@@ -100,10 +100,28 @@ async function getChapterContent(db: D1Database, chapterNumber: number, bookUuid
     ORDER BY ci.order_index ASC
   `).bind(book.id, chapter.id).all();
 
+  // Ensure a visible chapter title item exists at the top. Inject if missing.
+  const items: any[] = Array.isArray((contentItems as any).results)
+    ? (contentItems as any).results.slice()
+    : [];
+  const hasTitleItem = items.some((it: any) => it?.type === 'chapter' || it?.type === 'title');
+  if (!hasTitleItem) {
+    items.unshift({
+      item_id: `chapter-title-${chapter.chapter_number}`,
+      original_text: chapter.original_title || chapter.title,
+      translated_text: chapter.title || chapter.original_title,
+      type: 'chapter',
+      class_name: null,
+      tag_name: 'h3',
+      styles: null,
+      order_index: 0,
+    });
+  }
+
   return {
     book,
     chapter,
-    content: contentItems.results
+    content: items,
   };
 }
 

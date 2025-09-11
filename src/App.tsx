@@ -67,28 +67,32 @@ function App() {
   };
 
   useEffect(() => {
-    // Extract book UUID from URL: /book/:uuid
-    const pathParts = window.location.pathname.split('/');
-    if (pathParts[1] === 'book' && pathParts[2]) {
-      const uuid = pathParts[2];
+    // Extract book UUID from URL: /book/:uuid or /book/:uuid/chapter/:number
+    const match = window.location.pathname.match(/^\/book\/([^\/]+)(?:\/chapter\/(\d+))?$/);
+    if (match) {
+      const uuid = match[1];
+      const chapterFromUrl = match[2] ? parseInt(match[2], 10) : 1;
+      setCurrentChapter(isNaN(chapterFromUrl) ? 1 : chapterFromUrl);
       setBookUuid(uuid);
       setShowBookShelf(false);
-    } else if (pathParts.length <= 2 && (pathParts[1] === '' || pathParts[1] === undefined)) {
+      return;
+    }
+    if (window.location.pathname === '/' || window.location.pathname === '') {
       // Root path - show book shelf
       setShowBookShelf(true);
       setLoading(false);
-    } else {
-      setError('Invalid book URL. Expected format: /book/:book_id');
-      setLoading(false);
+      return;
     }
+    setError('Invalid book URL. Expected format: /book/:uuid or /book/:uuid/chapter/:number');
+    setLoading(false);
   }, []);
 
   useEffect(() => {
-    // Load first chapter when book UUID is available
+    // Load chapter when book UUID or currentChapter changes
     if (bookUuid && !showBookShelf) {
-      loadChapter(1);
+      loadChapter(currentChapter || 1);
     }
-  }, [bookUuid, showBookShelf]);
+  }, [bookUuid, showBookShelf, currentChapter]);
 
   const handleSelectBook = (uuid: string) => {
     setBookUuid(uuid);
@@ -98,8 +102,10 @@ function App() {
     setError(null);
     setLoading(true);
     
-    // Update URL
-    window.history.pushState({}, '', `/book/${uuid}`);
+    // Update URL to reflect book and chapter 1; effect will load content
+    try {
+      window.history.pushState({}, '', `/book/${uuid}/chapter/1`);
+    } catch {}
   };
 
   // Show book shelf on root path
@@ -142,7 +148,15 @@ function App() {
         author={author}
         styles={bookContent.styles}
         currentChapter={currentChapter}
-        onLoadChapter={loadChapter}
+        onLoadChapter={(n: number) => {
+          // Update URL on chapter navigation and let effect trigger load
+          if (bookUuid) {
+            try {
+              window.history.replaceState({}, '', `/book/${bookUuid}/chapter/${n}`);
+            } catch {}
+          }
+          setCurrentChapter(n);
+        }}
         isLoading={loading}
         setShowOriginalTitle={setShowOriginalTitle}
         bookUuid={bookUuid || undefined}

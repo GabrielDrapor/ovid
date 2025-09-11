@@ -12,12 +12,20 @@
     "convert-epub": "ts-node src/cli/convert-epub.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "deploy": "npm run build && wrangler deploy --config wrangler.toml.local",
+    "deploy": "npm run build && wrangler deploy --config wrangler.toml",
     "dev:worker": "wrangler dev --config wrangler.toml.local",
     "preview": "wrangler dev --local src/worker/index.ts --assets ./build",
     "db:local": "wrangler d1 execute polyink-db --local --command",
+    "db:local:file": "wrangler d1 execute polyink-db --local --file",
+    "db:local:legacy": "wrangler d1 execute polyink-db --local --config wrangler.legacy.toml --command",
+    "db:local:legacy:file": "wrangler d1 execute polyink-db --local --config wrangler.legacy.toml --file",
+    "db:init": "wrangler d1 execute polyink-db --local --file database/schema.sql",
+    "db:seed": "wrangler d1 execute polyink-db --local --file database/sample_data.sql",
     "db:remote": "wrangler d1 execute polyink-db --remote --command",
-    "generate-uuid": "node scripts/generate-uuid.js"
+    "generate-uuid": "node scripts/generate-uuid.js",
+    "import-book": "node scripts/import-book.js",
+    "remove-book": "node scripts/remove-book.js",
+    "sync-remote-book": "node scripts/sync-remote-book.js"
   },
   "keywords": [
     "react",
@@ -33,6 +41,7 @@
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-scripts": "5.0.1",
+    "uuid": "^11.1.0",
     "xmldom": "^0.6.0"
   },
   "devDependencies": {

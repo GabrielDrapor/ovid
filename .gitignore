@@ -28,8 +28,7 @@ yarn-error.log*
 
 # Wrangler
 .wrangler
-wrangler.toml.backup
-wrangler.toml.local
+wrangler.*toml*
 
 # Data files (EPUB books, content files)
 *.epub
@@ -71,3 +70,5 @@ _redirects
 .local
 
 database/migration_scripts
+exports
+epubs
