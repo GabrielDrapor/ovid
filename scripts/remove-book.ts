@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env ts-node
 
 /**
  * Ovid Book Removal Tool
@@ -6,33 +6,52 @@
  * Safely removes books from the database with confirmation
  *
  * Usage:
- *   node scripts/remove-book.js --uuid="book-uuid-here"
+ *   ts-node scripts/remove-book.ts --uuid="book-uuid-here"
  *   npm run remove-book -- --uuid="book-uuid-here"
  */
 
-require('dotenv').config();
-const { execSync } = require('child_process');
-const readline = require('readline');
+import 'dotenv/config';
+import { execSync } from 'child_process';
+import * as readline from 'readline';
+
+interface BookInfo {
+  id: number;
+  title: string;
+  author: string;
+  languagePair: string;
+  chapterCount: number;
+  contentCount: number;
+}
+
+interface RemoveOptions {
+  uuid?: string;
+  help?: boolean;
+}
 
 class BookRemover {
-  constructor(uuid) {
+  private uuid: string;
+
+  constructor(uuid: string) {
     this.uuid = uuid;
     this.validateInputs();
   }
 
-  validateInputs() {
+  private validateInputs(): void {
     if (!this.uuid) {
       throw new Error('Book UUID is required. Use --uuid="your-book-uuid"');
     }
 
     // Basic UUID format validation
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const uuidRegex =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     if (!uuidRegex.test(this.uuid)) {
-      throw new Error('Invalid UUID format. Expected format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx');
+      throw new Error(
+        'Invalid UUID format. Expected format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx'
+      );
     }
   }
 
-  async remove() {
+  async remove(): Promise<void> {
     console.log('📚 Ovid Book Removal Tool');
     console.log('='.repeat(40));
     console.log(`🔍 UUID: ${this.uuid}`);
@@ -42,19 +61,21 @@ class BookRemover {
       // Step 1: Check if book exists and get details
       console.log('🔍 Step 1: Checking if book exists...');
       const bookInfo = await this.getBookInfo();
-      
+
       if (!bookInfo) {
         console.log('❌ Book not found with the specified UUID');
         process.exit(1);
       }
 
       console.log(`   ✅ Found book: "${bookInfo.title}" by ${bookInfo.author}`);
-      console.log(`   📊 Chapters: ${bookInfo.chapterCount}, Content items: ${bookInfo.contentCount}`);
+      console.log(
+        `   📊 Chapters: ${bookInfo.chapterCount}, Content items: ${bookInfo.contentCount}`
+      );
       console.log('');
 
       // Step 2: Ask for confirmation
       const confirmed = await this.askForConfirmation(bookInfo);
-      
+
       if (!confirmed) {
         console.log('❌ Book removal cancelled');
         process.exit(0);
@@ -63,38 +84,46 @@ class BookRemover {
       // Step 3: Remove the book
       console.log('🗑️  Step 2: Removing book from database...');
       await this.removeFromDatabase(bookInfo.id);
-      
+
       console.log('');
       console.log('🎉 Book removed successfully!');
       console.log(`📱 Book "${bookInfo.title}" is no longer accessible`);
-
     } catch (error) {
-      console.error('❌ Removal failed:', error.message);
+      const errorMessage =
+        error instanceof Error ? error.message : 'Unknown error';
+      console.error('❌ Removal failed:', errorMessage);
       process.exit(1);
     }
   }
 
-  async getBookInfo() {
+  private async getBookInfo(): Promise<BookInfo | null> {
     try {
       // Get book details
       const bookSql = `SELECT id, title, author, language_pair FROM books WHERE uuid = '${this.uuid}';`;
-      const bookResult = execSync(`npm run db:local -- "${bookSql}"`, { encoding: 'utf8' });
-      
+      const bookResult = execSync(`npm run db:local -- "${bookSql}"`, {
+        encoding: 'utf8',
+      });
+
       // Parse JSON response more robustly
-      let bookId, title, author, languagePair;
-      
+      let bookId: number;
+      let title: string;
+      let author: string;
+      let languagePair: string;
+
       try {
         const resultsMatch = bookResult.match(/\[\s*{\s*"results":\s*\[(.*?)\]/s);
         if (!resultsMatch) return null;
-        
+
         const resultsContent = resultsMatch[1];
         const idMatch = resultsContent.match(/"id":\s*(\d+)/);
         const titleMatch = resultsContent.match(/"title":\s*"([^"]*)"/);
         const authorMatch = resultsContent.match(/"author":\s*"([^"]*)"/);
-        const languagePairMatch = resultsContent.match(/"language_pair":\s*"([^"]*)"/);
-        
+        const languagePairMatch = resultsContent.match(
+          /"language_pair":\s*"([^"]*)"/
+        );
+
         if (!idMatch || !titleMatch) return null;
-        
+
         bookId = parseInt(idMatch[1]);
         title = titleMatch[1];
         author = authorMatch ? authorMatch[1] : 'Unknown Author';
@@ -105,13 +134,17 @@ class BookRemover {
 
       // Get chapter count
       const chapterSql = `SELECT COUNT(*) as count FROM chapters WHERE book_id = ${bookId};`;
-      const chapterResult = execSync(`npm run db:local -- "${chapterSql}"`, { encoding: 'utf8' });
+      const chapterResult = execSync(`npm run db:local -- "${chapterSql}"`, {
+        encoding: 'utf8',
+      });
       const chapterMatch = chapterResult.match(/"count":\s*(\d+)/);
       const chapterCount = chapterMatch ? parseInt(chapterMatch[1]) : 0;
 
       // Get content count
       const contentSql = `SELECT COUNT(*) as count FROM content_items WHERE book_id = ${bookId};`;
-      const contentResult = execSync(`npm run db:local -- "${contentSql}"`, { encoding: 'utf8' });
+      const contentResult = execSync(`npm run db:local -- "${contentSql}"`, {
+        encoding: 'utf8',
+      });
       const contentMatch = contentResult.match(/"count":\s*(\d+)/);
       const contentCount = contentMatch ? parseInt(contentMatch[1]) : 0;
 
@@ -121,36 +154,43 @@ class BookRemover {
         author,
         languagePair,
         chapterCount,
-        contentCount
+        contentCount,
       };
-
     } catch (error) {
-      throw new Error(`Failed to fetch book info: ${error.message}`);
+      const errorMessage =
+        error instanceof Error ? error.message : 'Unknown error';
+      throw new Error(`Failed to fetch book info: ${errorMessage}`);
     }
   }
 
-  async askForConfirmation(bookInfo) {
+  private async askForConfirmation(bookInfo: BookInfo): Promise<boolean> {
     const rl = readline.createInterface({
       input: process.stdin,
-      output: process.stdout
+      output: process.stdout,
     });
 
     return new Promise((resolve) => {
       console.log('⚠️  WARNING: This action cannot be undone!');
-      console.log(`   This will permanently delete "${bookInfo.title}" and all its content.`);
+      console.log(
+        `   This will permanently delete "${bookInfo.title}" and all its content.`
+      );
       console.log(`   - ${bookInfo.chapterCount} chapters will be deleted`);
       console.log(`   - ${bookInfo.contentCount} content items will be deleted`);
       console.log('');
 
-      rl.question('Are you sure you want to delete this book? (yes/no): ', (answer) => {
-        rl.close();
-        const confirmed = answer.toLowerCase() === 'yes' || answer.toLowerCase() === 'y';
-        resolve(confirmed);
-      });
+      rl.question(
+        'Are you sure you want to delete this book? (yes/no): ',
+        (answer) => {
+          rl.close();
+          const confirmed =
+            answer.toLowerCase() === 'yes' || answer.toLowerCase() === 'y';
+          resolve(confirmed);
+        }
+      );
     });
   }
 
-  async removeFromDatabase(bookId) {
+  private async removeFromDatabase(bookId: number): Promise<void> {
     try {
       // Remove in correct order due to foreign key constraints
       console.log('   🗑️  Removing content items...');
@@ -166,17 +206,18 @@ class BookRemover {
       execSync(`npm run db:local -- "${bookSql}"`, { stdio: 'pipe' });
 
       console.log('   ✅ All data removed successfully');
-
     } catch (error) {
-      throw new Error(`Database removal failed: ${error.message}`);
+      const errorMessage =
+        error instanceof Error ? error.message : 'Unknown error';
+      throw new Error(`Database removal failed: ${errorMessage}`);
     }
   }
 }
 
 // CLI Interface
-function parseArgs() {
+function parseArgs(): RemoveOptions {
   const args = process.argv.slice(2);
-  const options = {};
+  const options: any = {};
 
   for (const arg of args) {
     if (arg.startsWith('--')) {
@@ -189,12 +230,12 @@ function parseArgs() {
   return options;
 }
 
-function showHelp() {
+function showHelp(): void {
   console.log(`
 📚 Ovid Book Removal Tool
 
 Usage:
-  node scripts/remove-book.js --uuid="book-uuid-here"
+  ts-node scripts/remove-book.ts --uuid="book-uuid-here"
   npm run remove-book -- --uuid="book-uuid-here"
 
 Options:
@@ -220,7 +261,8 @@ async function main() {
     const remover = new BookRemover(options.uuid);
     await remover.remove();
   } catch (error) {
-    console.error('❌ Error:', error.message);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error('❌ Error:', errorMessage);
     process.exit(1);
   }
 }
@@ -230,4 +272,4 @@ if (require.main === module) {
   main();
 }
 
-module.exports = BookRemover;
+export default BookRemover;

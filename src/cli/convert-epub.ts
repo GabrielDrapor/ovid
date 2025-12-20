@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 
-import { EPUBConverter } from '../api/epubConverter';
+import { EPUBParser } from '../utils/epubParser';
 import { config } from 'dotenv';
+import * as fs from 'fs';
+import { Translator } from '../utils/translator';
 
 config();
 
@@ -32,8 +34,20 @@ async function main() {
   try {
     console.log(`Converting ${inputPath} to bilingual JSON...`);
 
-    const converter = new EPUBConverter();
+    // Parse EPUB
+    console.log(`📖 Extracting content from EPUB...`);
+    const epubData = await EPUBParser.parseEPUBToStructured(inputPath);
 
+    if (epubData.content.length === 0) {
+      throw new Error('No text content found in EPUB');
+    }
+
+    console.log(`📚 Found ${epubData.content.length} structured items`);
+
+    // Initialize translator
+    const translator = new Translator();
+
+    // Progress callback
     const onProgress = (progress: number) => {
       const barLength = 40;
       const filledLength = Math.round(barLength * (progress / 100));
@@ -42,14 +56,44 @@ async function main() {
       process.stdout.write(`\rTranslating: [${bar}] ${progress}%`);
     };
 
-    const savedPath = await converter.saveBilingualJSON(inputPath, outputPath, {
+    // Translate content
+    console.log(`🌏 Translating to Chinese...`);
+    const originalTexts = epubData.content.map((item) => item.content);
+    const translatedTexts = await translator.translateBatch(originalTexts, {
       sourceLanguage: 'English',
       targetLanguage: 'Chinese',
       onProgress,
     });
 
     process.stdout.write('\n'); // Newline after progress bar
-    console.log(`✅ Successfully converted and saved to: ${savedPath}`);
+
+    // Translate title
+    const translatedTitle = await translator.translateText(epubData.title, {
+      sourceLanguage: 'English',
+      targetLanguage: 'Chinese',
+    });
+
+    // Create bilingual content
+    const bilingualContent = {
+      title: translatedTitle,
+      originalTitle: epubData.title,
+      author: epubData.author,
+      styles: epubData.styles,
+      content: epubData.content.map((item, index) => ({
+        id: item.id,
+        original: item.content,
+        translated: translatedTexts[index] || `[Translation failed: ${item.content}]`,
+        type: item.type,
+        className: item.className,
+        tagName: item.tagName,
+        styles: item.styles,
+      })),
+    };
+
+    // Save to file
+    fs.writeFileSync(outputPath, JSON.stringify(bilingualContent, null, 2));
+
+    console.log(`✅ Successfully converted and saved to: ${outputPath}`);
     console.log(`📖 Content is ready for the bilingual reader!`);
   } catch (error) {
     console.error('❌ Error converting EPUB:', error);

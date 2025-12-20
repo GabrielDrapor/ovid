@@ -20,10 +20,10 @@
     "db:init": "wrangler d1 execute ovid-db --local --file database/schema.sql",
     "db:seed": "wrangler d1 execute ovid-db --local --file database/sample_data.sql",
     "db:remote": "wrangler d1 execute ovid-db --remote --command",
-    "generate-uuid": "node scripts/generate-uuid.js",
-    "import-book": "node scripts/import-book.js",
-    "remove-book": "node scripts/remove-book.js",
-    "sync-remote-book": "node scripts/sync-remote-book.js"
+    "generate-uuid": "ts-node --project scripts/tsconfig.json scripts/generate-uuid.ts",
+    "import-book": "ts-node --project scripts/tsconfig.json scripts/import-book.ts",
+    "remove-book": "ts-node --project scripts/tsconfig.json scripts/remove-book.ts",
+    "sync-remote-book": "ts-node --project scripts/tsconfig.json scripts/sync-remote-book.ts"
   },
   "keywords": [
     "react",
