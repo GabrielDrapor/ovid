@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 
 /**
- * PolyInk Book Removal Tool
- * 
+ * Ovid Book Removal Tool
+ *
  * Safely removes books from the database with confirmation
- * 
+ *
  * Usage:
  *   node scripts/remove-book.js --uuid="book-uuid-here"
  *   npm run remove-book -- --uuid="book-uuid-here"
@@ -33,7 +33,7 @@ class BookRemover {
   }
 
   async remove() {
-    console.log('📚 PolyInk Book Removal Tool');
+    console.log('📚 Ovid Book Removal Tool');
     console.log('='.repeat(40));
     console.log(`🔍 UUID: ${this.uuid}`);
     console.log('');
@@ -191,7 +191,7 @@ function parseArgs() {
 
 function showHelp() {
   console.log(`
-📚 PolyInk Book Removal Tool
+📚 Ovid Book Removal Tool
 
 Usage:
   node scripts/remove-book.js --uuid="book-uuid-here"

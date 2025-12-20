@@ -1,4 +1,4 @@
-# Book Import System Design
+# Book Import System Design - Ovid
 
 ## Overview
 A comprehensive system to import books (EPUB, TXT, etc.) and automatically generate bilingual content.
@@ -235,4 +235,4 @@ DEEPL_API_KEY=...
 - Google Translate: 300,000 characters/minute
 - DeepL: 500,000 characters/month (free tier)
 
-This system would transform PolyInk from a reader into a complete bilingual book creation platform!
+This system would transform Ovid from a reader into a complete bilingual book creation platform!

@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 
 /**
- * PolyInk Book Import System
- * 
+ * Ovid Book Import System
+ *
  * Imports EPUB/TXT files and generates bilingual content using translation APIs
- * 
+ *
  * Usage:
  *   node scripts/import-book.js --file="book.epub" --target="zh" --provider="openai"
  *   node scripts/import-book.js --file="book.txt" --title="Book Title" --author="Author" --target="es" --provider="google"
@@ -143,7 +143,7 @@ class BookImporter {
   }
 
   async import() {
-    console.log('📚 PolyInk Book Import System');
+    console.log('📚 Ovid Book Import System');
     console.log('='.repeat(40));
     console.log(`📖 File: ${this.file}`);
     console.log(`🌍 Target Language: ${SUPPORTED_LANGUAGES[this.targetLang]}`);
@@ -617,7 +617,7 @@ class BookImporter {
 
   buildImportSql(bookData, translatedContent, bookUuid, languagePair) {
     const lines = [];
-    lines.push('-- PolyInk import SQL');
+    lines.push('-- Ovid import SQL');
     // Insert book
     lines.push(`INSERT INTO books (title, original_title, author, language_pair, styles, uuid) VALUES ('${this.escapeSql(bookData.title)}', '${this.escapeSql(bookData.title)}', '${this.escapeSql(bookData.author)}', '${this.escapeSql(languagePair)}', '{}' , '${bookUuid}');`);
     const bookIdExpr = `(SELECT id FROM books WHERE uuid='${bookUuid}')`;
@@ -758,7 +758,7 @@ function parseArgs() {
 
 function showHelp() {
   console.log(`
-📚 PolyInk Book Import System
+📚 Ovid Book Import System
 
 Usage:
   node scripts/import-book.js --file="book.txt" --target="zh" --provider="openai"

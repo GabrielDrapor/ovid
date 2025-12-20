@@ -1,4 +1,4 @@
--- PolyInk Database Schema
+-- Ovid Database Schema
 -- Complete schema including all migrations consolidated into one file
 
 -- Books table to store book metadata

@@ -1,8 +1,8 @@
-# AGENTS.md - PolyInk Project Documentation
+# AGENTS.md - Ovid Project Documentation
 
 ## Project Overview
 
-**PolyInk** is a bilingual reading platform that allows users to import EPUB books and read them with real-time language switching between original and translated text. Users can click any paragraph to toggle between the source language and translation, creating an immersive language learning experience.
+**Ovid** is a bilingual reading platform that allows users to import EPUB books and read them with real-time language switching between original and translated text. Users can click any paragraph to toggle between the source language and translation, creating an immersive language learning experience.
 
 ### Key Features
 - **EPUB Import System**: Parse EPUB files and extract chapter structure from TOC/nav.html
@@ -241,7 +241,7 @@ const DB = env.DB; // Cloudflare D1 database binding
 ```toml
 [[ d1_databases ]]
 binding = "DB"
-database_name = "polyink-db"
+database_name = "polyink-db"  # keeping existing database name
 database_id = "your-database-id"
 ```
 
@@ -388,3 +388,5 @@ When working with this project:
 6. **Prefer SQL ingestion for bulk writes** - avoids D1 lock contention and speeds up sync/import
 
 The project demonstrates a successful integration of modern web technologies (React, Cloudflare Workers, D1) with AI translation services to create an innovative bilingual reading experience.
+
+Note: The database is still named "polyink-db" to preserve existing data during the project rename to Ovid.

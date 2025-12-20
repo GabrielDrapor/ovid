@@ -1,4 +1,4 @@
-# PolyInk
+# Ovid
 
 A bilingual reader application that helps you read books in two languages. Built with React and deployed as a Cloudflare Worker with D1 database integration.
 
@@ -23,7 +23,7 @@ A bilingual reader application that helps you read books in two languages. Built
 1. **Clone the repository:**
    ```bash
    git clone <repository-url>
-   cd polyink
+   cd ovid
    ```
 
 2. **Install dependencies:**
@@ -31,25 +31,16 @@ A bilingual reader application that helps you read books in two languages. Built
    npm install
    ```
 
-3. **Set up environment configuration:**
+3. **Configure the project:**
    ```bash
-   # Copy the example environment file
+   # Copy example files to create local configs
    cp .env.example .env
-   
-   # Edit .env and add your configuration:
-   # CLOUDFLARE_D1_DATABASE_ID=your-actual-database-id-here
-   # OPENAI_API_KEY=sk-your-openai-api-key-here (for book translation)
-   # OPENAI_API_BASE_URL=https://api.openai.com/v1 (or OpenAI-compatible API)
-   # OPENAI_MODEL=gpt-4o-mini (translation model to use)
-   ```
+   cp wrangler.toml.example wrangler.toml
 
-4. **Create local wrangler config:**
-   ```bash
-   # Copy wrangler.toml to wrangler.toml.local
-   cp wrangler.toml wrangler.toml.local
-   
-   # Edit wrangler.toml.local and replace "your-database-id-here" 
+   # Edit wrangler.toml and replace "your-database-id-here"
    # with your actual Cloudflare D1 database ID
+
+   # Edit .env if you want to use book translation features
    ```
 
 5. **Set up local database:**
@@ -101,8 +92,10 @@ database/
 ├── schema.sql                 # Complete database schema (includes all migrations)
 └── sample_data.sql           # Sample book data
 
-wrangler.toml                 # Cloudflare Workers configuration (safe for commits)
-wrangler.toml.local           # Local config with secrets (not committed)
+wrangler.toml.example         # Cloudflare Workers config template (committed)
+wrangler.toml                 # Your local config with real IDs (not committed)
+.env.example                  # Environment variables template (committed)
+.env                          # Your local environment variables (not committed)
 ```
 
 ### Database Schema
@@ -113,7 +106,7 @@ wrangler.toml.local           # Local config with secrets (not committed)
 
 ### Adding New Books
 
-PolyInk includes an automated book import system that supports EPUB and TXT files with automatic translation:
+Ovid includes an automated book import system that supports EPUB and TXT files with automatic translation:
 
 #### Book Import CLI
 
@@ -205,4 +198,4 @@ For advanced users, you can also manually import bilingual content:
 
 ## License
 
-ISC License
+MIT License - see the [LICENSE](LICENSE) file for details

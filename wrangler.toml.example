@@ -1,4 +1,4 @@
-name = "polyink"
+name = "ovid"
 main = "src/worker/index.ts"
 compatibility_date = "2023-12-01"
 
@@ -11,5 +11,5 @@ binding = "ASSETS"
 
 [[d1_databases]]
 binding = "DB"
-database_name = "polyink-db"
+database_name = "ovid-db"
 database_id = "your-database-id-here"

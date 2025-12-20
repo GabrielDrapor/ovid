@@ -388,7 +388,7 @@ async function main() {
       fs.mkdirSync(outDir, { recursive: true });
     }
     const lines = [];
-    lines.push('-- PolyInk export SQL for single book sync');
+    lines.push('-- Ovid export SQL for single book sync');
     const bookUuid = data.book.uuid;
     const bookIdExpr = `(SELECT id FROM books WHERE uuid='${bookUuid}')`;
     // Clean existing

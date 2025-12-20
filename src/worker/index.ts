@@ -246,7 +246,7 @@ export default {
                 <!DOCTYPE html>
                 <html>
                   <head>
-                    <title>PolyInk - Reading ${bookUuid}</title>
+                    <title>Ovid - Reading ${bookUuid}</title>
                     <meta charset="utf-8">
                     <meta name="viewport" content="width=device-width, initial-scale=1">
                   </head>
@@ -276,12 +276,12 @@ export default {
           <!DOCTYPE html>
           <html>
             <head>
-              <title>PolyInk - Library</title>
+              <title>Ovid - Library</title>
               <meta charset="utf-8">
               <meta name="viewport" content="width=device-width, initial-scale=1">
             </head>
             <body>
-              <div id="root">Loading PolyInk library...</div>
+              <div id="root">Loading Ovid library...</div>
             </body>
           </html>
         `, {

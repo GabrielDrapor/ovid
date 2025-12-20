@@ -77,7 +77,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
   return (
     <div className="bookshelf">
       <header className="bookshelf-header">
-        <h1>PolyInk Library</h1>
+        <h1>Ovid Library</h1>
         <p>Your bilingual reading collection</p>
       </header>
       
