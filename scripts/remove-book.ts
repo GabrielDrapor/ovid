@@ -13,6 +13,8 @@
 import 'dotenv/config';
 import { execSync } from 'child_process';
 import * as readline from 'readline';
+import * as fs from 'fs';
+import * as path from 'path';
 
 interface BookInfo {
   id: number;
@@ -25,14 +27,19 @@ interface BookInfo {
 
 interface RemoveOptions {
   uuid?: string;
+  mode?: string;
   help?: boolean;
 }
 
+type DatabaseMode = 'local' | 'remote';
+
 class BookRemover {
   private uuid: string;
+  private mode: DatabaseMode;
 
-  constructor(uuid: string) {
+  constructor(uuid: string, mode: DatabaseMode = 'local') {
     this.uuid = uuid;
+    this.mode = mode;
     this.validateInputs();
   }
 
@@ -52,7 +59,8 @@ class BookRemover {
   }
 
   async remove(): Promise<void> {
-    console.log('📚 Ovid Book Removal Tool');
+    const modeLabel = this.mode === 'local' ? 'Local' : 'Remote';
+    console.log(`📚 Ovid Book Removal Tool (${modeLabel})`);
     console.log('='.repeat(40));
     console.log(`🔍 UUID: ${this.uuid}`);
     console.log('');
@@ -96,12 +104,96 @@ class BookRemover {
     }
   }
 
+  private getCleanEnv(): NodeJS.ProcessEnv {
+    // Remove npm_config_* environment variables to avoid warnings
+    const env = { ...process.env };
+    Object.keys(env).forEach((key) => {
+      if (key.startsWith('npm_config_')) {
+        delete env[key];
+      }
+    });
+    return env;
+  }
+
+  private readDatabaseIdFromWrangler(): string | null {
+    const candidates = [
+      path.resolve(process.cwd(), 'wrangler.toml.local'),
+      path.resolve(process.cwd(), 'wrangler.toml'),
+    ];
+    for (const file of candidates) {
+      if (fs.existsSync(file)) {
+        const txt = fs.readFileSync(file, 'utf8');
+        const m = txt.match(/database_id\s*=\s*"([^"]+)"/);
+        if (m) return m[1];
+      }
+    }
+    return null;
+  }
+
+  private async queryRemote(sql: string): Promise<any[]> {
+    const token = process.env.CLOUDFLARE_API_TOKEN;
+    const accountId =
+      process.env.CLOUDFLARE_ACCOUNT_ID || process.env.CF_ACCOUNT_ID;
+    const databaseId =
+      process.env.CLOUDFLARE_D1_DATABASE_ID || this.readDatabaseIdFromWrangler();
+
+    if (!token) {
+      throw new Error(
+        '❌ CLOUDFLARE_API_TOKEN is not set. Set it to query remote database.'
+      );
+    }
+    if (!accountId) {
+      throw new Error(
+        '❌ CLOUDFLARE_ACCOUNT_ID is not set. Set it to query remote database.'
+      );
+    }
+    if (!databaseId) {
+      throw new Error(
+        '❌ CLOUDFLARE_D1_DATABASE_ID not found in environment or wrangler.toml'
+      );
+    }
+
+    const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/d1/database/${databaseId}/query`;
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ sql }),
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(`D1 API error ${res.status}: ${text}`);
+    }
+
+    const data = (await res.json()) as any;
+    return data?.result?.[0]?.results || data?.result?.results || [];
+  }
+
   private async getBookInfo(): Promise<BookInfo | null> {
+    try {
+      if (this.mode === 'local') {
+        return await this.getLocalBookInfo();
+      } else {
+        return await this.getRemoteBookInfo();
+      }
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : 'Unknown error';
+      throw new Error(`Failed to fetch book info: ${errorMessage}`);
+    }
+  }
+
+  private async getLocalBookInfo(): Promise<BookInfo | null> {
     try {
       // Get book details
       const bookSql = `SELECT id, title, author, language_pair FROM books WHERE uuid = '${this.uuid}';`;
       const bookResult = execSync(`npm run db:local -- "${bookSql}"`, {
         encoding: 'utf8',
+        env: this.getCleanEnv(),
       });
 
       // Parse JSON response more robustly
@@ -136,6 +228,7 @@ class BookRemover {
       const chapterSql = `SELECT COUNT(*) as count FROM chapters WHERE book_id = ${bookId};`;
       const chapterResult = execSync(`npm run db:local -- "${chapterSql}"`, {
         encoding: 'utf8',
+        env: this.getCleanEnv(),
       });
       const chapterMatch = chapterResult.match(/"count":\s*(\d+)/);
       const chapterCount = chapterMatch ? parseInt(chapterMatch[1]) : 0;
@@ -144,6 +237,7 @@ class BookRemover {
       const contentSql = `SELECT COUNT(*) as count FROM content_items WHERE book_id = ${bookId};`;
       const contentResult = execSync(`npm run db:local -- "${contentSql}"`, {
         encoding: 'utf8',
+        env: this.getCleanEnv(),
       });
       const contentMatch = contentResult.match(/"count":\s*(\d+)/);
       const contentCount = contentMatch ? parseInt(contentMatch[1]) : 0;
@@ -157,9 +251,44 @@ class BookRemover {
         contentCount,
       };
     } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : 'Unknown error';
-      throw new Error(`Failed to fetch book info: ${errorMessage}`);
+      return null;
+    }
+  }
+
+  private async getRemoteBookInfo(): Promise<BookInfo | null> {
+    try {
+      // Get book details
+      const bookSql = `SELECT id, title, author, language_pair FROM books WHERE uuid = '${this.uuid}';`;
+      const bookResults = await this.queryRemote(bookSql);
+
+      if (!bookResults || bookResults.length === 0) return null;
+
+      const book = bookResults[0];
+      const bookId = book.id;
+      const title = book.title;
+      const author = book.author || 'Unknown Author';
+      const languagePair = book.language_pair || 'unknown';
+
+      // Get chapter count
+      const chapterSql = `SELECT COUNT(*) as count FROM chapters WHERE book_id = ${bookId};`;
+      const chapterResults = await this.queryRemote(chapterSql);
+      const chapterCount = chapterResults[0]?.count || 0;
+
+      // Get content count
+      const contentSql = `SELECT COUNT(*) as count FROM content_items WHERE book_id = ${bookId};`;
+      const contentResults = await this.queryRemote(contentSql);
+      const contentCount = contentResults[0]?.count || 0;
+
+      return {
+        id: bookId,
+        title,
+        author,
+        languagePair,
+        chapterCount,
+        contentCount,
+      };
+    } catch (error) {
+      return null;
     }
   }
 
@@ -191,19 +320,56 @@ class BookRemover {
   }
 
   private async removeFromDatabase(bookId: number): Promise<void> {
+    if (this.mode === 'local') {
+      await this.removeFromLocalDatabase(bookId);
+    } else {
+      await this.removeFromRemoteDatabase(bookId);
+    }
+  }
+
+  private async removeFromLocalDatabase(bookId: number): Promise<void> {
     try {
       // Remove in correct order due to foreign key constraints
       console.log('   🗑️  Removing content items...');
       const contentSql = `DELETE FROM content_items WHERE book_id = ${bookId};`;
-      execSync(`npm run db:local -- "${contentSql}"`, { stdio: 'pipe' });
+      execSync(`npm run db:local -- "${contentSql}"`, {
+        stdio: 'pipe',
+        env: this.getCleanEnv(),
+      });
 
       console.log('   🗑️  Removing chapters...');
       const chapterSql = `DELETE FROM chapters WHERE book_id = ${bookId};`;
-      execSync(`npm run db:local -- "${chapterSql}"`, { stdio: 'pipe' });
+      execSync(`npm run db:local -- "${chapterSql}"`, {
+        stdio: 'pipe',
+        env: this.getCleanEnv(),
+      });
 
       console.log('   🗑️  Removing book...');
       const bookSql = `DELETE FROM books WHERE id = ${bookId};`;
-      execSync(`npm run db:local -- "${bookSql}"`, { stdio: 'pipe' });
+      execSync(`npm run db:local -- "${bookSql}"`, {
+        stdio: 'pipe',
+        env: this.getCleanEnv(),
+      });
+
+      console.log('   ✅ All data removed successfully');
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : 'Unknown error';
+      throw new Error(`Database removal failed: ${errorMessage}`);
+    }
+  }
+
+  private async removeFromRemoteDatabase(bookId: number): Promise<void> {
+    try {
+      // Remove in correct order due to foreign key constraints
+      console.log('   🗑️  Removing content items...');
+      await this.queryRemote(`DELETE FROM content_items WHERE book_id = ${bookId};`);
+
+      console.log('   🗑️  Removing chapters...');
+      await this.queryRemote(`DELETE FROM chapters WHERE book_id = ${bookId};`);
+
+      console.log('   🗑️  Removing book...');
+      await this.queryRemote(`DELETE FROM books WHERE id = ${bookId};`);
 
       console.log('   ✅ All data removed successfully');
     } catch (error) {
@@ -235,14 +401,23 @@ function showHelp(): void {
 📚 Ovid Book Removal Tool
 
 Usage:
-  ts-node scripts/remove-book.ts --uuid="book-uuid-here"
-  npm run remove-book -- --uuid="book-uuid-here"
+  ts-node scripts/remove-book.ts --uuid="book-uuid-here" [--mode=local|remote]
+  npm run remove-book:local -- --uuid="book-uuid-here"
+  npm run remove-book:remote -- --uuid="book-uuid-here"
 
 Options:
   --uuid         UUID of the book to remove (required)
+  --mode=MODE    Database mode: 'local' or 'remote' (default: local)
+  --help, -h     Show this help message
+
+Environment variables (required for remote mode):
+  CLOUDFLARE_API_TOKEN      Your Cloudflare API token
+  CLOUDFLARE_ACCOUNT_ID     Your Cloudflare account ID
+  CLOUDFLARE_D1_DATABASE_ID Database ID (or set in wrangler.toml)
 
 Examples:
-  npm run remove-book -- --uuid="cc2b6711-82f6-443e-a174-d8897a4f4f6c"
+  npm run remove-book:local -- --uuid="cc2b6711-82f6-443e-a174-d8897a4f4f6c"
+  npm run remove-book:remote -- --uuid="cc2b6711-82f6-443e-a174-d8897a4f4f6c"
 
 ⚠️  WARNING: This operation is irreversible. The book and all its content will be permanently deleted.
 `);
@@ -258,7 +433,18 @@ async function main() {
   }
 
   try {
-    const remover = new BookRemover(options.uuid);
+    // Parse mode from arguments
+    let mode: DatabaseMode = 'local';
+    if (options.mode) {
+      if (options.mode === 'remote' || options.mode === 'local') {
+        mode = options.mode;
+      } else {
+        console.error('❌ Invalid mode. Use --mode=local or --mode=remote');
+        process.exit(1);
+      }
+    }
+
+    const remover = new BookRemover(options.uuid, mode);
     await remover.remove();
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';

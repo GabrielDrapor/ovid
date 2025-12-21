@@ -22,7 +22,12 @@
     "db:remote": "wrangler d1 execute ovid-db --remote --command",
     "generate-uuid": "ts-node --project scripts/tsconfig.json scripts/generate-uuid.ts",
     "import-book": "ts-node --project scripts/tsconfig.json scripts/import-book.ts",
-    "remove-book": "ts-node --project scripts/tsconfig.json scripts/remove-book.ts",
+    "list-books": "ts-node --project scripts/tsconfig.json scripts/list-books.ts --mode=local",
+    "list-books:local": "ts-node --project scripts/tsconfig.json scripts/list-books.ts --mode=local",
+    "list-books:remote": "ts-node --project scripts/tsconfig.json scripts/list-books.ts --mode=remote",
+    "remove-book": "ts-node --project scripts/tsconfig.json scripts/remove-book.ts --mode=local",
+    "remove-book:local": "ts-node --project scripts/tsconfig.json scripts/remove-book.ts --mode=local",
+    "remove-book:remote": "ts-node --project scripts/tsconfig.json scripts/remove-book.ts --mode=remote",
     "sync-remote-book": "ts-node --project scripts/tsconfig.json scripts/sync-remote-book.ts"
   },
   "keywords": [
