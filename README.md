@@ -70,9 +70,12 @@ The main page will show your book shelf with available books. Click any book to 
 - `npm run deploy` - Deploy to Cloudflare Workers (requires authentication)
 - `npm run db:local` - Execute SQL commands on local database
 - `npm run db:remote` - Execute SQL commands on remote database
-- `npm run import-book` - Import EPUB/TXT books with translation
-- `npm run remove-book` - Remove books by UUID (with confirmation)
-- `npm run sync-remote-book` - Sync a locally imported book to the remote D1 (ensures schema first)
+- `yarn import-book` - Import EPUB/TXT books with translation
+- `yarn list-books:local` - List all books in local database with timestamps
+- `yarn list-books:remote` - List all books in remote database with timestamps
+- `yarn remove-book:local` - Remove books from local database by UUID (with confirmation)
+- `yarn remove-book:remote` - Remove books from remote database by UUID (with confirmation)
+- `yarn sync-remote-book` - Sync a locally imported book to the remote D1 (ensures schema first)
 - `npm start` - Start React development server (frontend only)
 - `npm test` - Run tests
 
@@ -112,16 +115,25 @@ Ovid includes an automated book import system that supports EPUB and TXT files w
 
 ```bash
 # Import EPUB with Chinese translation
-npm run import-book -- --file="book.epub" --target="zh" --provider="openai"
+yarn import-book -- --file="book.epub" --target="zh" --provider="openai"
 
-# Import TXT with Spanish translation  
-npm run import-book -- --file="book.txt" --target="es" --title="Book Title" --author="Author Name"
+# Import TXT with Spanish translation
+yarn import-book -- --file="book.txt" --target="es" --title="Book Title" --author="Author Name"
 
-# Remove a book by UUID (with confirmation prompt)
-npm run remove-book -- --uuid="book-uuid-here"
+# List all books in local database
+yarn list-books:local
+
+# List all books in remote database
+yarn list-books:remote
+
+# Remove a book from local database by UUID (with confirmation prompt)
+yarn remove-book:local -- --uuid="book-uuid-here"
+
+# Remove a book from remote database by UUID (with confirmation prompt)
+yarn remove-book:remote -- --uuid="book-uuid-here"
 
 # Sync a locally imported book to remote D1 (ensures schema first)
-npm run sync-remote-book -- --uuid="book-uuid-here"
+yarn sync-remote-book -- --uuid="book-uuid-here"
 
 # Available target languages: zh (Chinese), es (Spanish), fr (French), de (German), ja (Japanese), ko (Korean), ru (Russian)
 # Available providers: openai, google, deepl
@@ -183,7 +195,8 @@ For advanced users, you can also manually import bilingual content:
 ### Environment Variables
 
 - `CLOUDFLARE_D1_DATABASE_ID` - Your D1 database ID for local development
-- `CLOUDFLARE_ACCOUNT_ID` - Your Cloudflare account ID (required for remote sync)
+- `CLOUDFLARE_ACCOUNT_ID` - Your Cloudflare account ID (required for remote operations)
+- `CLOUDFLARE_API_TOKEN` - Your Cloudflare API token (required for remote database operations)
 - `OPENAI_API_KEY` - OpenAI API key for book translation (optional)
 - `OPENAI_API_BASE_URL` - OpenAI API base URL (optional, defaults to https://api.openai.com/v1)
 - `OPENAI_MODEL` - Translation model to use (optional, defaults to gpt-4o-mini)

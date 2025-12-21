@@ -66,9 +66,11 @@ CREATE TABLE content_items (
 
 ## Critical Implementation Details
 
-### 1. EPUB Parsing System (`scripts/import-book.js`)
+### 1. EPUB Parsing System (`scripts/import-book.ts`)
 
 **Key Learning**: The initial implementation failed because it relied on EPUB spine contents which often lack proper titles. The correct approach is to use the Table of Contents (TOC) structure.
+
+**Architecture Note**: All scripts are written in TypeScript for type safety and consistency. The unified translation module is located at `src/utils/translator.ts` and is used by all import and conversion processes.
 
 #### TOC-Based Chapter Detection
 ```javascript
@@ -157,33 +159,48 @@ WHERE book_id = ?;
 
 ### 4. Translation Integration
 
-The system supports multiple translation providers with fallback mechanisms. Translation can run with limited parallelism to speed up imports.
+The system uses a unified TypeScript translator module (`src/utils/translator.ts`) that supports OpenAI-compatible APIs with configurable concurrency. All translation logic is centralized in this single module to ensure consistency across the codebase.
 
-```javascript
-async translateWithOpenAI(text) {
-  if (!this.openaiConfigured) {
-    return `[${this.targetLang.toUpperCase()}] ${text}`; // Fallback
+```typescript
+// Unified Translator (src/utils/translator.ts)
+export class Translator {
+  private config: Required<TranslatorConfig>;
+
+  constructor(config: TranslatorConfig = {}) {
+    this.config = {
+      apiKey: config.apiKey || process.env.OPENAI_API_KEY || '',
+      baseURL: config.baseURL || process.env.OPENAI_API_BASE_URL || 'https://api.openai.com/v1',
+      model: config.model || process.env.OPENAI_MODEL || 'gpt-4o-mini',
+      temperature: config.temperature ?? 0.3,
+      concurrency: config.concurrency ?? 8,
+    };
   }
 
-  const response = await this.openai.chat.completions.create({
-    model: process.env.OPENAI_MODEL || "gpt-4o-mini",
-    messages: [
-      {
-        role: "system",
-        content: `You are a professional literary translator. Translate to ${targetLanguage}. Maintain original style and tone.`
-      },
-      { role: "user", content: text }
-    ],
-    temperature: 0.3,
-    max_tokens: text.length * 2
-  });
+  async translateText(text: string, options: TranslateOptions = {}): Promise<string> {
+    // Single text translation
+  }
 
-  return response.choices[0]?.message?.content?.trim();
+  async translateBatch(texts: string[], options: TranslateOptions = {}): Promise<string[]> {
+    // Batch translation with controlled concurrency
+    // Default: 8 parallel requests
+  }
+
+  async translateChapters(chapters: Chapter[], options: TranslateOptions = {}): Promise<TranslatedChapter[]> {
+    // Chapter-level translation with progress tracking
+  }
 }
 
-// Concurrency (defaults):
-// - Chapters: 2 at a time (override with --chapters-concurrency)
-// - Items per chapter: 8 at a time (override with --items-concurrency or --concurrency)
+// Environment Variable Cleanup Pattern
+// All scripts use this pattern to avoid npm warnings:
+private getCleanEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  Object.keys(env).forEach((key) => {
+    if (key.startsWith('npm_config_')) {
+      delete env[key];
+    }
+  });
+  return env;
+}
 ```
 
 ## Frontend Implementation
@@ -258,25 +275,34 @@ npm run build               # Build for production
 npm run deploy              # Deploy to Cloudflare Workers
 ```
 
-### Book Import
+### Book Management
 ```bash
 # Import EPUB with translation
-npm run import-book -- --file="book.epub" --target="zh" --provider="openai"
+yarn import-book -- --file="book.epub" --target="zh" --provider="openai"
 
 # Faster/robust import via SQL file
-node scripts/import-book.js --file="book.epub" --target="zh" --sql-out=exports/book.sql --apply=local
+ts-node --project scripts/tsconfig.json scripts/import-book.ts --file="book.epub" --target="zh" --sql-out=exports/book.sql --apply=local
 
 # Parallel translation (tune conservatively if rate-limited)
-node scripts/import-book.js --file="book.epub" --target="zh" --chapters-concurrency=3 --concurrency=10
+ts-node --project scripts/tsconfig.json scripts/import-book.ts --file="book.epub" --target="zh" --chapters-concurrency=3 --concurrency=10
 
-# Remove book by UUID
-node scripts/remove-book.js --uuid="book-uuid-here"
+# List books from local database with timestamps
+yarn list-books:local
+
+# List books from remote database with timestamps
+yarn list-books:remote
+
+# Remove book from local database by UUID (with confirmation)
+yarn remove-book:local -- --uuid="book-uuid-here"
+
+# Remove book from remote database by UUID (with confirmation)
+yarn remove-book:remote -- --uuid="book-uuid-here"
 
 # Sync a local book to remote D1 (ensures schema first)
-npm run sync-remote-book -- --uuid="book-uuid-here"
+yarn sync-remote-book -- --uuid="book-uuid-here"
 
 # Export a single local book to SQL and apply to remote in one shot
-npm run sync-remote-book -- --uuid="book-uuid-here" --sql-out=exports/book_sync.sql --apply=remote
+yarn sync-remote-book -- --uuid="book-uuid-here" --sql-out=exports/book_sync.sql --apply=remote
 ```
 
 ### Database Operations
@@ -327,10 +353,10 @@ OPENAI_MODEL=google/gemini-2.5-flash-lite        # or gpt-4o-mini
 # Development
 NODE_ENV=development
 
-# Remote sync
+# Remote database operations
 CLOUDFLARE_ACCOUNT_ID=your-account-id
+CLOUDFLARE_API_TOKEN=your-api-token              # Required for remote database operations (D1:Edit scope)
 # (optional) CLOUDFLARE_D1_DATABASE_ID can be read from wrangler.toml.local
-# (required for remote HTTP API path) CLOUDFLARE_API_TOKEN with D1:Edit scope
 ```
 
 ## Testing Strategy
