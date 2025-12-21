@@ -113,14 +113,14 @@ Rules:
 1. Translate EXACTLY what is provided. Do not add summaries, explanations, or continuations.
 2. Maintain the original style, tone, and formatting.
 3. If the input is a title or short phrase, translate it as such.
-4. Return ONLY the translation.
+4. Return ONLY the translation. Do NOT wrap the translation in quotes unless the source text has them.
 5. Use the provided tools to ensure consistency for proper nouns.
    - Use 'kv_read' to check for existing translations of names/places.
    - Use 'kv_write' to save new translations for names/places.`,
           },
           {
             role: 'user',
-            content: `Task: Translate the following text to ${targetLang}. Return ONLY the translation.\n${contextStr}\nText: "${text}"`,
+            content: `Task: Translate the following text to ${targetLang}. Return ONLY the translation.\n${contextStr}\nText: ${text}`,
           },
         ],
         max_tokens: 8192,

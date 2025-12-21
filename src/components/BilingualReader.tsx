@@ -249,8 +249,9 @@ const BilingualReader: React.FC<BilingualReaderProps> = ({
                 className: itemClass,
                 style: combinedStyles,
                 onClick: () => toggleLanguage(item.id),
+                dangerouslySetInnerHTML: { __html: text },
               },
-              text
+              null
             );
 
             return (

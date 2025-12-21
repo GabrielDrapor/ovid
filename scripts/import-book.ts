@@ -16,6 +16,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { execSync } from 'child_process';
+const { DOMParser } = require('xmldom');
 import {
   Translator,
   SUPPORTED_LANGUAGES,
@@ -53,6 +54,8 @@ interface ContentItem {
   text: string;
   type: string;
   tagName?: string;
+  className?: string;
+  styles?: string;
 }
 
 interface Chapter {
@@ -70,6 +73,7 @@ interface BookData {
   author: string;
   language: string;
   chapters: Chapter[];
+  styles?: string;
 }
 
 interface TranslatedContentItem extends ContentItem {
@@ -304,10 +308,11 @@ class BookImporter {
 
   private parseEpubFile(): Promise<BookData> {
     const { EPub } = require('epub2');
+    const crypto = require('crypto');
 
     return new Promise((resolve, reject) => {
       const epub = new EPub(this.file);
-      epub.on('end', () => {
+      epub.on('end', async () => {
         try {
           const metadata = {
             title:
@@ -321,8 +326,25 @@ class BookImporter {
           console.log(`   Using TOC-based chapter detection`);
           console.log(`   Found ${epub.toc.length} TOC entries`);
 
-          // Prefer TOC order as-is to preserve original author-defined order.
-          // Lightly filter out obvious non-reading items like cover/toc if present.
+          // Extract styles from manifest (CSS files)
+          let globalStyles = '';
+          for (const id in epub.manifest) {
+            const item = epub.manifest[id];
+            if (item['media-type'] === 'text/css') {
+              try {
+                const styleContent = await new Promise<string>((res, rej) => {
+                  epub.getFile(id, (err: any, data: any) => {
+                    if (err) rej(err);
+                    else res(data.toString());
+                  });
+                });
+                globalStyles += `/* ${item.href} */\n${styleContent}\n`;
+              } catch (e) {
+                console.warn(`      ⚠️  Failed to read style ${item.href}`);
+              }
+            }
+          }
+
           let chapterEntries = (epub.toc || []).filter((entry: any) => {
             const title = (entry.title || '').toLowerCase();
             const href = (entry.href || '').toLowerCase();
@@ -335,14 +357,12 @@ class BookImporter {
             return !(isCover || isToc);
           });
 
-          // Fallback: if filtering removed everything, use all TOC entries
           if (chapterEntries.length === 0 && epub.toc && epub.toc.length > 0) {
             chapterEntries = epub.toc.slice();
           }
 
           console.log(`   TOC chapters considered: ${chapterEntries.length}`);
 
-          // Build href -> manifest id map for reliable resolution
           const hrefToId: Record<string, string> = {};
           for (const id in epub.manifest) {
             const hrefRaw = epub.manifest[id].href || '';
@@ -350,19 +370,16 @@ class BookImporter {
               .normalize(decodeURI(hrefRaw))
               .replace(/^\/*/, '');
             hrefToId[normalized] = id;
-            // also map by filename as a fallback key
             const filename = normalized.split('/').pop();
             if (filename && !hrefToId[filename]) {
               hrefToId[filename] = id;
             }
           }
 
-          // Build spine order map (manifest id -> spine index) using OPF spine reading order
           const spineIndexById: Record<string, number> = {};
           const spineIndexByHref: Record<string, number> = {};
           (epub.spine.contents || []).forEach((item: any, idx: number) => {
             spineIndexById[item.id] = idx;
-            // also map by href if available
             const man = epub.manifest[item.id];
             if (man && man.href) {
               const n = path.posix
@@ -372,29 +389,23 @@ class BookImporter {
             }
           });
 
-          // We will fill results by TOC index to keep deterministic order
           const orderedChapters: (Chapter | null)[] = new Array(
             chapterEntries.length
           ).fill(null);
           let processedChapters = 0;
+          const processedHashes = new Set<string>();
 
-          const self = this; // capture for inner functions
-          // Process each chapter entry
+          const self = this;
           chapterEntries.forEach((entry: any, index: number) => {
-            // Extract the file ID from href (e.g., "OEBPS/text/file.xhtml" -> find matching ID)
-            const href = (entry.href || '').split('#')[0]; // Remove anchor
+            const href = (entry.href || '').split('#')[0];
             const normalizedHref = path.posix
               .normalize(decodeURI(href))
               .replace(/^\/*/, '');
 
-            // Find the corresponding spine/manifest item by href
             let fileId: string | null = null;
-
-            // First try exact/normalized match
             if (hrefToId[normalizedHref]) {
               fileId = hrefToId[normalizedHref];
             } else {
-              // Fallback: try by filename only
               const filename = normalizedHref.split('/').pop();
               if (filename && hrefToId[filename]) {
                 fileId = hrefToId[filename];
@@ -412,7 +423,6 @@ class BookImporter {
               return;
             }
 
-            // Determine spine index for this entry for canonical ordering
             const spineIndex =
               spineIndexById[fileId] !== undefined
                 ? spineIndexById[fileId]
@@ -420,14 +430,36 @@ class BookImporter {
                   ? spineIndexByHref[normalizedHref]
                   : Number.POSITIVE_INFINITY;
 
-            // Get the chapter content
-            epub.getChapter(fileId, (err: any, text: string) => {
-              if (err || !text) {
+            epub.getChapter(fileId, (err: any, html: string) => {
+              if (err || !html) {
                 console.log(
                   `   ⚠️ Could not read content for: ${entry.title} (${fileId})`
                 );
               } else {
-                processChapter(index, spineIndex, entry.title, text);
+                // Extract the fragment if present
+                const fragment = (entry.href || '').split('#')[1];
+
+                // Deduplicate by fileId if titles are similar or content is identical
+                const contentHash = crypto
+                  .createHash('md5')
+                  .update(html + (fragment || ''))
+                  .digest('hex');
+
+                if (processedHashes.has(contentHash)) {
+                  console.log(
+                    `   ⏭️  Skipping duplicate content: "${entry.title}"`
+                  );
+                } else {
+                  processChapter(
+                    index,
+                    spineIndex,
+                    entry.title,
+                    html,
+                    fileId!,
+                    fragment
+                  );
+                  processedHashes.add(contentHash);
+                }
               }
 
               processedChapters++;
@@ -441,85 +473,250 @@ class BookImporter {
             tocIndex: number,
             spineIndex: number,
             title: string,
-            text: string
+            html: string,
+            fileId: string,
+            fragment?: string
           ) => {
-            // Better HTML cleanup preserving paragraph structure
-            let cleanText = text
-              .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-              .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-              .replace(/<\/?(p|div|h[1-6]|br)\s*[^>]*>/gi, '\n\n')
-              .replace(/<[^>]+>/g, ' ')
-              .replace(/[ \t]+/g, ' ')
-              .replace(/\n\s*\n\s*\n+/g, '\n\n')
-              .trim();
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(html, 'text/html');
 
-            // Skip threshold set to 0 to include all chapters
-            if (cleanText.length < 0) {
-              console.log(
-                `   Skipped: "${title}" (${cleanText.length} chars, too short)`
-              );
-              return;
+            // Extract internal styles if any
+            const styleTags = doc.getElementsByTagName('style');
+            for (let i = 0; i < styleTags.length; i++) {
+              const s = styleTags[i].textContent;
+              if (s) globalStyles += `/* Internal ${fileId} */\n${s}\n`;
             }
 
-            // Split into paragraphs on double line breaks
-            let paragraphs = cleanText
-              .split(/\n\s*\n/)
-              .map((p) => p.replace(/\n/g, ' ').trim())
-              .filter((p) => p.length > 30)
-              .map((p, i) => ({
-                // Use TOC index for deterministic IDs; will be renumbered later
-                id: `p-${tocIndex + 1}-${i + 1}`,
-                text: p,
-                type: 'paragraph',
-                tagName: 'p',
-              }));
-
-            if (
-              typeof self.limitParagraphs === 'number' &&
-              self.limitParagraphs > 0
-            ) {
-              paragraphs = paragraphs.slice(0, self.limitParagraphs);
+            let startNode = doc.getElementsByTagName('body')[0] || doc;
+            if (fragment) {
+              const target = doc.getElementById(fragment);
+              if (target) {
+                console.log(`      📍 Starting at fragment: ${fragment}`);
+                startNode = target;
+              }
             }
 
-            if (paragraphs.length > 0) {
-              // Prepend a synthetic chapter title item so reader displays it
-              const titleItem: ContentItem = {
-                id: `t-${tocIndex + 1}`,
-                text: String(title || `Chapter ${tocIndex + 1}`),
-                type: 'chapter',
-                tagName: 'h3',
-              };
+            const fragmentIds = chapterEntries
+              .filter((e: any) => (e.href || '').startsWith(fileId + '#'))
+              .map((e: any) => e.href.split('#')[1]);
 
-              const items = [titleItem, ...paragraphs];
+            let stopExtracting = false;
 
+            const items: ContentItem[] = [];
+
+            // Add title item
+            items.push({
+              id: `t-${tocIndex + 1}-0`,
+              text: title,
+              type: 'chapter',
+              tagName: 'h3',
+            });
+
+            let started = !fragment;
+            stopExtracting = false;
+
+            const extractItems = (node: any) => {
+              if (!node || stopExtracting) return;
+
+              // If this node or its descendants have the target fragment
+              if (node.getAttribute && node.getAttribute('id')) {
+                const id = node.getAttribute('id');
+                if (id === fragment) {
+                  started = true;
+                } else if (fragmentIds.includes(id)) {
+                  if (started) {
+                    // console.log(`      🚩 Stopping at next chapter fragment: ${id}`);
+                    stopExtracting = true;
+                    return;
+                  }
+                }
+              }
+
+              const nodeName = (node.nodeName || '').toLowerCase();
+              if (nodeName === 'script' || nodeName === 'style') return;
+
+              const meaningfulTags = [
+                'p',
+                'div',
+                'h1',
+                'h2',
+                'h3',
+                'h4',
+                'h5',
+                'h6',
+                'blockquote',
+                'li',
+                'section',
+                'header',
+                'footer',
+              ];
+
+              if (started && meaningfulTags.includes(nodeName)) {
+                let text = (node.textContent || '').trim();
+                if (text.length > 0) {
+                  let rawText = '';
+                  const children = node.childNodes;
+                  if (children) {
+                    for (let i = 0; i < children.length; i++) {
+                      const child = children[i];
+                      const childName = (child.nodeName || '').toLowerCase();
+
+                      if (child.nodeType === 3) {
+                        // TEXT_NODE
+                        rawText += child.nodeValue;
+                      } else if (
+                        childName === 'sup' ||
+                        (child.getAttribute &&
+                          (child.getAttribute('class') || '').includes(
+                            'footnote'
+                          ))
+                      ) {
+                        rawText += `<sup>${child.textContent}</sup>`;
+                      } else if (childName === 'a') {
+                        // Check if this <a> is actually a footnote (ends with a number)
+                        const linkText = (child.textContent || '').trim();
+                        const footnoteMatch = linkText.match(/^(.*?)(\d+)$/);
+                        if (
+                          footnoteMatch &&
+                          (footnoteMatch[1] === '' ||
+                            footnoteMatch[1].length < 5)
+                        ) {
+                          const baseText = footnoteMatch[1];
+                          const num = footnoteMatch[2];
+                          rawText += `${baseText}<sup>${num}</sup>`;
+                        } else {
+                          rawText += child.textContent || '';
+                        }
+                      } else {
+                        rawText += child.textContent || '';
+                      }
+                    }
+                  } else {
+                    rawText = text;
+                  }
+
+                  const className = node.getAttribute
+                    ? node.getAttribute('class')
+                    : '';
+                  const inlineStyle = node.getAttribute
+                    ? node.getAttribute('style')
+                    : '';
+
+                  // Internal deduplication: if this item's text is identical to the chapter title or previous item
+                  const cleanText = rawText.replace(/<[^>]*>/g, '').trim();
+                  if (items.length > 0) {
+                    const prevItem = items[items.length - 1];
+                    const prevText = prevItem.text
+                      .replace(/<[^>]*>/g, '')
+                      .trim();
+                    if (cleanText === prevText && cleanText.length > 0) {
+                      console.log(
+                        `      ⏭️  Skipping internal duplicate text: "${cleanText.substring(0, 30)}..."`
+                      );
+                      return;
+                    }
+                  }
+
+                  items.push({
+                    id: `p-${tocIndex + 1}-${items.length}`,
+                    text: rawText.trim(),
+                    type: nodeName.startsWith('h') ? 'chapter' : 'paragraph',
+                    tagName: nodeName,
+                    className: className || undefined,
+                    styles: inlineStyle || undefined,
+                  });
+                  return; // Don't recurse into processed paragraph-like nodes
+                }
+              }
+
+              // Recurse
+              const children = node.childNodes;
+              if (children) {
+                for (let i = 0; i < children.length; i++) {
+                  extractItems(children[i]);
+                }
+              }
+            };
+
+            extractItems(doc.getElementsByTagName('body')[0] || doc);
+
+            // Filter out short/empty results but keep titles and "Part" chapters
+            let filteredItems = items.filter(
+              (it) =>
+                it.type === 'chapter' ||
+                it.text.length > 5 ||
+                it.className?.includes('part')
+            );
+
+            // Robust synthetic header deduplication
+            // If the first real content items match the TOC title, remove those content items
+            if (filteredItems.length > 1) {
+              const normalize = (s: string) =>
+                s
+                  .toLowerCase()
+                  .replace(
+                    /^((chapter|part|section|appendix|book)\s+)?(\d+|[ivx]+)[:.]?\s*/gi,
+                    ''
+                  )
+                  .replace(/[^a-z0-9\u4e00-\u9fa5]/g, '')
+                  .trim();
+
+              const tocTitleClean = normalize(title);
+
+              if (tocTitleClean.length > 0) {
+                let itemsToRemove = 0;
+                let currentAccumulator = '';
+
+                // Check first 3 items (skipping our synthetic title at 0)
+                for (let i = 1; i < Math.min(filteredItems.length, 4); i++) {
+                  currentAccumulator += ' ' + filteredItems[i].text;
+                  const accClean = normalize(currentAccumulator);
+
+                  if (
+                    accClean === tocTitleClean ||
+                    (accClean.length > 5 && accClean.includes(tocTitleClean)) ||
+                    (tocTitleClean.length > 5 &&
+                      tocTitleClean.includes(accClean))
+                  ) {
+                    itemsToRemove = i;
+                  } else if (accClean.length > tocTitleClean.length + 10) {
+                    break;
+                  }
+                }
+
+                if (itemsToRemove > 0) {
+                  console.log(
+                    `      ✨ Deduplicated ${itemsToRemove} content header items for: "${title}"`
+                  );
+                  filteredItems.splice(1, itemsToRemove);
+                }
+              }
+            }
+
+            if (filteredItems.length > 0) {
               orderedChapters[tocIndex] = {
-                // number will be assigned after filtering to preserve sequence
                 number: tocIndex + 1,
                 orderIndex: tocIndex + 1,
                 tocIndex,
                 spineIndex,
                 title: title,
                 originalTitle: title,
-                content: items,
+                content: filteredItems,
               };
-              console.log(`   ✅ "${title}" (${paragraphs.length} paragraphs)`);
+              console.log(
+                `   ✅ "${title}" (${filteredItems.length - 1} items)`
+              );
             }
           };
 
           const finalizeParsing = () => {
-            // Drop null/short entries, then order by OPF spine index with TOC index as tiebreaker
             let present = orderedChapters
               .filter((ch) => ch && ch.content && ch.content.length > 0)
               .map((ch) => ch as Chapter);
+
             present.sort((a, b) => {
-              const sa =
-                a.spineIndex === undefined
-                  ? Number.POSITIVE_INFINITY
-                  : a.spineIndex;
-              const sb =
-                b.spineIndex === undefined
-                  ? Number.POSITIVE_INFINITY
-                  : b.spineIndex;
+              const sa = a.spineIndex ?? Number.POSITIVE_INFINITY;
+              const sb = b.spineIndex ?? Number.POSITIVE_INFINITY;
               if (sa !== sb) return sa - sb;
               return (a.tocIndex || 0) - (b.tocIndex || 0);
             });
@@ -531,15 +728,12 @@ class BookImporter {
               present = present.slice(0, self.limitChapters);
             }
 
-            // Assign final chapter numbers in displayed order
             present.forEach((ch, index) => {
               ch.number = index + 1;
               ch.orderIndex = index + 1;
-              // Renumber paragraph IDs to reflect final chapter number for consistency
               if (Array.isArray(ch.content)) {
                 ch.content = ch.content.map((p, i) => ({
                   ...p,
-                  // Keep title item with 't-' prefix; paragraphs use running index
                   id:
                     p.type === 'chapter'
                       ? `t-${index + 1}`
@@ -555,11 +749,11 @@ class BookImporter {
               author: metadata.author,
               language: metadata.language,
               chapters: present,
+              styles: globalStyles,
             });
           };
 
           if (chapterEntries.length === 0) {
-            // As a fallback, attempt to use spine order to preserve reading sequence
             console.log(
               '   ⚠️  No TOC entries found. Falling back to spine order.'
             );
@@ -570,19 +764,18 @@ class BookImporter {
               return;
             }
             spineItems.forEach((item: any, idx: number) => {
-              epub.getChapter(item.id, (err: any, text: string) => {
-                if (!err && text) {
+              epub.getChapter(item.id, (err: any, html: string) => {
+                if (!err && html) {
                   processChapter(
                     idx,
                     idx,
                     item.title || `Chapter ${idx + 1}`,
-                    text
+                    html,
+                    item.id
                   );
                 }
                 processed++;
-                if (processed === spineItems.length) {
-                  finalizeParsing();
-                }
+                if (processed === spineItems.length) finalizeParsing();
               });
             });
           }
@@ -591,10 +784,7 @@ class BookImporter {
         }
       });
 
-      epub.on('error', (err: any) => {
-        reject(err);
-      });
-
+      epub.on('error', (err: any) => reject(err));
       epub.parse();
     });
   }
@@ -662,7 +852,7 @@ class BookImporter {
     lines.push('-- Ovid import SQL');
     // Insert book
     lines.push(
-      `INSERT INTO books (title, original_title, author, language_pair, styles, uuid) VALUES ('${this.escapeSql(bookData.title)}', '${this.escapeSql(bookData.title)}', '${this.escapeSql(bookData.author)}', '${this.escapeSql(languagePair)}', '{}' , '${bookUuid}');`
+      `INSERT INTO books (title, original_title, author, language_pair, styles, uuid) VALUES ('${this.escapeSql(bookData.title)}', '${this.escapeSql(bookData.title)}', '${this.escapeSql(bookData.author)}', '${this.escapeSql(languagePair)}', '${this.escapeSql(bookData.styles || '')}' , '${bookUuid}');`
     );
     const bookIdExpr = `(SELECT id FROM books WHERE uuid='${bookUuid}')`;
     // Chapters
@@ -685,8 +875,10 @@ class BookImporter {
           : item.type === 'chapter'
             ? 'h3'
             : 'p';
+        const className = item.className ? this.escapeSql(item.className) : '';
+        const itemStyles = item.styles ? this.escapeSql(item.styles) : '';
         lines.push(
-          `INSERT INTO content_items (book_id, chapter_id, item_id, original_text, translated_text, type, tag_name, order_index) VALUES (${bookIdExpr}, ${chapterIdExpr}, '${this.escapeSql(item.id)}', '${this.escapeSql(item.originalText)}', '${this.escapeSql(item.translatedText)}', '${itemType}', '${tagName}', ${globalContentOrder});`
+          `INSERT INTO content_items (book_id, chapter_id, item_id, original_text, translated_text, type, tag_name, class_name, styles, order_index) VALUES (${bookIdExpr}, ${chapterIdExpr}, '${this.escapeSql(item.id)}', '${this.escapeSql(item.originalText)}', '${this.escapeSql(item.translatedText)}', '${itemType}', '${tagName}', '${className}', '${itemStyles}', ${globalContentOrder});`
         );
         globalContentOrder++;
       }
@@ -720,16 +912,14 @@ class BookImporter {
 
       if (this.applyMode === 'local') {
         console.log('   📥 Applying SQL file to local D1...');
-        execSync(
-          `npx wrangler d1 execute polyink-db --local --file=${outPath}`,
-          { stdio: 'inherit' }
-        );
+        execSync(`npx wrangler d1 execute ovid-db --local --file=${outPath}`, {
+          stdio: 'inherit',
+        });
       } else if (this.applyMode === 'remote') {
         console.log('   ☁️  Applying SQL file to remote D1...');
-        execSync(
-          `npx wrangler d1 execute polyink-db --remote --file=${outPath}`,
-          { stdio: 'inherit' }
-        );
+        execSync(`npx wrangler d1 execute ovid-db --remote --file=${outPath}`, {
+          stdio: 'inherit',
+        });
       } else {
         console.log(
           '   ℹ️  SQL not applied automatically (use --apply=local|remote to apply).'

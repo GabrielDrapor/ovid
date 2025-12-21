@@ -137,7 +137,7 @@ function runLocal(
 ): any[] {
   // Force persistence to the default local D1 directory so we read existing data
   const cfg = opts.config || 'wrangler.toml';
-  const cmd = `npx wrangler d1 execute polyink-db --local --config ${cfg} --command "${sql}"`;
+  const cmd = `npx wrangler d1 execute ovid-db --local --config ${cfg} --command "${sql}"`;
   try {
     const out = execSync(cmd, {
       encoding: 'utf8',
@@ -602,15 +602,14 @@ async function main() {
     console.log('✅ SQL file written.');
     if (opts.apply === 'remote') {
       console.log('☁️  Applying SQL to remote...');
-      execSync(
-        `npx wrangler d1 execute polyink-db --remote --file=${outPath}`,
-        { stdio: 'inherit' }
-      );
+      execSync(`npx wrangler d1 execute ovid-db --remote --file=${outPath}`, {
+        stdio: 'inherit',
+      });
       console.log('🎉 Sync complete via SQL file');
       return;
     } else if (opts.apply === 'local') {
       console.log('📥 Applying SQL to local...');
-      execSync(`npx wrangler d1 execute polyink-db --local --file=${outPath}`, {
+      execSync(`npx wrangler d1 execute ovid-db --local --file=${outPath}`, {
         stdio: 'inherit',
       });
       console.log('🎉 Local apply complete');
