@@ -42,7 +42,9 @@ const BilingualReader: React.FC<BilingualReaderProps> = ({
   setShowOriginalTitle,
   bookUuid,
 }) => {
-  const [showOriginal, setShowOriginal] = useState<{ [key: string]: boolean }>({});
+  const [showOriginal, setShowOriginal] = useState<{ [key: string]: boolean }>(
+    {}
+  );
 
   // Initialize showOriginal state to show original text by default when content changes
   useEffect(() => {
@@ -117,11 +119,11 @@ const BilingualReader: React.FC<BilingualReaderProps> = ({
   useEffect(() => {
     const fetchChapters = async () => {
       if (!bookUuid) return;
-      
+
       try {
         const response = await fetch(`/api/book/${bookUuid}/chapters`);
         if (response.ok) {
-          const chaptersData = await response.json() as Chapter[];
+          const chaptersData = (await response.json()) as Chapter[];
           setChapters(chaptersData);
           setTotalChapters(chaptersData.length);
         }
@@ -145,7 +147,6 @@ const BilingualReader: React.FC<BilingualReaderProps> = ({
       onLoadChapter(currentChapter + 1);
     }
   };
-
 
   const scrollToChapter = (chapterNumber: number) => {
     onLoadChapter(chapterNumber);
@@ -176,11 +177,11 @@ const BilingualReader: React.FC<BilingualReaderProps> = ({
             Loading chapter...
           </div>
         )}
-        
+
         {/* Previous Chapter Button at top - only show for chapters > 1 */}
         {!isLoading && currentChapter > 1 && (
           <div className="chapter-navigation-top">
-            <button 
+            <button
               className="nav-button prev-button"
               onClick={goToPreviousChapter}
               title="Previous Chapter"
@@ -189,78 +190,85 @@ const BilingualReader: React.FC<BilingualReaderProps> = ({
             </button>
           </div>
         )}
-        
-        {!isLoading && content.map((item) => {
-          const text = showOriginal[item.id] ? item.original : item.translated;
-          const isChinese = /[\u4e00-\u9fff]/.test(text);
 
-          // Combine original EPUB classes with reader classes
-          let itemClass = 'paragraph';
-          if (item.type === 'title') {
-            itemClass = 'title-text';
-          } else if (item.type === 'chapter') {
-            itemClass = 'chapter-text';
-          } else {
-            itemClass += isChinese ? ' chinese-text' : ' english-text';
-          }
+        {!isLoading &&
+          content.map((item) => {
+            const text = showOriginal[item.id]
+              ? item.original
+              : item.translated;
+            const isChinese = /[\u4e00-\u9fff]/.test(text);
 
-          // Add original EPUB className if available
-          if (item.className) {
-            itemClass += ` ${item.className}`;
-          }
+            // Combine original EPUB classes with reader classes
+            let itemClass = 'paragraph';
+            if (item.type === 'title') {
+              itemClass = 'title-text';
+            } else if (item.type === 'chapter') {
+              itemClass = 'chapter-text';
+            } else {
+              itemClass += isChinese ? ' chinese-text' : ' english-text';
+            }
 
-          // Create inline styles combining reader and EPUB styles
-          const combinedStyles: React.CSSProperties = {};
-          if (item.styles) {
-            // Parse inline styles if available
-            const inlineStyles = item.styles.split(';').reduce((acc, style) => {
-              const [property, value] = style.split(':').map((s) => s.trim());
-              if (property && value) {
-                // Convert CSS property names to camelCase for React
-                const camelProp = property.replace(/-([a-z])/g, (g) =>
-                  g[1].toUpperCase()
-                );
-                acc[camelProp] = value;
-              }
-              return acc;
-            }, {} as any);
-            Object.assign(combinedStyles, inlineStyles);
-          }
+            // Add original EPUB className if available
+            if (item.className) {
+              itemClass += ` ${item.className}`;
+            }
 
-          // Determine the appropriate HTML element based on original tagName or type
-          const TagName = (item.tagName ||
-            (item.type === 'title'
-              ? 'h2'
-              : item.type === 'chapter'
-                ? 'h3'
-                : 'p')) as keyof JSX.IntrinsicElements;
+            // Create inline styles combining reader and EPUB styles
+            const combinedStyles: React.CSSProperties = {};
+            if (item.styles) {
+              // Parse inline styles if available
+              const inlineStyles = item.styles
+                .split(';')
+                .reduce((acc, style) => {
+                  const [property, value] = style
+                    .split(':')
+                    .map((s) => s.trim());
+                  if (property && value) {
+                    // Convert CSS property names to camelCase for React
+                    const camelProp = property.replace(/-([a-z])/g, (g) =>
+                      g[1].toUpperCase()
+                    );
+                    acc[camelProp] = value;
+                  }
+                  return acc;
+                }, {} as any);
+              Object.assign(combinedStyles, inlineStyles);
+            }
 
-          const element = React.createElement(
-            TagName,
-            {
-              className: itemClass,
-              style: combinedStyles,
-              onClick: () => toggleLanguage(item.id),
-            },
-            text
-          );
+            // Determine the appropriate HTML element based on original tagName or type
+            const TagName = (item.tagName ||
+              (item.type === 'title'
+                ? 'h2'
+                : item.type === 'chapter'
+                  ? 'h3'
+                  : 'p')) as keyof JSX.IntrinsicElements;
 
-          return (
-            <div
-              key={item.id}
-              id={`paragraph-${item.id}`}
-              className={`paragraph-container ${item.type || 'paragraph'}-container`}
-              style={{ marginBottom: `${paragraphSpacing}px` }}
-            >
-              {element}
-            </div>
-          );
-        })}
-        
+            const element = React.createElement(
+              TagName,
+              {
+                className: itemClass,
+                style: combinedStyles,
+                onClick: () => toggleLanguage(item.id),
+              },
+              text
+            );
+
+            return (
+              <div
+                key={item.id}
+                id={`paragraph-${item.id}`}
+                className={`paragraph-container ${item.type || 'paragraph'}-container`}
+                style={{ marginBottom: `${paragraphSpacing}px` }}
+              >
+                {element}
+              </div>
+            );
+          })}
+
         {/* Next Chapter Button at bottom - only show if not on last chapter */}
         {!isLoading && currentChapter < totalChapters && (
           <div className="chapter-navigation-bottom">
-            <button 
+            <button
               className="nav-button next-button"
               onClick={goToNextChapter}
               title={currentChapter === 1 ? 'Start reading' : 'Next Chapter'}
@@ -362,8 +370,8 @@ const BilingualReader: React.FC<BilingualReaderProps> = ({
             <div className="chapters-content">
               <div className="chapters-header">
                 <h3>Chapters</h3>
-                <button 
-                  className="chapters-close" 
+                <button
+                  className="chapters-close"
                   onClick={() => setIsChaptersOpen(false)}
                 >
                   ×
@@ -381,16 +389,20 @@ const BilingualReader: React.FC<BilingualReaderProps> = ({
                         {chapter.chapter_number}
                       </div>
                       <div className="chapter-titles">
-                        <div className="chapter-title-original">{chapter.original_title}</div>
-                        <div className="chapter-title-translated">{chapter.title}</div>
+                        <div className="chapter-title-original">
+                          {chapter.original_title}
+                        </div>
+                        <div className="chapter-title-translated">
+                          {chapter.title}
+                        </div>
                       </div>
                     </button>
                   );
                 })}
               </div>
             </div>
-            <div 
-              className="chapters-backdrop" 
+            <div
+              className="chapters-backdrop"
               onClick={() => setIsChaptersOpen(false)}
             />
           </div>

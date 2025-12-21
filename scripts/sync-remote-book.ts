@@ -16,8 +16,7 @@ import * as path from 'path';
 
 // Ensure Wrangler writes config/logs inside the workspace to avoid permission issues
 process.env.XDG_CONFIG_HOME =
-  process.env.XDG_CONFIG_HOME ||
-  path.resolve(process.cwd(), '.wrangler_cfg');
+  process.env.XDG_CONFIG_HOME || path.resolve(process.cwd(), '.wrangler_cfg');
 
 interface SyncOptions {
   uuid?: string;
@@ -187,7 +186,11 @@ async function remoteQueryHTTP(sqlArray: string | string[]): Promise<any[]> {
   let sqlText = '';
   if (Array.isArray(sqlArray)) {
     sqlText = sqlArray
-      .map((s) => String(s).trim().replace(/;+\s*$/, ''))
+      .map((s) =>
+        String(s)
+          .trim()
+          .replace(/;+\s*$/, '')
+      )
       .filter((s) => s.length > 0)
       .join('; ');
     if (!sqlText.endsWith(';')) sqlText += ';';
@@ -250,7 +253,9 @@ function ensureWranglerAuthInteractive(): void {
     execSync('npx wrangler whoami', { encoding: 'utf8', stdio: 'pipe' });
     return; // Auth already set locally
   } catch (e) {
-    console.log('🔐 Wrangler is not authenticated. Opening interactive login...');
+    console.log(
+      '🔐 Wrangler is not authenticated. Opening interactive login...'
+    );
     const res = spawnSync('npx', ['wrangler', 'auth', 'login'], {
       stdio: 'inherit',
     });
@@ -605,10 +610,9 @@ async function main() {
       return;
     } else if (opts.apply === 'local') {
       console.log('📥 Applying SQL to local...');
-      execSync(
-        `npx wrangler d1 execute polyink-db --local --file=${outPath}`,
-        { stdio: 'inherit' }
-      );
+      execSync(`npx wrangler d1 execute polyink-db --local --file=${outPath}`, {
+        stdio: 'inherit',
+      });
       console.log('🎉 Local apply complete');
       return;
     } else {

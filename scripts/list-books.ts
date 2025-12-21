@@ -82,12 +82,16 @@ class BookLister {
       }
 
       console.log('');
-      console.log(`📊 Total: ${books.length} book${books.length > 1 ? 's' : ''}`);
+      console.log(
+        `📊 Total: ${books.length} book${books.length > 1 ? 's' : ''}`
+      );
       console.log('');
       console.log('💡 Commands:');
       console.log('   View book: /book/{uuid}');
       console.log('   Remove book: yarn remove-book -- --uuid="{uuid}"');
-      console.log('   Sync to remote: yarn sync-remote-book -- --uuid="{uuid}"');
+      console.log(
+        '   Sync to remote: yarn sync-remote-book -- --uuid="{uuid}"'
+      );
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : 'Unknown error';
@@ -101,7 +105,8 @@ class BookLister {
     const accountId =
       process.env.CLOUDFLARE_ACCOUNT_ID || process.env.CF_ACCOUNT_ID;
     const databaseId =
-      process.env.CLOUDFLARE_D1_DATABASE_ID || this.readDatabaseIdFromWrangler();
+      process.env.CLOUDFLARE_D1_DATABASE_ID ||
+      this.readDatabaseIdFromWrangler();
 
     if (!token) {
       throw new Error(
@@ -190,7 +195,8 @@ class BookLister {
       if (!Array.isArray(parsed) || parsed.length === 0) return [];
 
       const firstResult = parsed[0];
-      if (!firstResult.results || !Array.isArray(firstResult.results)) return [];
+      if (!firstResult.results || !Array.isArray(firstResult.results))
+        return [];
 
       // Map the results to Book objects
       const books: Book[] = firstResult.results.map((row: any) => ({
@@ -276,7 +282,8 @@ Environment variables (required for remote mode):
     const lister = new BookLister(mode);
     await lister.list();
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    const errorMessage =
+      error instanceof Error ? error.message : 'Unknown error';
     console.error('❌ Error:', errorMessage);
     process.exit(1);
   }

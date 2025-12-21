@@ -87,18 +87,19 @@ function App() {
     setLoading(true);
     try {
       // API supports fetching specific chapters
-      const response = await fetch(`/api/book/${uuid}/chapter/${chapterNumber}`);
+      const response = await fetch(
+        `/api/book/${uuid}/chapter/${chapterNumber}`
+      );
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
-      const data = await response.json() as BookContent;
+      const data = (await response.json()) as BookContent;
       setBookContent(data);
 
       // Auto-scroll logic
       setTimeout(() => {
         window.scrollTo(0, 0);
       }, 100);
-
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load chapter');
       console.error('Error fetching chapter:', err);
@@ -112,16 +113,22 @@ function App() {
     if (bookUuid && !showBookShelf) {
       // Save progress
       if (currentChapter) {
-        localStorage.setItem(`ovid_progress_${bookUuid}`, currentChapter.toString());
+        localStorage.setItem(
+          `ovid_progress_${bookUuid}`,
+          currentChapter.toString()
+        );
       }
 
       // Only load if content missing or chapter changed
-      if (!bookContent || bookContent.uuid !== bookUuid || bookContent.currentChapter !== currentChapter) {
+      if (
+        !bookContent ||
+        bookContent.uuid !== bookUuid ||
+        bookContent.currentChapter !== currentChapter
+      ) {
         loadChapter(bookUuid, currentChapter);
       }
     }
   }, [bookUuid, currentChapter, showBookShelf]);
-
 
   const handleSelectBook = (uuid: string) => {
     // Check for saved progress
@@ -160,10 +167,14 @@ function App() {
       <div className="App">
         <div style={{ textAlign: 'center', padding: '50px' }}>
           <div>Error: {error}</div>
-          <button onClick={() => {
-            window.history.pushState({}, '', '/');
-            syncFromUrl();
-          }}>Go Home</button>
+          <button
+            onClick={() => {
+              window.history.pushState({}, '', '/');
+              syncFromUrl();
+            }}
+          >
+            Go Home
+          </button>
         </div>
       </div>
     );
@@ -172,7 +183,8 @@ function App() {
   if (!bookContent) return null;
 
   const epubContent = bookContent.content;
-  const author = bookContent.author !== 'Unknown Author' ? bookContent.author : '';
+  const author =
+    bookContent.author !== 'Unknown Author' ? bookContent.author : '';
 
   return (
     <div className="App">

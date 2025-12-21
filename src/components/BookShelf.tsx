@@ -28,7 +28,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`);
         }
-        const booksData = await response.json() as Book[];
+        const booksData = (await response.json()) as Book[];
         setBooks(booksData);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to fetch books');
@@ -68,7 +68,9 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
       <div className="bookshelf">
         <div className="bookshelf-empty">
           <h2>Your Library is Empty</h2>
-          <p>Add some books to get started with your bilingual reading journey.</p>
+          <p>
+            Add some books to get started with your bilingual reading journey.
+          </p>
         </div>
       </div>
     );
@@ -80,10 +82,10 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
         <h1>Ovid Library</h1>
         <p>Your bilingual reading collection</p>
       </header>
-      
+
       <div className="books-grid">
         {books.map((book) => (
-          <div 
+          <div
             key={book.uuid}
             className="book-card"
             onClick={() => onSelectBook(book.uuid)}
@@ -104,7 +106,9 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                 </div>
                 <div className="book-meta">
                   <p className="book-author">{book.author}</p>
-                  <span className="language-pair">{book.language_pair.toUpperCase()}</span>
+                  <span className="language-pair">
+                    {book.language_pair.toUpperCase()}
+                  </span>
                 </div>
               </div>
             </div>

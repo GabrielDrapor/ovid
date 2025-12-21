@@ -177,8 +177,12 @@
 }
 
 @keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
 }
 
 .bookshelf-loading p,
@@ -202,29 +206,29 @@
   .bookshelf {
     padding: 1rem;
   }
-  
+
   .bookshelf-header h1 {
     font-size: 2rem;
   }
-  
+
   .books-grid {
     grid-template-columns: 1fr;
     gap: 1.5rem;
   }
-  
+
   .book-card {
     margin: 0 auto;
     max-width: 400px;
   }
-  
+
   .book-cover {
     height: 160px;
   }
-  
+
   .book-front {
     padding: 1rem;
   }
-  
+
   .book-title {
     font-size: 1.1rem;
   }

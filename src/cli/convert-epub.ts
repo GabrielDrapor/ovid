@@ -82,7 +82,8 @@ async function main() {
       content: epubData.content.map((item, index) => ({
         id: item.id,
         original: item.content,
-        translated: translatedTexts[index] || `[Translation failed: ${item.content}]`,
+        translated:
+          translatedTexts[index] || `[Translation failed: ${item.content}]`,
         type: item.type,
         className: item.className,
         tagName: item.tagName,

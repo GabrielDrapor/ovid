@@ -24,8 +24,7 @@ import {
 
 // Ensure Wrangler writes config/logs inside the workspace to avoid permission issues
 process.env.XDG_CONFIG_HOME =
-  process.env.XDG_CONFIG_HOME ||
-  path.resolve(process.cwd(), '.wrangler_cfg');
+  process.env.XDG_CONFIG_HOME || path.resolve(process.cwd(), '.wrangler_cfg');
 
 // Configuration
 const SUPPORTED_FORMATS = ['.epub', '.txt', '.pdf'];
@@ -141,9 +140,7 @@ class BookImporter {
     // Resolve input file path with support for epubs and @epubs directories
     this.file = this.resolveFilePath(this.file) || '';
     if (!this.file) {
-      throw new Error(
-        `File not found. Looked in: ./, ./epubs, ./@epubs`
-      );
+      throw new Error(`File not found. Looked in: ./, ./epubs, ./@epubs`);
     }
 
     // Check file format
@@ -300,7 +297,9 @@ class BookImporter {
 
   private isChapterHeader(line: string): boolean {
     // Simple heuristics for chapter detection
-    return /^(Chapter|CHAPTER|第.{1,3}章|\d+\.)/i.test(line) && line.length < 100;
+    return (
+      /^(Chapter|CHAPTER|第.{1,3}章|\d+\.)/i.test(line) && line.length < 100
+    );
   }
 
   private parseEpubFile(): Promise<BookData> {
@@ -541,7 +540,10 @@ class BookImporter {
                 ch.content = ch.content.map((p, i) => ({
                   ...p,
                   // Keep title item with 't-' prefix; paragraphs use running index
-                  id: p.type === 'chapter' ? `t-${index + 1}` : `p-${index + 1}-${i}`,
+                  id:
+                    p.type === 'chapter'
+                      ? `t-${index + 1}`
+                      : `p-${index + 1}-${i}`,
                 }));
               }
             });
@@ -602,7 +604,9 @@ class BookImporter {
     throw new Error('PDF parsing not yet implemented. Use TXT files for now.');
   }
 
-  private async translateContent(bookData: BookData): Promise<TranslatedContent> {
+  private async translateContent(
+    bookData: BookData
+  ): Promise<TranslatedContent> {
     let totalSegments = 0;
 
     // Prepare chapters for translation
@@ -736,33 +740,44 @@ class BookImporter {
     }
 
     // Default: local execution using temporary file to avoid shell escaping issues
-    const tempSqlPath = path.resolve(process.cwd(), `.temp_import_${bookUuid}.sql`);
+    const tempSqlPath = path.resolve(
+      process.cwd(),
+      `.temp_import_${bookUuid}.sql`
+    );
 
     try {
       console.log('   📝 Generating temporary SQL for import...');
-      const sql = this.buildImportSql(bookData, translatedContent, bookUuid, languagePair);
+      const sql = this.buildImportSql(
+        bookData,
+        translatedContent,
+        bookUuid,
+        languagePair
+      );
       fs.writeFileSync(tempSqlPath, sql, 'utf8');
 
       console.log('   📥 Executing SQL import...');
 
       // Sanitize environment variables to avoid npm warnings
       const env = { ...process.env };
-      Object.keys(env).forEach(key => {
+      Object.keys(env).forEach((key) => {
         if (key.startsWith('npm_config_')) {
           delete env[key];
         }
       });
 
       // Use the --file flag which handles large/complex SQL safely
-      execSync(`npx wrangler d1 execute ovid-db --local --file="${tempSqlPath}"`, {
-        stdio: 'inherit',
-        env: env
-      });
+      execSync(
+        `npx wrangler d1 execute ovid-db --local --file="${tempSqlPath}"`,
+        {
+          stdio: 'inherit',
+          env: env,
+        }
+      );
 
       return bookUuid;
-
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const errorMessage =
+        error instanceof Error ? error.message : 'Unknown error';
       console.error('Database import error:', errorMessage);
       throw error;
     } finally {
@@ -772,8 +787,6 @@ class BookImporter {
       }
     }
   }
-
-
 
   private escapeSql(text: string): string {
     if (!text) return '';
@@ -833,7 +846,9 @@ Notes:
     The importer will resolve among ./, ./epubs, and ./@epubs automatically.
   - Configure OpenAI-compatible APIs via environment variables
 
-Supported Languages: ${Object.entries(SUPPORTED_LANGUAGES).map(([k, v]) => `${k}(${v})`).join(', ')}
+Supported Languages: ${Object.entries(SUPPORTED_LANGUAGES)
+    .map(([k, v]) => `${k}(${v})`)
+    .join(', ')}
 `);
 }
 

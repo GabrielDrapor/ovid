@@ -1,46 +1,69 @@
 // Database query functions
 async function getBookWithContent(db: D1Database, bookUuid: string) {
   // Get book metadata by UUID
-  const book = await db.prepare('SELECT * FROM books WHERE uuid = ?').bind(bookUuid).first();
+  const book = await db
+    .prepare('SELECT * FROM books WHERE uuid = ?')
+    .bind(bookUuid)
+    .first();
   if (!book) {
     throw new Error('Book not found');
   }
 
   // Get all content items ordered by order_index
-  const contentItems = await db.prepare(`
+  const contentItems = await db
+    .prepare(
+      `
     SELECT ci.*, c.chapter_number, c.title as chapter_title, c.original_title as chapter_original_title
     FROM content_items ci
     LEFT JOIN chapters c ON ci.chapter_id = c.id
     WHERE ci.book_id = ?
     ORDER BY ci.order_index ASC
-  `).bind(book.id).all();
+  `
+    )
+    .bind(book.id)
+    .all();
 
   return {
     book,
-    content: contentItems.results
+    content: contentItems.results,
   };
 }
 
 async function getBookChapters(db: D1Database, bookUuid: string) {
   // Get book by UUID first
-  const book = await db.prepare('SELECT id FROM books WHERE uuid = ?').bind(bookUuid).first();
+  const book = await db
+    .prepare('SELECT id FROM books WHERE uuid = ?')
+    .bind(bookUuid)
+    .first();
   if (!book) {
     throw new Error('Book not found');
   }
 
-  const chapters = await db.prepare(`
+  const chapters = await db
+    .prepare(
+      `
     SELECT id, chapter_number, title, original_title, order_index
     FROM chapters
     WHERE book_id = ?
     ORDER BY order_index ASC
-  `).bind(book.id).all();
+  `
+    )
+    .bind(book.id)
+    .all();
 
   return chapters.results;
 }
 
-async function getChapterContent(db: D1Database, chapterNumber: number, bookUuid: string) {
+async function getChapterContent(
+  db: D1Database,
+  chapterNumber: number,
+  bookUuid: string
+) {
   // Get book metadata by UUID
-  const book = await db.prepare('SELECT * FROM books WHERE uuid = ?').bind(bookUuid).first();
+  const book = await db
+    .prepare('SELECT * FROM books WHERE uuid = ?')
+    .bind(bookUuid)
+    .first();
   if (!book) {
     throw new Error('Book not found');
   }
@@ -55,7 +78,7 @@ async function getChapterContent(db: D1Database, chapterNumber: number, bookUuid
         chapter_number: 0,
         title: book.title,
         original_title: book.original_title || book.title,
-        order_index: 0
+        order_index: 0,
       },
       content: [
         {
@@ -64,9 +87,9 @@ async function getChapterContent(db: D1Database, chapterNumber: number, bookUuid
           translated: book.title || 'Title',
           type: 'title',
           className: null,
-          tagName: 'h1', 
+          tagName: 'h1',
           styles: null,
-          order_index: 0
+          order_index: 0,
         },
         {
           id: 'author-0',
@@ -76,35 +99,47 @@ async function getChapterContent(db: D1Database, chapterNumber: number, bookUuid
           className: null,
           tagName: 'p',
           styles: null,
-          order_index: 1
-        }
-      ]
+          order_index: 1,
+        },
+      ],
     };
   }
 
   // Get chapter info for regular chapters
-  const chapter = await db.prepare(`
+  const chapter = await db
+    .prepare(
+      `
     SELECT * FROM chapters 
     WHERE book_id = ? AND chapter_number = ?
-  `).bind(book.id, chapterNumber).first();
+  `
+    )
+    .bind(book.id, chapterNumber)
+    .first();
 
   if (!chapter) {
     throw new Error('Chapter not found');
   }
 
   // Get content items for this chapter
-  const contentItems = await db.prepare(`
+  const contentItems = await db
+    .prepare(
+      `
     SELECT ci.* 
     FROM content_items ci
     WHERE ci.book_id = ? AND ci.chapter_id = ?
     ORDER BY ci.order_index ASC
-  `).bind(book.id, chapter.id).all();
+  `
+    )
+    .bind(book.id, chapter.id)
+    .all();
 
   // Ensure a visible chapter title item exists at the top. Inject if missing.
   const items: any[] = Array.isArray((contentItems as any).results)
     ? (contentItems as any).results.slice()
     : [];
-  const hasTitleItem = items.some((it: any) => it?.type === 'chapter' || it?.type === 'title');
+  const hasTitleItem = items.some(
+    (it: any) => it?.type === 'chapter' || it?.type === 'title'
+  );
   if (!hasTitleItem) {
     items.unshift({
       item_id: `chapter-title-${chapter.chapter_number}`,
@@ -126,11 +161,15 @@ async function getChapterContent(db: D1Database, chapterNumber: number, bookUuid
 }
 
 async function getAllBooks(db: D1Database) {
-  const books = await db.prepare(`
+  const books = await db
+    .prepare(
+      `
     SELECT id, uuid, title, original_title, author, language_pair, created_at, updated_at
     FROM books
     ORDER BY created_at DESC
-  `).all();
+  `
+    )
+    .all();
 
   return books.results;
 }
@@ -138,7 +177,7 @@ async function getAllBooks(db: D1Database) {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
-    
+
     // Handle API routes
     if (url.pathname.startsWith('/api/')) {
       try {
@@ -146,7 +185,7 @@ export default {
         if (url.pathname === '/api/books') {
           const books = await getAllBooks(env.DB);
           return new Response(JSON.stringify(books), {
-            headers: { 'Content-Type': 'application/json' }
+            headers: { 'Content-Type': 'application/json' },
           });
         }
 
@@ -158,7 +197,7 @@ export default {
 
           if (endpoint === 'content') {
             const bookData = await getBookWithContent(env.DB, bookUuid);
-            
+
             // Transform database result to match the original JSON structure
             const response = {
               uuid: bookData.book.uuid,
@@ -173,26 +212,30 @@ export default {
                 type: item.type,
                 className: item.class_name,
                 tagName: item.tag_name,
-                styles: item.styles
-              }))
+                styles: item.styles,
+              })),
             };
 
             return new Response(JSON.stringify(response), {
-              headers: { 'Content-Type': 'application/json' }
+              headers: { 'Content-Type': 'application/json' },
             });
           }
 
           if (endpoint === 'chapters') {
             const chapters = await getBookChapters(env.DB, bookUuid);
             return new Response(JSON.stringify(chapters), {
-              headers: { 'Content-Type': 'application/json' }
+              headers: { 'Content-Type': 'application/json' },
             });
           }
 
           if (endpoint.startsWith('chapter/')) {
             const chapterNumber = parseInt(endpoint.split('/')[1] || '1');
-            const chapterData = await getChapterContent(env.DB, chapterNumber, bookUuid);
-            
+            const chapterData = await getChapterContent(
+              env.DB,
+              chapterNumber,
+              bookUuid
+            );
+
             // Transform database result to match the original JSON structure
             const response = {
               uuid: chapterData.book.uuid,
@@ -204,7 +247,7 @@ export default {
               chapterInfo: {
                 number: chapterData.chapter.chapter_number,
                 title: chapterData.chapter.title,
-                originalTitle: chapterData.chapter.original_title
+                originalTitle: chapterData.chapter.original_title,
               },
               content: chapterData.content.map((item: any) => ({
                 id: item.item_id,
@@ -213,12 +256,12 @@ export default {
                 type: item.type,
                 className: item.class_name,
                 tagName: item.tag_name,
-                styles: item.styles
-              }))
+                styles: item.styles,
+              })),
             };
 
             return new Response(JSON.stringify(response), {
-              headers: { 'Content-Type': 'application/json' }
+              headers: { 'Content-Type': 'application/json' },
             });
           }
         }
@@ -229,20 +272,27 @@ export default {
         return new Response('Internal Server Error', { status: 500 });
       }
     }
-    
+
     // Handle book URLs: /book/:uuid
     if (url.pathname.startsWith('/book/')) {
       const bookUuid = url.pathname.split('/')[2];
       if (bookUuid) {
         try {
           // Verify book exists
-          const book = await env.DB.prepare('SELECT uuid FROM books WHERE uuid = ?').bind(bookUuid).first();
+          const book = await env.DB.prepare(
+            'SELECT uuid FROM books WHERE uuid = ?'
+          )
+            .bind(bookUuid)
+            .first();
           if (book) {
             // Serve React app for valid book UUIDs
             try {
-              return env.ASSETS.fetch(new Request(new URL('/index.html', request.url)));
+              return env.ASSETS.fetch(
+                new Request(new URL('/index.html', request.url))
+              );
             } catch (error) {
-              return new Response(`
+              return new Response(
+                `
                 <!DOCTYPE html>
                 <html>
                   <head>
@@ -254,9 +304,11 @@ export default {
                     <div id="root">Loading book ${bookUuid}...</div>
                   </body>
                 </html>
-              `, {
-                headers: { 'Content-Type': 'text/html' }
-              });
+              `,
+                {
+                  headers: { 'Content-Type': 'text/html' },
+                }
+              );
             }
           } else {
             return new Response('Book not found', { status: 404 });
@@ -266,13 +318,16 @@ export default {
         }
       }
     }
-    
+
     // Handle root URL - serve React app
     if (url.pathname === '/') {
       try {
-        return env.ASSETS.fetch(new Request(new URL('/index.html', request.url)));
+        return env.ASSETS.fetch(
+          new Request(new URL('/index.html', request.url))
+        );
       } catch (error) {
-        return new Response(`
+        return new Response(
+          `
           <!DOCTYPE html>
           <html>
             <head>
@@ -284,25 +339,26 @@ export default {
               <div id="root">Loading Ovid library...</div>
             </body>
           </html>
-        `, {
-          headers: { 'Content-Type': 'text/html' }
-        });
+        `,
+          {
+            headers: { 'Content-Type': 'text/html' },
+          }
+        );
       }
     }
-    
+
     // Serve static assets
     try {
       // Try to fetch the asset first
       const asset = await env.ASSETS.fetch(request);
-      
+
       // If asset found, return it
       if (asset.status !== 404) {
         return asset;
       }
-      
+
       // Return 404 for actual missing files
       return new Response('Not found', { status: 404 });
-      
     } catch (error) {
       // Fallback if ASSETS is not available (local dev)
       return new Response('Asset not found', { status: 404 });

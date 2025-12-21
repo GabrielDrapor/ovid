@@ -70,7 +70,9 @@ export class Translator {
     this.kvStore = new KVStore();
 
     if (this.config.apiKey) {
-      console.log(`🔧 Translator configured with base URL: ${this.config.baseURL}`);
+      console.log(
+        `🔧 Translator configured with base URL: ${this.config.baseURL}`
+      );
       console.log(`🤖 Using model: ${this.config.model}`);
     } else {
       console.warn(
@@ -86,10 +88,7 @@ export class Translator {
     text: string,
     options: TranslateOptions = {}
   ): Promise<string> {
-    const {
-      sourceLanguage = 'English',
-      targetLanguage = 'Chinese',
-    } = options;
+    const { sourceLanguage = 'English', targetLanguage = 'Chinese' } = options;
 
     // If no API configured, return mock translation
     if (!this.config.apiKey) {
@@ -100,9 +99,10 @@ export class Translator {
       const targetLang = SUPPORTED_LANGUAGES[targetLanguage] || targetLanguage;
 
       // Prepare context string
-      const contextStr = options.context && options.context.length > 0
-        ? `\nContext (Preceding text):\n${options.context.join('\n')}\n`
-        : '';
+      const contextStr =
+        options.context && options.context.length > 0
+          ? `\nContext (Preceding text):\n${options.context.join('\n')}\n`
+          : '';
 
       const translation = await this.llmClient.chat({
         messages: [
@@ -129,11 +129,15 @@ Rules:
             type: 'function',
             function: {
               name: 'kv_read',
-              description: 'Read a translation for a proper noun (name, place, specific term) from the glossary.',
+              description:
+                'Read a translation for a proper noun (name, place, specific term) from the glossary.',
               parameters: {
                 type: 'object',
                 properties: {
-                  key: { type: 'string', description: 'The proper noun in source language' },
+                  key: {
+                    type: 'string',
+                    description: 'The proper noun in source language',
+                  },
                 },
                 required: ['key'],
               },
@@ -147,12 +151,19 @@ Rules:
             type: 'function',
             function: {
               name: 'kv_write',
-              description: 'Save a translation for a proper noun to the glossary for future consistency.',
+              description:
+                'Save a translation for a proper noun to the glossary for future consistency.',
               parameters: {
                 type: 'object',
                 properties: {
-                  key: { type: 'string', description: 'The proper noun or name in source language' },
-                  value: { type: 'string', description: 'The translation in target language' },
+                  key: {
+                    type: 'string',
+                    description: 'The proper noun or name in source language',
+                  },
+                  value: {
+                    type: 'string',
+                    description: 'The translation in target language',
+                  },
                 },
                 required: ['key', 'value'],
               },
@@ -214,7 +225,8 @@ Rules:
             );
           } catch (error) {
             // On error, use fallback
-            results[currentIndex] = `[Translation failed: ${texts[currentIndex].substring(0, 30)}...]`;
+            results[currentIndex] =
+              `[Translation failed: ${texts[currentIndex].substring(0, 30)}...]`;
           }
 
           completed++;
@@ -249,8 +261,7 @@ Rules:
     const results: TranslatedChapter[] = new Array(chapters.length);
 
     let chapterIndex = 0;
-    let totalItems =
-      chapters.reduce((sum, ch) => sum + ch.items.length + 1, 0); // +1 for title
+    let totalItems = chapters.reduce((sum, ch) => sum + ch.items.length + 1, 0); // +1 for title
     let completedItems = 0;
 
     const chapterWorkers = Array.from(

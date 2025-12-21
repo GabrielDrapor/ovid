@@ -479,25 +479,25 @@ h3.chapter-text {
     margin: 20px;
     max-height: 85vh;
   }
-  
+
   .chapters-header {
     padding: 16px 20px;
   }
-  
+
   .chapter-item {
     padding: 12px;
     gap: 12px;
   }
-  
+
   .chapter-number {
     font-size: 13px;
     min-width: 18px;
   }
-  
+
   .chapter-title-original {
     font-size: 15px;
   }
-  
+
   .chapter-title-translated {
     font-size: 13px;
   }

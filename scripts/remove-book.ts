@@ -75,7 +75,9 @@ class BookRemover {
         process.exit(1);
       }
 
-      console.log(`   ✅ Found book: "${bookInfo.title}" by ${bookInfo.author}`);
+      console.log(
+        `   ✅ Found book: "${bookInfo.title}" by ${bookInfo.author}`
+      );
       console.log(
         `   📊 Chapters: ${bookInfo.chapterCount}, Content items: ${bookInfo.contentCount}`
       );
@@ -135,7 +137,8 @@ class BookRemover {
     const accountId =
       process.env.CLOUDFLARE_ACCOUNT_ID || process.env.CF_ACCOUNT_ID;
     const databaseId =
-      process.env.CLOUDFLARE_D1_DATABASE_ID || this.readDatabaseIdFromWrangler();
+      process.env.CLOUDFLARE_D1_DATABASE_ID ||
+      this.readDatabaseIdFromWrangler();
 
     if (!token) {
       throw new Error(
@@ -203,7 +206,9 @@ class BookRemover {
       let languagePair: string;
 
       try {
-        const resultsMatch = bookResult.match(/\[\s*{\s*"results":\s*\[(.*?)\]/s);
+        const resultsMatch = bookResult.match(
+          /\[\s*{\s*"results":\s*\[(.*?)\]/s
+        );
         if (!resultsMatch) return null;
 
         const resultsContent = resultsMatch[1];
@@ -304,7 +309,9 @@ class BookRemover {
         `   This will permanently delete "${bookInfo.title}" and all its content.`
       );
       console.log(`   - ${bookInfo.chapterCount} chapters will be deleted`);
-      console.log(`   - ${bookInfo.contentCount} content items will be deleted`);
+      console.log(
+        `   - ${bookInfo.contentCount} content items will be deleted`
+      );
       console.log('');
 
       rl.question(
@@ -363,7 +370,9 @@ class BookRemover {
     try {
       // Remove in correct order due to foreign key constraints
       console.log('   🗑️  Removing content items...');
-      await this.queryRemote(`DELETE FROM content_items WHERE book_id = ${bookId};`);
+      await this.queryRemote(
+        `DELETE FROM content_items WHERE book_id = ${bookId};`
+      );
 
       console.log('   🗑️  Removing chapters...');
       await this.queryRemote(`DELETE FROM chapters WHERE book_id = ${bookId};`);
@@ -447,7 +456,8 @@ async function main() {
     const remover = new BookRemover(options.uuid, mode);
     await remover.remove();
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    const errorMessage =
+      error instanceof Error ? error.message : 'Unknown error';
     console.error('❌ Error:', errorMessage);
     process.exit(1);
   }
