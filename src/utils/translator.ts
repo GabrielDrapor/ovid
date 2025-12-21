@@ -3,7 +3,8 @@
  * Provides translation capabilities using OpenAI-compatible APIs
  */
 
-import { LLMClient } from './LLMClient';
+import { LLMClient, Tool } from './LLMClient';
+import { KVStore } from './KVStore';
 
 export const SUPPORTED_LANGUAGES: Record<string, string> = {
   zh: 'Chinese',
@@ -29,6 +30,7 @@ export interface TranslateOptions {
   targetLanguage?: string;
   onProgress?: (progress: number, current: number, total: number) => void;
   chapterConcurrency?: number;
+  context?: string[]; // Previous paragraphs
 }
 
 export interface Chapter {
@@ -44,6 +46,7 @@ export interface TranslatedChapter {
 export class Translator {
   private config: Required<TranslatorConfig>;
   private llmClient: LLMClient;
+  private kvStore: KVStore;
 
   constructor(config: TranslatorConfig = {}) {
     this.config = {
@@ -63,6 +66,8 @@ export class Translator {
       model: this.config.model,
       temperature: this.config.temperature,
     });
+
+    this.kvStore = new KVStore();
 
     if (this.config.apiKey) {
       console.log(`🔧 Translator configured with base URL: ${this.config.baseURL}`);
@@ -94,6 +99,11 @@ export class Translator {
     try {
       const targetLang = SUPPORTED_LANGUAGES[targetLanguage] || targetLanguage;
 
+      // Prepare context string
+      const contextStr = options.context && options.context.length > 0
+        ? `\nContext (Preceding text):\n${options.context.join('\n')}\n`
+        : '';
+
       const translation = await this.llmClient.chat({
         messages: [
           {
@@ -103,14 +113,56 @@ Rules:
 1. Translate EXACTLY what is provided. Do not add summaries, explanations, or continuations.
 2. Maintain the original style, tone, and formatting.
 3. If the input is a title or short phrase, translate it as such.
-4. Return ONLY the translation.`,
+4. Return ONLY the translation.
+5. Use the provided tools to ensure consistency for proper nouns.
+   - Use 'kv_read' to check for existing translations of names/places.
+   - Use 'kv_write' to save new translations for names/places.`,
           },
           {
             role: 'user',
-            content: `Task: Translate the following text to ${targetLang}. Return ONLY the translation.\n\nText: "${text}"`,
+            content: `Task: Translate the following text to ${targetLang}. Return ONLY the translation.\n${contextStr}\nText: "${text}"`,
           },
         ],
-        max_tokens: Math.max(text.length * 2, 1000),
+        max_tokens: 8192,
+        tools: [
+          {
+            type: 'function',
+            function: {
+              name: 'kv_read',
+              description: 'Read a translation for a proper noun (name, place, specific term) from the glossary.',
+              parameters: {
+                type: 'object',
+                properties: {
+                  key: { type: 'string', description: 'The proper noun in source language' },
+                },
+                required: ['key'],
+              },
+            },
+            implementation: (args: { key: string }) => {
+              const val = this.kvStore.get(args.key);
+              return val ? `Found: ${val}` : 'Not found';
+            },
+          },
+          {
+            type: 'function',
+            function: {
+              name: 'kv_write',
+              description: 'Save a translation for a proper noun to the glossary for future consistency.',
+              parameters: {
+                type: 'object',
+                properties: {
+                  key: { type: 'string', description: 'The proper noun or name in source language' },
+                  value: { type: 'string', description: 'The translation in target language' },
+                },
+                required: ['key', 'value'],
+              },
+            },
+            implementation: (args: { key: string; value: string }) => {
+              this.kvStore.set(args.key, args.value);
+              return 'Saved';
+            },
+          },
+        ],
       });
 
       return translation;
@@ -149,10 +201,16 @@ Rules:
           const currentIndex = index++;
           if (currentIndex >= texts.length) break;
 
+          // Prepare context (last 2 texts)
+          // Note: In parallel execution, we can only guarantee context from the original source array
+          // We can't use translated output as context because it might not be ready.
+          const contextStart = Math.max(0, currentIndex - 2);
+          const context = texts.slice(contextStart, currentIndex);
+
           try {
             results[currentIndex] = await this.translateText(
               texts[currentIndex],
-              options
+              { ...options, context }
             );
           } catch (error) {
             // On error, use fallback

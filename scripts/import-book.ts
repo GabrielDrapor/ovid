@@ -10,7 +10,8 @@
  *   ts-node scripts/import-book.ts --file="book.txt" --title="Book Title" --author="Author" --target="es"
  */
 
-import 'dotenv/config';
+import * as dotenv from 'dotenv';
+dotenv.config({ override: true });
 import * as fs from 'fs';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';

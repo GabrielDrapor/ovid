@@ -74,3 +74,4 @@ _redirects
 database/migration_scripts
 exports
 epubs
+.ovid_glossary.json
