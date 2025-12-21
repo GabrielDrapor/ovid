@@ -27,37 +27,78 @@ function App() {
   const [bookUuid, setBookUuid] = useState<string | null>(null);
   const [showBookShelf, setShowBookShelf] = useState(false);
 
-  const loadChapter = async (chapterNumber: number) => {
-    if (!bookUuid) {
-      setError('No book UUID found');
+  // Sync state from URL
+  const syncFromUrl = () => {
+    const path = window.location.pathname;
+    const hash = window.location.hash;
+
+    // Root path: /
+    if (path === '/' || path === '') {
+      setShowBookShelf(true);
+      setBookUuid(null);
+      setBookContent(null);
+      setLoading(false);
       return;
     }
-    
+
+    // Book path: /book/:uuid
+    const match = path.match(/^\/book\/([^\/]+)$/);
+    if (match) {
+      const uuid = match[1];
+      let chapter = 1;
+
+      // Check for chapter in hash: #chapter-2
+      const hashMatch = hash.match(/^#chapter-(\d+)$/);
+      if (hashMatch) {
+        chapter = parseInt(hashMatch[1], 10);
+      } else if (hash.match(/^\d+$/)) {
+        // Legacy simplified hash: #2
+        chapter = parseInt(hash, 10);
+      }
+
+      setBookUuid(uuid);
+      setCurrentChapter(isNaN(chapter) ? 1 : chapter);
+      setShowBookShelf(false);
+      return;
+    }
+
+    // Fallback/Error state
+    setError('Invalid URL. Expected / or /book/:uuid');
+    setLoading(false);
+    setShowBookShelf(false);
+  };
+
+  // Initial load and event listeners
+  useEffect(() => {
+    syncFromUrl();
+
+    const handlePopState = () => syncFromUrl();
+    window.addEventListener('popstate', handlePopState);
+    // Also listen for hashchange if user manually edits hash
+    window.addEventListener('hashchange', handlePopState);
+
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+      window.removeEventListener('hashchange', handlePopState);
+    };
+  }, []);
+
+  const loadChapter = async (uuid: string, chapterNumber: number) => {
     setLoading(true);
     try {
-      const response = await fetch(`/api/book/${bookUuid}/chapter/${chapterNumber}`);
+      // API supports fetching specific chapters
+      const response = await fetch(`/api/book/${uuid}/chapter/${chapterNumber}`);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
       const data = await response.json() as BookContent;
       setBookContent(data);
-      setCurrentChapter(chapterNumber);
-      
-      // Small delay then scroll to appropriate position
+
+      // Auto-scroll logic
       setTimeout(() => {
-        // If loading next chapter, scroll to a safe position from top
-        // If loading previous chapter, scroll to a safe position from bottom
-        if (chapterNumber > currentChapter) {
-          window.scrollTo(0, 100); // Start a bit from top when going forward
-        } else if (chapterNumber < currentChapter) {
-          // Scroll to near bottom when going backward
-          const scrollHeight = document.documentElement.scrollHeight;
-          const clientHeight = window.innerHeight;
-          window.scrollTo(0, scrollHeight - clientHeight - 100);
-        } else {
-          window.scrollTo(0, 0); // Default to top
-        }
+        window.scrollTo(0, 0);
       }, 100);
+
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load chapter');
       console.error('Error fetching chapter:', err);
@@ -66,46 +107,33 @@ function App() {
     }
   };
 
+  // React to state changes to load data and save progress
   useEffect(() => {
-    // Extract book UUID from URL: /book/:uuid or /book/:uuid/chapter/:number
-    const match = window.location.pathname.match(/^\/book\/([^\/]+)(?:\/chapter\/(\d+))?$/);
-    if (match) {
-      const uuid = match[1];
-      const chapterFromUrl = match[2] ? parseInt(match[2], 10) : 1;
-      setCurrentChapter(isNaN(chapterFromUrl) ? 1 : chapterFromUrl);
-      setBookUuid(uuid);
-      setShowBookShelf(false);
-      return;
-    }
-    if (window.location.pathname === '/' || window.location.pathname === '') {
-      // Root path - show book shelf
-      setShowBookShelf(true);
-      setLoading(false);
-      return;
-    }
-    setError('Invalid book URL. Expected format: /book/:uuid or /book/:uuid/chapter/:number');
-    setLoading(false);
-  }, []);
-
-  useEffect(() => {
-    // Load chapter when book UUID or currentChapter changes
     if (bookUuid && !showBookShelf) {
-      loadChapter(currentChapter || 1);
+      // Save progress
+      if (currentChapter) {
+        localStorage.setItem(`ovid_progress_${bookUuid}`, currentChapter.toString());
+      }
+
+      // Only load if content missing or chapter changed
+      if (!bookContent || bookContent.uuid !== bookUuid || bookContent.currentChapter !== currentChapter) {
+        loadChapter(bookUuid, currentChapter);
+      }
     }
-  }, [bookUuid, showBookShelf, currentChapter]);
+  }, [bookUuid, currentChapter, showBookShelf]);
+
 
   const handleSelectBook = (uuid: string) => {
-    setBookUuid(uuid);
-    setShowBookShelf(false);
-    setBookContent(null);
-    setCurrentChapter(1);
-    setError(null);
-    setLoading(true);
-    
-    // Update URL to reflect book and chapter 1; effect will load content
-    try {
-      window.history.pushState({}, '', `/book/${uuid}/chapter/1`);
-    } catch {}
+    // Check for saved progress
+    const savedChapter = localStorage.getItem(`ovid_progress_${uuid}`);
+    const chapterToLoad = savedChapter ? parseInt(savedChapter, 10) : 1;
+
+    // Navigation: Go to book home (or saved chapter)
+    const url = `/book/${uuid}#chapter-${chapterToLoad}`;
+    window.history.pushState({}, '', url);
+
+    // Manually trigger sync because pushState doesn't fire popstate
+    syncFromUrl();
   };
 
   // Show book shelf on root path
@@ -127,15 +155,21 @@ function App() {
     );
   }
 
-  if (error || !bookContent) {
+  if (error) {
     return (
       <div className="App">
         <div style={{ textAlign: 'center', padding: '50px' }}>
-          <div>Error: {error || 'Failed to load book content'}</div>
+          <div>Error: {error}</div>
+          <button onClick={() => {
+            window.history.pushState({}, '', '/');
+            syncFromUrl();
+          }}>Go Home</button>
         </div>
       </div>
     );
   }
+
+  if (!bookContent) return null;
 
   const epubContent = bookContent.content;
   const author = bookContent.author !== 'Unknown Author' ? bookContent.author : '';
@@ -149,13 +183,13 @@ function App() {
         styles={bookContent.styles}
         currentChapter={currentChapter}
         onLoadChapter={(n: number) => {
-          // Update URL on chapter navigation and let effect trigger load
-          if (bookUuid) {
-            try {
-              window.history.replaceState({}, '', `/book/${bookUuid}/chapter/${n}`);
-            } catch {}
+          // Update URL hash without full reload
+          const newHash = `#chapter-${n}`;
+          if (window.location.hash !== newHash) {
+            window.history.pushState({}, '', newHash);
+            setCurrentChapter(n);
+            // No need to call syncFromUrl() as state update triggers useEffect
           }
-          setCurrentChapter(n);
         }}
         isLoading={loading}
         setShowOriginalTitle={setShowOriginalTitle}

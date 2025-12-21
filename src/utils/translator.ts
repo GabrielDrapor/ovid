@@ -3,6 +3,8 @@
  * Provides translation capabilities using OpenAI-compatible APIs
  */
 
+import { LLMClient } from './LLMClient';
+
 export const SUPPORTED_LANGUAGES: Record<string, string> = {
   zh: 'Chinese',
   es: 'Spanish',
@@ -41,6 +43,7 @@ export interface TranslatedChapter {
 
 export class Translator {
   private config: Required<TranslatorConfig>;
+  private llmClient: LLMClient;
 
   constructor(config: TranslatorConfig = {}) {
     this.config = {
@@ -53,6 +56,13 @@ export class Translator {
       temperature: config.temperature ?? 0.3,
       concurrency: config.concurrency ?? 8, // Default: 8 parallel translations
     };
+
+    this.llmClient = new LLMClient({
+      apiKey: this.config.apiKey,
+      baseURL: this.config.baseURL,
+      model: this.config.model,
+      temperature: this.config.temperature,
+    });
 
     if (this.config.apiKey) {
       console.log(`🔧 Translator configured with base URL: ${this.config.baseURL}`);
@@ -83,46 +93,25 @@ export class Translator {
 
     try {
       const targetLang = SUPPORTED_LANGUAGES[targetLanguage] || targetLanguage;
-      const url = `${this.config.baseURL}/chat/completions`;
 
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${this.config.apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: this.config.model,
-          messages: [
-            {
-              content: `You are a professional literary translator. Translate the following ${sourceLanguage} text to ${targetLang}.
+      const translation = await this.llmClient.chat({
+        messages: [
+          {
+            role: 'system',
+            content: `You are a professional literary translator. Translate the following ${sourceLanguage} text to ${targetLang}.
 Rules:
 1. Translate EXACTLY what is provided. Do not add summaries, explanations, or continuations.
 2. Maintain the original style, tone, and formatting.
 3. If the input is a title or short phrase, translate it as such.
 4. Return ONLY the translation.`,
-            },
-            {
-              role: 'user',
-              content: `Task: Translate the following text to ${targetLang}. Return ONLY the translation.\n\nText: "${text}"`,
-            },
-          ],
-          temperature: this.config.temperature,
-          max_tokens: Math.max(text.length * 2, 1000),
-        }),
+          },
+          {
+            role: 'user',
+            content: `Task: Translate the following text to ${targetLang}. Return ONLY the translation.\n\nText: "${text}"`,
+          },
+        ],
+        max_tokens: Math.max(text.length * 2, 1000),
       });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`API Error ${response.status}: ${errorText}`);
-      }
-
-      const data = (await response.json()) as any;
-      const translation = data.choices[0]?.message?.content?.trim();
-
-      if (!translation) {
-        throw new Error('Empty response from translation API');
-      }
 
       return translation;
     } catch (error) {
