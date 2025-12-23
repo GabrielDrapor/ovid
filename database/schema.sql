@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS books (
     language_pair TEXT NOT NULL, -- e.g., 'en-zh', 'en-es'
     styles TEXT, -- CSS styles from EPUB
     uuid TEXT, -- Unique identifier for each book
+    book_cover_img_url TEXT, -- URL or path to book cover image
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );

@@ -8,6 +8,7 @@ interface Book {
   original_title: string;
   author: string;
   language_pair: string;
+  book_cover_img_url: string | null;
   created_at: string;
   updated_at: string;
 }

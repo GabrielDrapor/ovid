@@ -164,7 +164,7 @@ async function getAllBooks(db: D1Database) {
   const books = await db
     .prepare(
       `
-    SELECT id, uuid, title, original_title, author, language_pair, created_at, updated_at
+    SELECT id, uuid, title, original_title, author, language_pair, book_cover_img_url, created_at, updated_at
     FROM books
     ORDER BY created_at DESC
   `
