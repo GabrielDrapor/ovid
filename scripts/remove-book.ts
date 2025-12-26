@@ -47,15 +47,6 @@ class BookRemover {
     if (!this.uuid) {
       throw new Error('Book UUID is required. Use --uuid="your-book-uuid"');
     }
-
-    // Basic UUID format validation
-    const uuidRegex =
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    if (!uuidRegex.test(this.uuid)) {
-      throw new Error(
-        'Invalid UUID format. Expected format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx'
-      );
-    }
   }
 
   async remove(): Promise<void> {

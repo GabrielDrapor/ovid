@@ -736,7 +736,7 @@ class BookImporter {
                   ...p,
                   id:
                     p.type === 'chapter'
-                      ? `t-${index + 1}`
+                      ? `t-${index + 1}-${i}`
                       : `p-${index + 1}-${i}`,
                 }));
               }
