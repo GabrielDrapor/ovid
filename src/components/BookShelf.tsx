@@ -9,6 +9,7 @@ interface Book {
   author: string;
   language_pair: string;
   book_cover_img_url: string | null;
+  book_spine_img_url: string | null;
   created_at: string;
   updated_at: string;
 }

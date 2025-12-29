@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS books (
     styles TEXT, -- CSS styles from EPUB
     uuid TEXT, -- Unique identifier for each book
     book_cover_img_url TEXT, -- URL or path to book cover image
+    book_spine_img_url TEXT, -- URL or path to book spine image
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );

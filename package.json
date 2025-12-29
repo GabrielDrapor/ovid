@@ -15,11 +15,10 @@
     "preview": "wrangler dev --local src/worker/index.ts --assets ./build",
     "db:local": "wrangler d1 execute ovid-db --local --command",
     "db:local:file": "wrangler d1 execute ovid-db --local --file",
-    "db:local:legacy": "wrangler d1 execute ovid-db --local --config wrangler.legacy.toml --command",
-    "db:local:legacy:file": "wrangler d1 execute ovid-db --local --config wrangler.legacy.toml --file",
     "db:init": "wrangler d1 execute ovid-db --local --file database/schema.sql",
     "db:seed": "wrangler d1 execute ovid-db --local --file database/sample_data.sql",
     "db:remote": "wrangler d1 execute ovid-db --remote --command",
+    "db:remote:file": "wrangler d1 execute ovid-db --remote --file",
     "generate-uuid": "ts-node --project scripts/tsconfig.json scripts/generate-uuid.ts",
     "import-book": "ts-node --project scripts/tsconfig.json scripts/import-book.ts",
     "list-books": "ts-node --project scripts/tsconfig.json scripts/list-books.ts --mode=local",
@@ -69,5 +68,6 @@
       "last 1 firefox version",
       "last 1 safari version"
     ]
-  }
+  },
+  "packageManager": "yarn@1.22.22+sha512.a6b2f7906b721bba3d67d4aff083df04dad64c399707841b7acf00f6b133b7ac24255f2652fa22ae3534329dc6180534e98d17432037ff6fd140556e2bb3137e"
 }

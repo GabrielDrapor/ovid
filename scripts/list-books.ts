@@ -22,6 +22,7 @@ interface Book {
   author: string;
   language_pair: string;
   book_cover_img_url: string | null;
+  book_spine_img_url: string | null;
   created_at: string;
 }
 
@@ -42,7 +43,7 @@ class BookLister {
 
     try {
       // Query all books from database
-      const booksSql = `SELECT id, uuid, title, author, language_pair, book_cover_img_url, created_at FROM books ORDER BY created_at DESC;`;
+      const booksSql = `SELECT id, uuid, title, author, language_pair, book_cover_img_url, book_spine_img_url, created_at FROM books ORDER BY created_at DESC;`;
 
       let books: Book[];
       if (this.mode === 'local') {
@@ -151,6 +152,7 @@ class BookLister {
       author: row.author || 'Unknown',
       language_pair: row.language_pair || 'unknown',
       book_cover_img_url: row.book_cover_img_url || null,
+      book_spine_img_url: row.book_spine_img_url || null,
       created_at: row.created_at || new Date().toISOString(),
     }));
   }
@@ -208,6 +210,7 @@ class BookLister {
         author: row.author || 'Unknown',
         language_pair: row.language_pair || 'unknown',
         book_cover_img_url: row.book_cover_img_url || null,
+        book_spine_img_url: row.book_spine_img_url || null,
         created_at: row.created_at || new Date().toISOString(),
       }));
 

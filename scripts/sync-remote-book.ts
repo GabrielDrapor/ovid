@@ -35,6 +35,7 @@ interface BookRow {
   styles?: string;
   uuid: string;
   book_cover_img_url?: string;
+  book_spine_img_url?: string;
 }
 
 interface ChapterRow {
@@ -409,7 +410,7 @@ async function insertRemote({
   contents,
 }: BookData): Promise<number> {
   console.log('🚀 Inserting book into remote...');
-  const insertBookSQL = `INSERT INTO books (title, original_title, author, language_pair, styles, uuid, book_cover_img_url) VALUES ('${escapeSql(book.title)}', '${escapeSql(book.original_title)}', '${escapeSql(book.author)}', '${escapeSql(book.language_pair)}', ${book.styles ? `'${escapeSql(book.styles)}'` : 'NULL'}, '${escapeSql(book.uuid)}', ${book.book_cover_img_url ? `'${escapeSql(book.book_cover_img_url)}'` : 'NULL'});`;
+  const insertBookSQL = `INSERT INTO books (title, original_title, author, language_pair, styles, uuid, book_cover_img_url, book_spine_img_url) VALUES ('${escapeSql(book.title)}', '${escapeSql(book.original_title)}', '${escapeSql(book.author)}', '${escapeSql(book.language_pair)}', ${book.styles ? `'${escapeSql(book.styles)}'` : 'NULL'}, '${escapeSql(book.uuid)}', ${book.book_cover_img_url ? `'${escapeSql(book.book_cover_img_url)}'` : 'NULL'}, ${book.book_spine_img_url ? `'${escapeSql(book.book_spine_img_url)}'` : 'NULL'});`;
   await runRemote(insertBookSQL);
 
   const bookIdRows = await runRemote(
@@ -572,7 +573,7 @@ async function main() {
     lines.push(`DELETE FROM books WHERE uuid='${bookUuid}';`);
     // Insert book
     lines.push(
-      `INSERT INTO books (title, original_title, author, language_pair, styles, uuid, book_cover_img_url) VALUES ('${escapeSql(data.book.title)}', '${escapeSql(data.book.original_title)}', '${escapeSql(data.book.author)}', '${escapeSql(data.book.language_pair)}', ${data.book.styles ? `'${escapeSql(data.book.styles)}'` : 'NULL'}, '${escapeSql(bookUuid)}', ${data.book.book_cover_img_url ? `'${escapeSql(data.book.book_cover_img_url)}'` : 'NULL'});`
+      `INSERT INTO books (title, original_title, author, language_pair, styles, uuid, book_cover_img_url, book_spine_img_url) VALUES ('${escapeSql(data.book.title)}', '${escapeSql(data.book.original_title)}', '${escapeSql(data.book.author)}', '${escapeSql(data.book.language_pair)}', ${data.book.styles ? `'${escapeSql(data.book.styles)}'` : 'NULL'}, '${escapeSql(bookUuid)}', ${data.book.book_cover_img_url ? `'${escapeSql(data.book.book_cover_img_url)}'` : 'NULL'}, ${data.book.book_spine_img_url ? `'${escapeSql(data.book.book_spine_img_url)}'` : 'NULL'});`
     );
     // Chapters
     for (const ch of data.chapters) {
