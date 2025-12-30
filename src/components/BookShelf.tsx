@@ -22,7 +22,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
   const [books, setBooks] = useState<Book[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const booksGridRef = React.useRef<HTMLDivElement>(null);
+  const [selectedBook, setSelectedBook] = useState<Book | null>(null);
 
   useEffect(() => {
     const fetchBooks = async () => {
@@ -44,134 +44,97 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
     fetchBooks();
   }, []);
 
-  useEffect(() => {
-    const handleScroll = () => {
-      if (!booksGridRef.current) return;
-
-      const container = booksGridRef.current;
-      const containerRect = container.getBoundingClientRect();
-      const containerCenter = containerRect.left + containerRect.width / 2;
-
-      const bookCards = container.querySelectorAll('.book-card');
-      bookCards.forEach((card) => {
-        const cardRect = card.getBoundingClientRect();
-        const cardCenter = cardRect.left + cardRect.width / 2;
-        const distance = Math.abs(containerCenter - cardCenter);
-        const maxDistance = containerRect.width / 2;
-
-        // Calculate scale: 1.0 at center, down to 0.7 at edges
-        const normalizedDistance = Math.min(distance / maxDistance, 1);
-        const scale = 1 - (normalizedDistance * 0.3); // 1.0 to 0.7
-
-        (card as HTMLElement).style.transform = `scale(${scale})`;
-      });
-    };
-
-    const container = booksGridRef.current;
-    if (container) {
-      handleScroll(); // Initial scale
-      container.addEventListener('scroll', handleScroll);
-      window.addEventListener('resize', handleScroll);
-    }
-
-    return () => {
-      if (container) {
-        container.removeEventListener('scroll', handleScroll);
-        window.removeEventListener('resize', handleScroll);
-      }
-    };
-  }, [books]);
-
-  if (loading) {
-    return (
-      <div className="bookshelf">
-        <div className="bookshelf-loading">
-          <div className="loading-spinner"></div>
-          <p>Loading your library...</p>
-        </div>
-      </div>
-    );
-  }
-
   if (error) {
     return (
-      <div className="bookshelf">
-        <div className="bookshelf-error">
-          <h2>Unable to load books</h2>
-          <p>{error}</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (books.length === 0) {
-    return (
-      <div className="bookshelf">
-        <div className="bookshelf-empty">
-          <h2>Your Library is Empty</h2>
-          <p>
-            Add some books to get started with your bilingual reading journey.
-          </p>
-        </div>
+      <div className="bookshelf-error">
+        <h2>Unable to load books</h2>
+        <p>{error}</p>
       </div>
     );
   }
 
   return (
-    <div className="bookshelf">
-      <header className="bookshelf-header">
-        <h1>Ovid Library</h1>
-        <p>Your bilingual reading collection</p>
-      </header>
-
-      <div className="books-grid" ref={booksGridRef}>
-        {books.map((book) => (
-          <div
-            key={book.uuid}
-            className="book-card"
-            onClick={() => onSelectBook(book.uuid)}
-            role="button"
-            tabIndex={0}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                onSelectBook(book.uuid);
-              }
-            }}
-          >
-            <div
-              className={`book-cover ${!book.book_cover_img_url ? 'default-cover' : ''}`}
-              style={
-                book.book_cover_img_url
-                  ? {
-                      backgroundImage: `url(${book.book_cover_img_url})`,
-                      backgroundSize: 'cover',
-                      backgroundPosition: 'center',
-                      backgroundRepeat: 'no-repeat'
-                    }
-                  : undefined
-              }
-            >
-              {!book.book_cover_img_url && (
-                <div className="default-cover-content">
-                  <svg className="book-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M4 19.5C4 18.837 4.26339 18.2011 4.73223 17.7322C5.20107 17.2634 5.83696 17 6.5 17H20" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                    <path d="M6.5 2H20V22H6.5C5.83696 22 5.20107 21.7366 4.73223 21.2678C4.26339 20.7989 4 20.163 4 19.5V4.5C4 3.83696 4.26339 3.20107 4.73223 2.73223C5.20107 2.26339 5.83696 2 6.5 2Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                  </svg>
-                  <div className="default-cover-text">
-                    <h3 className="default-cover-title">{book.title}</h3>
-                    {book.original_title && book.original_title !== book.title && (
-                      <h4 className="default-cover-original-title">{book.original_title}</h4>
-                    )}
-                    <p className="default-cover-author">{book.author}</p>
+    <div className="bookshelf-container">
+      <div
+        className="bookshelf-wall"
+        style={{ backgroundImage: 'url(/bookcase_bg.jpeg)' }}
+      >
+        {!loading && books.length === 0 ? (
+          <div className="bookshelf-empty">
+            {/* Empty State, effectively just the background with a message if needed */}
+          </div>
+        ) : (
+          <div className="books-grid" style={{ opacity: loading ? 0 : 1, transition: 'opacity 0.5s ease-in-out' }}>
+            {books.map((book) => (
+              <div
+                key={book.uuid}
+                className={`book-spine-container ${selectedBook?.uuid === book.uuid ? 'selected' : ''}`}
+                onClick={() => setSelectedBook(book)}
+              >
+                {book.book_spine_img_url ? (
+                  <img
+                    src={book.book_spine_img_url}
+                    alt={`${book.title} spine`}
+                    className="book-spine-img"
+                  />
+                ) : (
+                  <div className="book-spine-default" style={{ backgroundColor: stringToColor(book.title) }}>
+                    <span className="spine-title">{book.title}</span>
                   </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className={`book-preview-sidebar ${selectedBook ? 'open' : ''}`}>
+        {selectedBook ? (
+          <div className="preview-content">
+            <button className="close-preview" onClick={() => setSelectedBook(null)}>×</button>
+
+            <div className="preview-cover">
+              {selectedBook.book_cover_img_url ? (
+                <img src={selectedBook.book_cover_img_url} alt={selectedBook.title} />
+              ) : (
+                <div className="default-preview-cover">
+                  <h3>{selectedBook.title}</h3>
+                  <p>{selectedBook.author}</p>
                 </div>
               )}
             </div>
+
+            <div className="preview-info">
+              <h2>{selectedBook.title}</h2>
+              {selectedBook.original_title && <h3>{selectedBook.original_title}</h3>}
+              <p className="author">By {selectedBook.author}</p>
+
+              <button
+                className="enter-book-btn"
+                onClick={() => onSelectBook(selectedBook.uuid)}
+              >
+                Start Reading
+              </button>
+            </div>
           </div>
-        ))}
+        ) : (
+          <div className="preview-placeholder">
+            <p>Select a book to view details</p>
+          </div>
+        )}
       </div>
     </div>
   );
 };
+
+// Helper to generate consistent colors for default spines
+function stringToColor(str: string) {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = str.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const c = (hash & 0x00ffffff).toString(16).toUpperCase();
+  return '#' + '00000'.substring(0, 6 - c.length) + c;
+}
 
 export default BookShelf;
