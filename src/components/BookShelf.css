@@ -15,7 +15,7 @@
 .user-auth-container {
   position: absolute;
   bottom: 30px;
-  left: 30px;
+  right: 380px;
   z-index: 200;
 }
 
@@ -86,7 +86,7 @@
 .user-dropdown {
   position: absolute;
   bottom: 54px;
-  left: 0;
+  right: 0;
   background: #222;
   border-radius: 12px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
@@ -453,7 +453,7 @@
 
   /* Mobile auth button positioning */
   .user-auth-container {
-    left: 20px;
+    right: 20px;
     bottom: 20px;
   }
 
