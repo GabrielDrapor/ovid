@@ -13,3 +13,10 @@ binding = "ASSETS"
 binding = "DB"
 database_name = "ovid-db"
 database_id = "your-database-id-here"
+
+[vars]
+APP_URL = "https://your-domain.com"
+
+# Secrets (set via `wrangler secret put`):
+# - GOOGLE_CLIENT_ID
+# - GOOGLE_CLIENT_SECRET
