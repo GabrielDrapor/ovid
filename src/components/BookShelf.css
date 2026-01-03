@@ -73,7 +73,7 @@
 .book-spine-container {
   height: 300px;
   /* Scaled slightly for smaller bg */
-  width: 60px;
+  min-width: 30px;
   /* Narrower for denser look */
   position: relative;
   cursor: pointer;
