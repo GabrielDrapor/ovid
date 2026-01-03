@@ -55,3 +55,43 @@ CREATE INDEX IF NOT EXISTS idx_content_items_type ON content_items(book_id, type
 CREATE INDEX IF NOT EXISTS idx_content_items_chapter ON content_items(chapter_id);
 CREATE INDEX IF NOT EXISTS idx_chapters_book ON chapters(book_id, order_index);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_books_uuid ON books(uuid);
+
+-- Users table for Google OAuth authentication
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    google_id TEXT UNIQUE NOT NULL,
+    email TEXT UNIQUE NOT NULL,
+    name TEXT,
+    picture TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Sessions table for user sessions
+CREATE TABLE IF NOT EXISTS sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    session_token TEXT UNIQUE NOT NULL,
+    expires_at DATETIME NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+);
+
+-- Reading progress table (cloud sync)
+CREATE TABLE IF NOT EXISTS reading_progress (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    book_uuid TEXT NOT NULL,
+    chapter_number INTEGER NOT NULL DEFAULT 1,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+    UNIQUE(user_id, book_uuid)
+);
+
+-- User-related indexes
+CREATE INDEX IF NOT EXISTS idx_users_google_id ON users(google_id);
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(session_token);
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_reading_progress_user ON reading_progress(user_id);
+CREATE INDEX IF NOT EXISTS idx_reading_progress_book ON reading_progress(book_uuid);

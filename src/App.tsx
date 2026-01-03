@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import BilingualReader, { ContentItem } from './components/BilingualReader';
 import BookShelf from './components/BookShelf';
+import { UserProvider } from './contexts/UserContext';
 import './App.css';
 
 interface BookContent {
@@ -146,9 +147,11 @@ function App() {
   // Show book shelf on root path
   if (showBookShelf) {
     return (
-      <div className="App">
-        <BookShelf onSelectBook={handleSelectBook} />
-      </div>
+      <UserProvider>
+        <div className="App">
+          <BookShelf onSelectBook={handleSelectBook} />
+        </div>
+      </UserProvider>
     );
   }
 
