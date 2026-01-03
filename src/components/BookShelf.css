@@ -108,8 +108,7 @@
 .book-spine-container.selected {
   transform: scale(1.05) translateY(-10px);
   z-index: 60;
-  box-shadow: 0 0 15px rgba(255, 255, 255, 0.5);
-  outline: 2px solid rgba(255, 255, 255, 0.6);
+  box-shadow: 0 0 15px rgba(255, 255, 255, 0.3);
 }
 
 .book-spine-img {
