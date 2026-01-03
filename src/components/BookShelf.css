@@ -11,12 +11,12 @@
   font-family: 'Georgia', 'Times New Roman', serif;
 }
 
-/* User Auth Container */
+/* User Auth Container - inside sidebar */
 .user-auth-container {
-  position: absolute;
-  bottom: 30px;
-  right: 380px;
-  z-index: 200;
+  padding: 20px 30px 30px;
+  display: flex;
+  justify-content: center;
+  margin-top: auto;
 }
 
 .google-login-btn {
@@ -303,12 +303,12 @@
 .preview-content {
   padding: 40px 30px;
   width: 100%;
-  /* Ensure content doesn't squash during transition */
-  height: 100%;
+  flex: 1;
   display: flex;
   flex-direction: column;
   position: relative;
   box-sizing: border-box;
+  overflow-y: auto;
 }
 
 .close-preview {
@@ -391,7 +391,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 100%;
+  flex: 1;
   color: #555;
   font-style: italic;
 }
@@ -453,8 +453,7 @@
 
   /* Mobile auth button positioning */
   .user-auth-container {
-    right: 20px;
-    bottom: 20px;
+    padding: 15px 20px 20px;
   }
 
   .google-login-btn {
