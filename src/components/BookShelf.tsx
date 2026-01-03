@@ -25,27 +25,74 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
   const [error, setError] = useState<string | null>(null);
   const [selectedBook, setSelectedBook] = useState<Book | null>(null);
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState('');
   const { user, loading: userLoading, login, logout } = useUser();
 
-  useEffect(() => {
-    const fetchBooks = async () => {
-      try {
-        const response = await fetch('/api/books');
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        const booksData = (await response.json()) as Book[];
-        setBooks(booksData);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to fetch books');
-        console.error('Error fetching books:', err);
-      } finally {
-        setLoading(false);
+  const fetchBooks = async () => {
+    try {
+      const response = await fetch('/api/books');
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
-    };
+      const booksData = (await response.json()) as Book[];
+      setBooks(booksData);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch books');
+      console.error('Error fetching books:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
+  useEffect(() => {
     fetchBooks();
   }, []);
+
+  const handleUploadBook = async (file: File) => {
+    if (!user) {
+      alert('Please login to upload books');
+      return;
+    }
+
+    setUploading(true);
+    setUploadProgress('Uploading and processing EPUB...');
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('targetLanguage', 'zh'); // Default to Chinese
+      formData.append('sourceLanguage', 'en');
+
+      const response = await fetch('/api/books/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json() as { error?: string };
+        throw new Error(errorData.error || 'Upload failed');
+      }
+
+      const result = await response.json() as { success: boolean; bookUuid: string };
+      setUploadProgress('Upload successful!');
+
+      // Refresh books list
+      await fetchBooks();
+
+      // Close modal after a short delay
+      setTimeout(() => {
+        setShowUploadModal(false);
+        setUploadProgress('');
+        setUploading(false);
+      }, 2000);
+    } catch (err) {
+      setUploadProgress('');
+      setUploading(false);
+      alert(err instanceof Error ? err.message : 'Upload failed');
+    }
+  };
 
   if (error) {
     return (
@@ -148,6 +195,15 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                     <span className="user-name">{user.name}</span>
                     <span className="user-email">{user.email}</span>
                   </div>
+                  <button
+                    className="upload-book-btn"
+                    onClick={() => {
+                      setShowUploadModal(true);
+                      setShowUserMenu(false);
+                    }}
+                  >
+                    Upload Book
+                  </button>
                   <button className="logout-btn" onClick={logout}>
                     Logout
                   </button>
@@ -167,6 +223,51 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
           )}
         </div>
       </div>
+
+      {/* Upload Modal */}
+      {showUploadModal && (
+        <div className="upload-modal-overlay" onClick={() => !uploading && setShowUploadModal(false)}>
+          <div className="upload-modal-content" onClick={(e) => e.stopPropagation()}>
+            <h2>Upload EPUB Book</h2>
+            {!uploading ? (
+              <div className="upload-area">
+                <input
+                  type="file"
+                  accept=".epub"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      handleUploadBook(file);
+                    }
+                  }}
+                  id="epub-file-input"
+                  style={{ display: 'none' }}
+                />
+                <label htmlFor="epub-file-input" className="upload-label">
+                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="17 8 12 3 7 8" />
+                    <line x1="12" y1="3" x2="12" y2="15" />
+                  </svg>
+                  <span>Click to select EPUB file</span>
+                  <span className="upload-hint">The book will be automatically translated to Chinese</span>
+                </label>
+                <button
+                  className="cancel-upload-btn"
+                  onClick={() => setShowUploadModal(false)}
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <div className="upload-progress">
+                <div className="spinner"></div>
+                <p>{uploadProgress}</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

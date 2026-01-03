@@ -12,8 +12,10 @@ CREATE TABLE IF NOT EXISTS books (
     uuid TEXT, -- Unique identifier for each book
     book_cover_img_url TEXT, -- URL or path to book cover image
     book_spine_img_url TEXT, -- URL or path to book spine image
+    user_id INTEGER, -- NULL = admin/public book, non-NULL = private user book
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
 -- Chapters table to track chapter information
@@ -55,6 +57,7 @@ CREATE INDEX IF NOT EXISTS idx_content_items_type ON content_items(book_id, type
 CREATE INDEX IF NOT EXISTS idx_content_items_chapter ON content_items(chapter_id);
 CREATE INDEX IF NOT EXISTS idx_chapters_book ON chapters(book_id, order_index);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_books_uuid ON books(uuid);
+CREATE INDEX IF NOT EXISTS idx_books_user_id ON books(user_id);
 
 -- Users table for Google OAuth authentication
 CREATE TABLE IF NOT EXISTS users (
