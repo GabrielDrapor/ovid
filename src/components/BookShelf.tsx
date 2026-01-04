@@ -178,15 +178,6 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
           {userLoading ? null : user ? (
             <div className="user-menu-wrapper">
               <button
-                className="upload-book-btn-icon"
-                onClick={() => setShowUploadModal(true)}
-                title="Upload Book"
-              >
-                <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
-                  <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
-                </svg>
-              </button>
-              <button
                 className="user-avatar-btn"
                 onClick={() => setShowUserMenu(!showUserMenu)}
               >
@@ -197,6 +188,17 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                     {user.name?.charAt(0) || user.email.charAt(0)}
                   </div>
                 )}
+              </button>
+              <button
+                className="upload-book-btn-icon"
+                onClick={() => setShowUploadModal(true)}
+                title="Upload Book"
+              >
+                <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                  <polyline points="17 8 12 3 7 8"/>
+                  <line x1="12" y1="3" x2="12" y2="15"/>
+                </svg>
               </button>
               {showUserMenu && (
                 <div className="user-dropdown">
