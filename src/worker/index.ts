@@ -464,6 +464,13 @@ async function handleBookUpload(
     // Read file as ArrayBuffer
     const buffer = await file.arrayBuffer();
 
+    // Debug: Log environment variable configuration
+    console.log('📝 Environment configuration:');
+    console.log('  API Key present:', !!env.OPENAI_API_KEY);
+    console.log('  API Key length:', env.OPENAI_API_KEY?.length);
+    console.log('  API Base URL:', env.OPENAI_API_BASE_URL);
+    console.log('  API Model:', env.OPENAI_MODEL);
+
     // Import BookProcessor
     const { BookProcessor } = await import('../utils/book-processor');
     const processor = new BookProcessor(8, {
