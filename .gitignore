@@ -67,6 +67,7 @@ _redirects
 # Environment and secrets
 .env*
 !.env.example
+.dev.vars
 
 # Local development
 .local
