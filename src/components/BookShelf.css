@@ -46,6 +46,34 @@
 
 .user-menu-wrapper {
   position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.upload-book-btn-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 2px solid rgba(74, 222, 128, 0.4);
+  background: rgba(74, 222, 128, 0.1);
+  color: #4ade80;
+  padding: 0;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.upload-book-btn-icon:hover {
+  border-color: #4ade80;
+  background: rgba(74, 222, 128, 0.2);
+  transform: scale(1.05);
+}
+
+.upload-book-btn-icon svg {
+  color: inherit;
 }
 
 .user-avatar-btn {
@@ -123,23 +151,6 @@
 .user-email {
   color: #888;
   font-size: 12px;
-}
-
-.upload-book-btn {
-  width: 100%;
-  padding: 14px 16px;
-  background: none;
-  border: none;
-  color: #4ade80;
-  font-size: 14px;
-  cursor: pointer;
-  text-align: left;
-  transition: background 0.2s;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.upload-book-btn:hover {
-  background: rgba(74, 222, 128, 0.1);
 }
 
 .logout-btn {
