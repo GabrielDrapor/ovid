@@ -466,7 +466,11 @@ async function handleBookUpload(
 
     // Import BookProcessor
     const { BookProcessor } = await import('../utils/book-processor');
-    const processor = new BookProcessor(8);
+    const processor = new BookProcessor(8, {
+      apiKey: env.OPENAI_API_KEY,
+      baseURL: env.OPENAI_API_BASE_URL,
+      model: env.OPENAI_MODEL,
+    });
 
     // Process the EPUB
     const processedBook = await processor.processEPUB(

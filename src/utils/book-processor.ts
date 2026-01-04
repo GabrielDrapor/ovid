@@ -57,8 +57,18 @@ export interface ProcessedBook {
 export class BookProcessor {
   private translator: Translator;
 
-  constructor(concurrency: number = 8) {
-    this.translator = new Translator({ concurrency });
+  constructor(
+    concurrency: number = 8,
+    translatorConfig?: {
+      apiKey?: string;
+      baseURL?: string;
+      model?: string;
+    }
+  ) {
+    this.translator = new Translator({
+      concurrency,
+      ...translatorConfig,
+    });
   }
 
   /**

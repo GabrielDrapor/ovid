@@ -62,12 +62,9 @@ export class Translator {
 
   constructor(config: TranslatorConfig = {}) {
     this.config = {
-      apiKey: config.apiKey || process.env.OPENAI_API_KEY || '',
-      baseURL:
-        config.baseURL ||
-        process.env.OPENAI_API_BASE_URL ||
-        'https://api.openai.com/v1',
-      model: config.model || process.env.OPENAI_MODEL || 'gpt-4o-mini',
+      apiKey: config.apiKey || '',
+      baseURL: config.baseURL || 'https://api.openai.com/v1',
+      model: config.model || 'gpt-4o-mini',
       temperature: config.temperature ?? 0.3,
       concurrency: config.concurrency ?? 8, // Default: 8 parallel translations
     };
