@@ -45,6 +45,11 @@ export class LLMClient {
 
   async chat(options: CompletionOptions): Promise<string> {
     const url = `${this.config.baseURL}/chat/completions`;
+    console.log('🔧 LLM API URL:', url);
+    console.log('🔧 LLM Model:', this.config.model);
+    console.log('🔧 API Key present:', !!this.config.apiKey);
+    console.log('🔧 API Key length:', this.config.apiKey?.length);
+
     let messages = [...options.messages];
     let iterations = 0;
     const MAX_ITERATIONS = 5; // Prevent infinite loops

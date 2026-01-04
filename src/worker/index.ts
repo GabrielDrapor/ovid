@@ -391,18 +391,212 @@ async function getChapterContent(
   };
 }
 
-async function getAllBooks(db: D1Database) {
-  const books = await db
-    .prepare(
-      `
-    SELECT id, uuid, title, original_title, author, language_pair, book_cover_img_url, book_spine_img_url, created_at, updated_at
-    FROM books
-    ORDER BY created_at DESC
-  `
-    )
-    .all();
+async function getAllBooks(db: D1Database, userId?: number) {
+  let query: string;
+  let params: any[] = [];
+
+  if (userId) {
+    // If user is logged in, show public books (user_id IS NULL) AND their own books
+    query = `
+      SELECT id, uuid, title, original_title, author, language_pair, book_cover_img_url, book_spine_img_url, created_at, updated_at
+      FROM books
+      WHERE user_id IS NULL OR user_id = ?
+      ORDER BY created_at DESC
+    `;
+    params = [userId];
+  } else {
+    // If user is not logged in, show only public books
+    query = `
+      SELECT id, uuid, title, original_title, author, language_pair, book_cover_img_url, book_spine_img_url, created_at, updated_at
+      FROM books
+      WHERE user_id IS NULL
+      ORDER BY created_at DESC
+    `;
+  }
+
+  const stmt = db.prepare(query);
+  const books = params.length > 0 ? await stmt.bind(...params).all() : await stmt.all();
 
   return books.results;
+}
+
+// ===================
+// Book Upload Handler
+// ===================
+
+async function handleBookUpload(
+  request: Request,
+  env: Env
+): Promise<Response> {
+  // Check authentication
+  const user = await getCurrentUser(env.DB, request);
+  if (!user) {
+    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  try {
+    const formData = await request.formData();
+    const file = formData.get('file') as File;
+    const targetLanguage = formData.get('targetLanguage') as string || 'zh';
+    const sourceLanguage = formData.get('sourceLanguage') as string || 'en';
+
+    if (!file) {
+      return new Response(JSON.stringify({ error: 'No file provided' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    // Validate file type
+    if (!file.name.endsWith('.epub')) {
+      return new Response(
+        JSON.stringify({ error: 'Only EPUB files are supported' }),
+        {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        }
+      );
+    }
+
+    // Read file as ArrayBuffer
+    const buffer = await file.arrayBuffer();
+
+    // Debug: Log environment variable configuration
+    console.log('📝 Environment configuration:');
+    console.log('  API Key present:', !!env.OPENAI_API_KEY);
+    console.log('  API Key length:', env.OPENAI_API_KEY?.length);
+    console.log('  API Base URL:', env.OPENAI_API_BASE_URL);
+    console.log('  API Model:', env.OPENAI_MODEL);
+
+    // Import BookProcessor
+    const { BookProcessor } = await import('../utils/book-processor');
+    const processor = new BookProcessor(8, {
+      apiKey: env.OPENAI_API_KEY,
+      baseURL: env.OPENAI_API_BASE_URL,
+      model: env.OPENAI_MODEL,
+    });
+
+    // Process the EPUB
+    const processedBook = await processor.processEPUB(
+      buffer,
+      targetLanguage,
+      sourceLanguage,
+      {
+        chapterConcurrency: 2,
+      }
+    );
+
+    // Generate UUID for the book
+    const bookUuid = crypto.randomUUID();
+
+    // Insert book metadata
+    await env.DB.prepare(
+      `INSERT INTO books (title, original_title, author, language_pair, styles, uuid, user_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    )
+      .bind(
+        processedBook.metadata.title,
+        processedBook.metadata.originalTitle,
+        processedBook.metadata.author,
+        processedBook.metadata.languagePair,
+        processedBook.metadata.styles,
+        bookUuid,
+        user.id
+      )
+      .run();
+
+    // Get book ID
+    const book = await env.DB.prepare('SELECT id FROM books WHERE uuid = ?')
+      .bind(bookUuid)
+      .first();
+
+    if (!book) {
+      throw new Error('Failed to create book');
+    }
+
+    const bookId = book.id as number;
+
+    // Insert chapters and content items
+    for (const chapter of processedBook.chapters) {
+      // Insert chapter
+      await env.DB.prepare(
+        `INSERT INTO chapters (book_id, chapter_number, title, original_title, order_index)
+         VALUES (?, ?, ?, ?, ?)`
+      )
+        .bind(
+          bookId,
+          chapter.number,
+          chapter.translatedTitle,
+          chapter.originalTitle,
+          chapter.number
+        )
+        .run();
+
+      // Get chapter ID
+      const chapterRow = await env.DB.prepare(
+        'SELECT id FROM chapters WHERE book_id = ? AND chapter_number = ?'
+      )
+        .bind(bookId, chapter.number)
+        .first();
+
+      if (!chapterRow) continue;
+
+      const chapterId = chapterRow.id as number;
+
+      // Insert content items
+      for (let i = 0; i < chapter.content.length; i++) {
+        const item = chapter.content[i];
+        await env.DB.prepare(
+          `INSERT INTO content_items (book_id, chapter_id, item_id, original_text, translated_text, type, tag_name, class_name, styles, order_index)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+          .bind(
+            bookId,
+            chapterId,
+            item.id,
+            item.originalText,
+            item.translatedText,
+            item.type,
+            item.tagName || 'p',
+            item.className || '',
+            item.styles || '',
+            i + 1
+          )
+          .run();
+      }
+    }
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        bookUuid,
+        message: 'Book uploaded and processed successfully',
+      }),
+      {
+        headers: { 'Content-Type': 'application/json' },
+      }
+    );
+  } catch (error) {
+    console.error('Book upload error:', error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorStack = error instanceof Error ? error.stack : undefined;
+    console.error('Error stack:', errorStack);
+
+    return new Response(
+      JSON.stringify({
+        error: 'Failed to process book',
+        details: errorMessage,
+        stack: errorStack,
+      }),
+      {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      }
+    );
+  }
 }
 
 export default {
@@ -440,9 +634,15 @@ export default {
         // Book endpoints
         // ==================
 
+        // Handle book upload
+        if (url.pathname === '/api/books/upload' && request.method === 'POST') {
+          return handleBookUpload(request, env);
+        }
+
         // Handle books list endpoint
         if (url.pathname === '/api/books') {
-          const books = await getAllBooks(env.DB);
+          const user = await getCurrentUser(env.DB, request);
+          const books = await getAllBooks(env.DB, user?.id);
           return new Response(JSON.stringify(books), {
             headers: { 'Content-Type': 'application/json' },
           });
@@ -631,4 +831,7 @@ export interface Env {
   GOOGLE_CLIENT_ID: string;
   GOOGLE_CLIENT_SECRET: string;
   APP_URL: string; // e.g., https://lib.jrd.pub
+  OPENAI_API_KEY: string;
+  OPENAI_API_BASE_URL?: string;
+  OPENAI_MODEL?: string;
 }
