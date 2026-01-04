@@ -4,9 +4,8 @@
  */
 
 import { Translator } from './translator';
-
-const JSZip = require('jszip');
-const { DOMParser } = require('xmldom');
+import JSZip from 'jszip';
+import { DOMParser } from '@xmldom/xmldom';
 
 export interface ContentItem {
   id: string;

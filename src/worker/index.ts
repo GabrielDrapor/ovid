@@ -574,10 +574,15 @@ async function handleBookUpload(
     );
   } catch (error) {
     console.error('Book upload error:', error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorStack = error instanceof Error ? error.stack : undefined;
+    console.error('Error stack:', errorStack);
+
     return new Response(
       JSON.stringify({
         error: 'Failed to process book',
-        details: error instanceof Error ? error.message : 'Unknown error',
+        details: errorMessage,
+        stack: errorStack,
       }),
       {
         status: 500,
