@@ -4,7 +4,19 @@
  */
 
 import { LLMClient, Tool } from './LLMClient';
-import { KVStore } from './KVStore';
+
+// Simple in-memory KV store for glossary (Worker-compatible)
+class SimpleKVStore {
+  private data: Record<string, string> = {};
+
+  get(key: string): string | null {
+    return this.data[key] || null;
+  }
+
+  set(key: string, value: string): void {
+    this.data[key] = value;
+  }
+}
 
 export const SUPPORTED_LANGUAGES: Record<string, string> = {
   zh: 'Chinese',
@@ -46,7 +58,7 @@ export interface TranslatedChapter {
 export class Translator {
   private config: Required<TranslatorConfig>;
   private llmClient: LLMClient;
-  private kvStore: KVStore;
+  private kvStore: SimpleKVStore;
 
   constructor(config: TranslatorConfig = {}) {
     this.config = {
@@ -67,7 +79,8 @@ export class Translator {
       temperature: this.config.temperature,
     });
 
-    this.kvStore = new KVStore();
+    // Use simple in-memory store (Worker-compatible)
+    this.kvStore = new SimpleKVStore();
 
     if (this.config.apiKey) {
       console.log(
