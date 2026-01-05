@@ -52,20 +52,38 @@ The bilingual reader features:
 
 ## API Endpoints
 
-- `GET /api/book/chapter/{number}` - Load specific chapter content
-- `GET /api/book/chapters` - Get list of all chapters
-- `GET /api/book/content` - Get full book content (legacy)
+### Authentication
+- `GET /api/auth/google` - Start Google OAuth flow
+- `GET /api/auth/callback/google` - OAuth callback handler
+- `GET /api/auth/me` - Get current user info
+- `POST /api/auth/logout` - Logout user
+
+### Books
+- `GET /api/books` - List all books (public + user's private books)
+- `POST /api/books/upload` - Upload EPUB file (requires auth, admin-only)
+- `GET /api/book/:uuid/content` - Get full book content
+- `GET /api/book/:uuid/chapters` - Get list of all chapters
+- `GET /api/book/:uuid/chapter/:number` - Load specific chapter content
 
 ## Database Schema
 
-- **books**: Book metadata (title, author, styles, uuid, created_at, updated_at)
+- **users**: User accounts via Google OAuth (google_id, email, name, picture)
+- **sessions**: Auth sessions (user_id, session_token, expires_at)
+- **books**: Book metadata (title, author, styles, uuid, user_id, created_at, updated_at)
 - **chapters**: Chapter information (chapter_number, titles, order_index)
 - **content_items**: Individual paragraphs with bilingual text (original_text, translated_text)
 
 ## Environment Variables
 
-Required for book translation and remote operations:
+### Cloudflare Worker (wrangler secrets)
+- `GOOGLE_CLIENT_ID` - Google OAuth client ID
+- `GOOGLE_CLIENT_SECRET` - Google OAuth client secret
+- `APP_URL` - Application URL (e.g., `https://lib.jrd.pub`)
+- `OPENAI_API_KEY` - API key for web upload translation
+- `OPENAI_API_BASE_URL` - API endpoint (default: `https://api.openai.com/v1`)
+- `OPENAI_MODEL` - Translation model (default: `gpt-4o-mini`)
 
+### Local CLI scripts (.env)
 - `OPENAI_API_KEY` - API key for translation (OpenAI or compatible provider)
 - `OPENAI_API_BASE_URL` - API endpoint (default: `https://api.openai.com/v1`)
 - `OPENAI_MODEL` - Translation model (default: `gpt-4o-mini`)
