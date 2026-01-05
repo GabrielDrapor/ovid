@@ -26,9 +26,11 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
   const [selectedBook, setSelectedBook] = useState<Book | null>(null);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
+  const [showCreditsModal, setShowCreditsModal] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState('');
-  const { user, loading: userLoading, login, logout } = useUser();
+  const [uploadError, setUploadError] = useState<{ message: string; required?: number; available?: number } | null>(null);
+  const { user, loading: userLoading, login, logout, credits, creditPackages, purchaseCredits, refreshCredits } = useUser();
 
   const fetchBooks = async () => {
     try {
@@ -58,6 +60,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
 
     setUploading(true);
     setUploadProgress('Uploading and processing EPUB...');
+    setUploadError(null);
 
     try {
       const formData = new FormData();
@@ -71,21 +74,36 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
       });
 
       if (!response.ok) {
-        const errorData = await response.json() as { error?: string };
+        const errorData = await response.json() as { error?: string; required?: number; available?: number; message?: string };
+
+        // Handle insufficient credits error
+        if (response.status === 402) {
+          setUploadError({
+            message: errorData.message || 'Insufficient credits',
+            required: errorData.required,
+            available: errorData.available,
+          });
+          setUploading(false);
+          setUploadProgress('');
+          return;
+        }
+
         throw new Error(errorData.error || 'Upload failed');
       }
 
-      const result = await response.json() as { success: boolean; bookUuid: string };
-      setUploadProgress('Upload successful!');
+      const result = await response.json() as { success: boolean; bookUuid: string; creditsUsed?: number };
+      setUploadProgress(`Upload successful! Used ${result.creditsUsed?.toLocaleString() || 0} credits.`);
 
-      // Refresh books list
+      // Refresh books list and credits
       await fetchBooks();
+      await refreshCredits();
 
       // Close modal after a short delay
       setTimeout(() => {
         setShowUploadModal(false);
         setUploadProgress('');
         setUploading(false);
+        setUploadError(null);
       }, 2000);
     } catch (err) {
       setUploadProgress('');
@@ -189,25 +207,30 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                   </div>
                 )}
               </button>
-              {user.email === 'diary.sjr@gmail.com' && (
-                <button
-                  className="upload-book-btn-icon"
-                  onClick={() => setShowUploadModal(true)}
-                  title="Upload Book"
-                >
-                  <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                    <polyline points="17 8 12 3 7 8"/>
-                    <line x1="12" y1="3" x2="12" y2="15"/>
-                  </svg>
-                </button>
-              )}
+              <button
+                className="upload-book-btn-icon"
+                onClick={() => setShowUploadModal(true)}
+                title="Upload Book"
+              >
+                <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                  <polyline points="17 8 12 3 7 8"/>
+                  <line x1="12" y1="3" x2="12" y2="15"/>
+                </svg>
+              </button>
               {showUserMenu && (
                 <div className="user-dropdown">
                   <div className="user-info">
                     <span className="user-name">{user.name}</span>
                     <span className="user-email">{user.email}</span>
                   </div>
+                  <div className="user-credits">
+                    <span className="credits-label">Credits</span>
+                    <span className="credits-amount">{credits?.toLocaleString() ?? '...'}</span>
+                  </div>
+                  <button className="buy-credits-btn" onClick={() => { setShowUserMenu(false); setShowCreditsModal(true); }}>
+                    Buy Credits
+                  </button>
                   <button className="logout-btn" onClick={logout}>
                     Logout
                   </button>
@@ -230,11 +253,53 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
 
       {/* Upload Modal */}
       {showUploadModal && (
-        <div className="upload-modal-overlay" onClick={() => !uploading && setShowUploadModal(false)}>
+        <div className="upload-modal-overlay" onClick={() => !uploading && !uploadError && setShowUploadModal(false)}>
           <div className="upload-modal-content" onClick={(e) => e.stopPropagation()}>
             <h2>Upload EPUB Book</h2>
-            {!uploading ? (
+            {uploadError ? (
+              <div className="upload-error">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#ff6b6b" strokeWidth="2">
+                  <circle cx="12" cy="12" r="10"/>
+                  <line x1="12" y1="8" x2="12" y2="12"/>
+                  <line x1="12" y1="16" x2="12.01" y2="16"/>
+                </svg>
+                <p className="error-message">{uploadError.message}</p>
+                {uploadError.required && uploadError.available !== undefined && (
+                  <div className="credit-details">
+                    <div className="credit-row">
+                      <span>Required:</span>
+                      <span className="required">{uploadError.required.toLocaleString()} credits</span>
+                    </div>
+                    <div className="credit-row">
+                      <span>Available:</span>
+                      <span className="available">{uploadError.available.toLocaleString()} credits</span>
+                    </div>
+                    <div className="credit-row">
+                      <span>Need:</span>
+                      <span className="needed">{(uploadError.required - uploadError.available).toLocaleString()} more credits</span>
+                    </div>
+                  </div>
+                )}
+                <div className="error-actions">
+                  <button
+                    className="buy-credits-btn-primary"
+                    onClick={() => { setShowUploadModal(false); setUploadError(null); setShowCreditsModal(true); }}
+                  >
+                    Buy Credits
+                  </button>
+                  <button
+                    className="cancel-upload-btn"
+                    onClick={() => { setShowUploadModal(false); setUploadError(null); }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : !uploading ? (
               <div className="upload-area">
+                <div className="current-credits">
+                  Your credits: <strong>{credits?.toLocaleString() ?? '...'}</strong>
+                </div>
                 <input
                   type="file"
                   accept=".epub"
@@ -255,6 +320,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                   </svg>
                   <span>Click to select EPUB file</span>
                   <span className="upload-hint">The book will be automatically translated to Chinese</span>
+                  <span className="upload-hint">Cost: ~1 credit per character</span>
                 </label>
                 <button
                   className="cancel-upload-btn"
@@ -269,6 +335,36 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                 <p>{uploadProgress}</p>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Credits Purchase Modal */}
+      {showCreditsModal && (
+        <div className="upload-modal-overlay" onClick={() => setShowCreditsModal(false)}>
+          <div className="upload-modal-content credits-modal" onClick={(e) => e.stopPropagation()}>
+            <h2>Buy Credits</h2>
+            <p className="credits-balance">Current balance: <strong>{credits?.toLocaleString() ?? '0'}</strong> credits</p>
+            <div className="credit-packages">
+              {creditPackages.map((pkg) => (
+                <button
+                  key={pkg.id}
+                  className="credit-package"
+                  onClick={() => purchaseCredits(pkg.id)}
+                >
+                  <span className="package-credits">{pkg.credits.toLocaleString()}</span>
+                  <span className="package-label">credits</span>
+                  <span className="package-price">${(pkg.price / 100).toFixed(2)}</span>
+                </button>
+              ))}
+            </div>
+            <p className="credits-info">Credits are used for book translations. ~1 credit per character.</p>
+            <button
+              className="cancel-upload-btn"
+              onClick={() => setShowCreditsModal(false)}
+            >
+              Cancel
+            </button>
           </div>
         </div>
       )}
