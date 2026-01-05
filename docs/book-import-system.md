@@ -38,19 +38,39 @@ A comprehensive system to import books (EPUB, TXT, etc.) and automatically gener
 
 ## Implementation Options
 
-### Option A: CLI Tool
+### Option A: CLI Tool (Implemented ✅)
 ```bash
-npm run import-book --file="book.epub" --target-lang="zh" --api="openai"
+yarn import-book -- --file="book.epub" --target="zh" --provider="openai"
 ```
 
-### Option B: Web Interface
-- Upload form with drag-and-drop
-- Language selection
-- Translation provider choice
-- Progress tracking
-- Preview before import
+### Option B: Web Interface (Implemented ✅)
+The web upload feature is available for admin users:
+- **Access**: Only visible to admin user (diary.sjr@gmail.com)
+- **Authentication**: Requires Google OAuth login
+- **Endpoint**: `POST /api/books/upload`
+- **Features**:
+  - EPUB file upload via drag-and-drop or file picker
+  - Automatic translation to Chinese (default)
+  - Book is associated with the uploading user (private by default)
+  - Uses BookProcessor for EPUB parsing and translation
 
-### Option C: API Endpoint
+```typescript
+// Web upload implementation (src/worker/index.ts)
+POST /api/books/upload
+Content-Type: multipart/form-data
+- file: EPUB file
+- targetLanguage: "zh" (default)
+- sourceLanguage: "en" (default)
+
+// Response
+{
+  "success": true,
+  "bookUuid": "generated-uuid",
+  "message": "Book uploaded and processed successfully"
+}
+```
+
+### Option C: API Endpoint (Legacy Design)
 ```typescript
 POST /api/books/import
 {
@@ -191,23 +211,28 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?);
 
 ## Implementation Priority
 
-### Phase 1: MVP (2-3 weeks)
+### Phase 1: MVP ✅
 1. ✅ Basic EPUB parsing
 2. ✅ OpenAI integration
 3. ✅ Database import
 4. ✅ CLI interface
 
-### Phase 2: Enhancement (1-2 weeks)
-5. ✅ Multiple translation providers
-6. ✅ Web interface
+### Phase 2: Enhancement ✅
+5. ✅ Multiple translation providers (OpenAI-compatible APIs)
+6. ✅ Web interface (admin-only EPUB upload)
 7. ✅ Quality control
 8. ✅ Error handling
 
-### Phase 3: Advanced (2-3 weeks)
-9. ✅ Batch processing
+### Phase 3: Advanced ✅
+9. ✅ Batch processing (concurrent translation)
 10. ✅ Progress tracking
-11. ✅ Preview system
-12. ✅ Cost optimization
+11. ⬚ Preview system (not yet implemented)
+12. ✅ Cost optimization (configurable models)
+
+### Phase 4: User Management ✅
+13. ✅ Google OAuth authentication
+14. ✅ User-specific book ownership
+15. ✅ Public/private book visibility
 
 ## Technical Requirements
 

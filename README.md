@@ -9,6 +9,9 @@ A bilingual reader application that helps you read books in two languages. Built
 - **Chapter Navigation**: Manual chapter navigation with curved arrow buttons
 - **Responsive Design**: Works on both desktop and mobile devices
 - **Multiple Languages**: Support for various language pairs (EN-ZH, EN-ES, EN-FR, etc.)
+- **User Authentication**: Google OAuth login for personalized book management
+- **Web Upload**: Upload EPUB files directly through the web interface (admin only)
+- **Book Privacy**: Public books visible to all, private books visible only to owners
 
 ## Getting Started
 
@@ -194,12 +197,21 @@ For advanced users, you can also manually import bilingual content:
 
 ### Environment Variables
 
+**For Cloudflare Worker (set via `wrangler secret put` or in `wrangler.toml`):**
+- `GOOGLE_CLIENT_ID` - Google OAuth client ID (required for authentication)
+- `GOOGLE_CLIENT_SECRET` - Google OAuth client secret (required for authentication)
+- `APP_URL` - Application URL, e.g., `https://lib.jrd.pub` (required)
+- `OPENAI_API_KEY` - OpenAI API key for web upload translation (required for web upload)
+- `OPENAI_API_BASE_URL` - OpenAI API base URL (optional, defaults to https://api.openai.com/v1)
+- `OPENAI_MODEL` - Translation model to use (optional, defaults to gpt-4o-mini)
+
+**For local development and CLI scripts (set in `.env`):**
 - `CLOUDFLARE_D1_DATABASE_ID` - Your D1 database ID for local development
 - `CLOUDFLARE_ACCOUNT_ID` - Your Cloudflare account ID (required for remote operations)
 - `CLOUDFLARE_API_TOKEN` - Your Cloudflare API token (required for remote database operations)
-- `OPENAI_API_KEY` - OpenAI API key for book translation (optional)
-- `OPENAI_API_BASE_URL` - OpenAI API base URL (optional, defaults to https://api.openai.com/v1)
-- `OPENAI_MODEL` - Translation model to use (optional, defaults to gpt-4o-mini)
+- `OPENAI_API_KEY` - OpenAI API key for book translation
+- `OPENAI_API_BASE_URL` - OpenAI API base URL (optional)
+- `OPENAI_MODEL` - Translation model to use (optional)
 
 ### Contributing
 

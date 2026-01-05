@@ -7,12 +7,15 @@
 ### Key Features
 - **EPUB Import System**: Parse EPUB files and extract chapter structure from TOC/nav.html
 - **Bilingual Content**: Store both original and translated text for each paragraph
-- **Interactive Reader**: Click paragraphs to switch between languages instantly  
+- **Interactive Reader**: Click paragraphs to switch between languages instantly
 - **Chapter Navigation**: Navigate through books with proper chapter ordering
 - **Deep Links**: Clean URLs like `/book/:uuid/chapter/:number` for direct navigation
 - **Translation Integration**: Automated translation using OpenAI/OpenRouter APIs with optional concurrency
 - **SQL Import/Export**: Generate SQL files for fast, reliable D1 ingestion
 - **Responsive Design**: Works on desktop and mobile devices
+- **User Authentication**: Google OAuth integration for user login
+- **Web Upload**: EPUB upload through the web interface with automatic translation (admin-only)
+- **Book Privacy**: Support for public and private books per user
 
 ## Architecture
 
@@ -25,6 +28,27 @@
 
 ### Database Schema
 ```sql
+-- Users table (for Google OAuth)
+CREATE TABLE users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  google_id TEXT UNIQUE NOT NULL,
+  email TEXT NOT NULL,
+  name TEXT,
+  picture TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Sessions table (for auth)
+CREATE TABLE sessions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  session_token TEXT UNIQUE NOT NULL,
+  expires_at DATETIME NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
 -- Books table
 CREATE TABLE books (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -33,10 +57,16 @@ CREATE TABLE books (
   original_title TEXT,
   author TEXT,
   language_pair TEXT, -- e.g., "en-zh" (English to Chinese)
-  styles TEXT -- JSON for custom styling
+  styles TEXT, -- JSON for custom styling
+  user_id INTEGER, -- NULL = public book, set = private to user
+  book_cover_img_url TEXT,
+  book_spine_img_url TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
--- Chapters table  
+-- Chapters table
 CREATE TABLE chapters (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   book_id INTEGER NOT NULL,
@@ -243,15 +273,34 @@ const handleParagraphClick = (itemId: string) => {
 
 ### Cloudflare Worker Setup (`src/worker/index.ts`)
 ```typescript
-// API routes
-app.get('/api/book/chapter/:number', getChapter);
-app.get('/api/book/chapters', getChapters);
+// Auth API routes
+GET  /api/auth/google           // Start Google OAuth flow
+GET  /api/auth/callback/google  // OAuth callback handler
+GET  /api/auth/me               // Get current user info
+POST /api/auth/logout           // Logout user
+
+// Book API routes
+GET  /api/books                 // List all books (public + user's private)
+POST /api/books/upload          // Upload EPUB file (authenticated, admin-only)
+GET  /api/book/:uuid/content    // Get full book content
+GET  /api/book/:uuid/chapters   // Get chapter list
+GET  /api/book/:uuid/chapter/:n // Get specific chapter content
 
 // Static file serving for React app
-app.get('/*', serveStatic);
+GET  /book/:uuid/*              // Serve React SPA for book URLs
+GET  /*                         // Serve static assets
 
-// Environment configuration
-const DB = env.DB; // Cloudflare D1 database binding
+// Environment configuration (Env interface)
+interface Env {
+  ASSETS: Fetcher;               // Cloudflare static assets
+  DB: D1Database;                // D1 database binding
+  GOOGLE_CLIENT_ID: string;      // OAuth client ID
+  GOOGLE_CLIENT_SECRET: string;  // OAuth client secret
+  APP_URL: string;               // e.g., https://lib.jrd.pub
+  OPENAI_API_KEY: string;        // For web upload translation
+  OPENAI_API_BASE_URL?: string;  // Optional API base URL
+  OPENAI_MODEL?: string;         // Optional model override
+}
 ```
 
 ### Database Configuration (`wrangler.toml`)
@@ -345,9 +394,21 @@ npm run db:local:legacy -- "SELECT title, uuid FROM books;"
 ## Environment Variables
 
 ```bash
-# Required for translation
-OPENAI_API_KEY=your-openai-key
-OPENAI_API_BASE_URL=https://openrouter.ai/api/v1  # or https://api.openai.com/v1
+# === Cloudflare Worker Secrets (set via wrangler secret put) ===
+GOOGLE_CLIENT_ID=xxx.apps.googleusercontent.com  # Google OAuth client ID
+GOOGLE_CLIENT_SECRET=GOCSPX-xxx                  # Google OAuth client secret
+
+# === wrangler.toml [vars] ===
+APP_URL=https://lib.jrd.pub                      # Application URL
+
+# === Worker secrets for web upload translation ===
+OPENAI_API_KEY=sk-xxx                            # Required for web EPUB upload
+OPENAI_API_BASE_URL=https://api.openai.com/v1    # Optional, defaults to OpenAI
+OPENAI_MODEL=gpt-4o-mini                         # Optional, defaults to gpt-4o-mini
+
+# === Local .env for CLI scripts ===
+OPENAI_API_KEY=your-openai-key                   # Required for CLI translation
+OPENAI_API_BASE_URL=https://openrouter.ai/api/v1 # or https://api.openai.com/v1
 OPENAI_MODEL=google/gemini-2.5-flash-lite        # or gpt-4o-mini
 
 # Development
