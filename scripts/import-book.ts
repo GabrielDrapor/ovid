@@ -22,6 +22,7 @@ import {
   SUPPORTED_LANGUAGES,
   TranslateOptions,
 } from '../src/utils/translator';
+import { KVStore } from '../src/utils/KVStore';
 
 // Ensure Wrangler writes config/logs inside the workspace to avoid permission issues
 process.env.XDG_CONFIG_HOME =
@@ -132,9 +133,10 @@ class BookImporter {
     this.sqlOut = options['sql-out'] || options['sqlOut'] || null; // e.g., path/to/book.sql
     this.applyMode = options['apply'] || null; // 'local' | 'remote' | null
 
-    // Initialize unified Translator
+    // Initialize unified Translator with file-based glossary store for persistence
     this.translator = new Translator({
       concurrency: this.itemConcurrency,
+      kvStore: new KVStore(), // Use file-based storage for persistent glossary
     });
 
     this.validateInputs();

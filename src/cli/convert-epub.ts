@@ -4,6 +4,7 @@ import { EPUBParser } from '../utils/epubParser';
 import { config } from 'dotenv';
 import * as fs from 'fs';
 import { Translator } from '../utils/translator';
+import { KVStore } from '../utils/KVStore';
 
 config();
 
@@ -44,8 +45,10 @@ async function main() {
 
     console.log(`📚 Found ${epubData.content.length} structured items`);
 
-    // Initialize translator
-    const translator = new Translator();
+    // Initialize translator with file-based glossary store for persistence
+    const translator = new Translator({
+      kvStore: new KVStore(), // Use file-based storage for persistent glossary
+    });
 
     // Progress callback
     const onProgress = (progress: number) => {

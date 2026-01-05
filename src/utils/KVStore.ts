@@ -1,7 +1,13 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { KVStoreInterface } from './translator';
 
-export class KVStore {
+/**
+ * File-based KV store for glossary persistence.
+ * Stores translations in a JSON file for persistence across script runs.
+ * Only available in Node.js environments (not Cloudflare Workers).
+ */
+export class KVStore implements KVStoreInterface {
   private filePath: string;
   private data: Record<string, string>;
 
