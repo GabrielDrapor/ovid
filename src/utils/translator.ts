@@ -5,8 +5,23 @@
 
 import { LLMClient, Tool } from './LLMClient';
 
-// Simple in-memory KV store for glossary (Worker-compatible)
-class SimpleKVStore {
+/**
+ * Interface for glossary KV store implementations.
+ * This allows dependency injection of different storage backends:
+ * - SimpleKVStore: In-memory (Worker-compatible, per-request persistence)
+ * - KVStore: File-based (local scripts, persistent across runs)
+ */
+export interface KVStoreInterface {
+  get(key: string): string | null;
+  set(key: string, value: string): void;
+}
+
+/**
+ * Simple in-memory KV store for glossary (Worker-compatible).
+ * Data persists only during a single translation session.
+ * Suitable for Worker environments or when cross-session persistence isn't needed.
+ */
+export class SimpleKVStore implements KVStoreInterface {
   private data: Record<string, string> = {};
 
   get(key: string): string | null {
@@ -35,6 +50,12 @@ export interface TranslatorConfig {
   model?: string;
   temperature?: number;
   concurrency?: number;
+  /**
+   * Optional KV store for glossary persistence.
+   * If not provided, uses in-memory SimpleKVStore (Worker-compatible).
+   * For local scripts, pass a file-based KVStore instance for persistence.
+   */
+  kvStore?: KVStoreInterface;
 }
 
 export interface TranslateOptions {
@@ -56,9 +77,9 @@ export interface TranslatedChapter {
 }
 
 export class Translator {
-  private config: Required<TranslatorConfig>;
+  private config: Omit<Required<TranslatorConfig>, 'kvStore'>;
   private llmClient: LLMClient;
-  private kvStore: SimpleKVStore;
+  private kvStore: KVStoreInterface;
 
   constructor(config: TranslatorConfig = {}) {
     this.config = {
@@ -76,8 +97,8 @@ export class Translator {
       temperature: this.config.temperature,
     });
 
-    // Use simple in-memory store (Worker-compatible)
-    this.kvStore = new SimpleKVStore();
+    // Use provided KV store or default to in-memory store (Worker-compatible)
+    this.kvStore = config.kvStore ?? new SimpleKVStore();
 
     if (this.config.apiKey) {
       console.log(
