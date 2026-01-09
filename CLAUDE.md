@@ -69,6 +69,7 @@ The bilingual reader features:
 - `GET /api/credits` - Get user's credit balance and available packages
 - `GET /api/credits/transactions` - Get user's credit transaction history
 - `POST /api/stripe/checkout` - Create Stripe checkout session for credit purchase
+- `GET /api/stripe/verify-session` - Verify checkout session and add credits (fallback for webhook)
 - `POST /api/stripe/webhook` - Stripe webhook handler (payment confirmation)
 
 ## Database Schema
