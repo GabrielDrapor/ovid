@@ -83,8 +83,8 @@ The bilingual reader features:
 ## Environment Variables
 
 ### Cloudflare Worker (wrangler secrets)
-- `GOOGLE_CLIENT_ID` - Google OAuth client ID
-- `GOOGLE_CLIENT_SECRET` - Google OAuth client secret
+- `GOOGLE_OAUTH_CLIENT_ID` - Google OAuth client ID
+- `GOOGLE_OAUTH_CLIENT_SECRET` - Google OAuth client secret
 - `APP_URL` - Application URL (e.g., `https://lib.jrd.pub`)
 - `OPENAI_API_KEY` - API key for web upload translation
 - `OPENAI_API_BASE_URL` - API endpoint (default: `https://api.openai.com/v1`)

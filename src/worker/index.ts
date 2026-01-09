@@ -60,7 +60,7 @@ async function handleGoogleAuthStart(env: Env): Promise<Response> {
   const state = generateSessionToken(); // CSRF protection
 
   const authUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
-  authUrl.searchParams.set('client_id', env.GOOGLE_CLIENT_ID);
+  authUrl.searchParams.set('client_id', env.GOOGLE_OAUTH_CLIENT_ID);
   authUrl.searchParams.set('redirect_uri', redirectUri);
   authUrl.searchParams.set('response_type', 'code');
   authUrl.searchParams.set('scope', scope);
@@ -99,8 +99,8 @@ async function handleGoogleCallback(
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
-      client_id: env.GOOGLE_CLIENT_ID,
-      client_secret: env.GOOGLE_CLIENT_SECRET,
+      client_id: env.GOOGLE_OAUTH_CLIENT_ID,
+      client_secret: env.GOOGLE_OAUTH_CLIENT_SECRET,
       code,
       grant_type: 'authorization_code',
       redirect_uri: `${env.APP_URL}/api/auth/callback/google`,
@@ -985,9 +985,41 @@ async function handleBookUpload(
   }
 }
 
+// Track if we've logged the OAuth warning (to avoid spamming logs)
+let oauthWarningLogged = false;
+
+function checkOAuthConfig(env: Env): { configured: boolean; errors: string[] } {
+  const errors: string[] = [];
+
+  if (!env.GOOGLE_OAUTH_CLIENT_ID) {
+    errors.push('GOOGLE_OAUTH_CLIENT_ID');
+  }
+  if (!env.GOOGLE_OAUTH_CLIENT_SECRET) {
+    errors.push('GOOGLE_OAUTH_CLIENT_SECRET');
+  }
+  if (!env.APP_URL) {
+    errors.push('APP_URL');
+  }
+
+  const configured = errors.length === 0;
+
+  if (!configured && !oauthWarningLogged) {
+    console.warn(
+      `[OAuth Warning] Missing required environment variables: ${errors.join(', ')}. ` +
+      'Google OAuth login will not work. Set these via `wrangler secret put` or in wrangler.toml [vars].'
+    );
+    oauthWarningLogged = true;
+  }
+
+  return { configured, errors };
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+
+    // Check OAuth config on startup (logs warning once if not configured)
+    checkOAuthConfig(env);
 
     // Handle API routes
     if (url.pathname.startsWith('/api/')) {
@@ -998,11 +1030,31 @@ export default {
 
         // Start Google OAuth flow
         if (url.pathname === '/api/auth/google') {
+          const oauthCheck = checkOAuthConfig(env);
+          if (!oauthCheck.configured) {
+            return new Response(
+              JSON.stringify({
+                error: 'Google OAuth is not configured. Please contact the administrator.',
+                missing: oauthCheck.errors,
+              }),
+              { status: 503, headers: { 'Content-Type': 'application/json' } }
+            );
+          }
           return handleGoogleAuthStart(env);
         }
 
         // Handle Google OAuth callback
         if (url.pathname === '/api/auth/callback/google') {
+          const oauthCheck = checkOAuthConfig(env);
+          if (!oauthCheck.configured) {
+            return new Response(
+              JSON.stringify({
+                error: 'Google OAuth is not configured. Please contact the administrator.',
+                missing: oauthCheck.errors,
+              }),
+              { status: 503, headers: { 'Content-Type': 'application/json' } }
+            );
+          }
           return handleGoogleCallback(request, env);
         }
 
@@ -1238,8 +1290,8 @@ export default {
 export interface Env {
   ASSETS: Fetcher;
   DB: D1Database;
-  GOOGLE_CLIENT_ID: string;
-  GOOGLE_CLIENT_SECRET: string;
+  GOOGLE_OAUTH_CLIENT_ID: string;
+  GOOGLE_OAUTH_CLIENT_SECRET: string;
   APP_URL: string; // e.g., https://lib.jrd.pub
   OPENAI_API_KEY: string;
   OPENAI_API_BASE_URL?: string;

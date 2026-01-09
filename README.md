@@ -198,8 +198,8 @@ For advanced users, you can also manually import bilingual content:
 ### Environment Variables
 
 **For Cloudflare Worker (set via `wrangler secret put` or in `wrangler.toml`):**
-- `GOOGLE_CLIENT_ID` - Google OAuth client ID (required for authentication)
-- `GOOGLE_CLIENT_SECRET` - Google OAuth client secret (required for authentication)
+- `GOOGLE_OAUTH_CLIENT_ID` - Google OAuth client ID (required for authentication)
+- `GOOGLE_OAUTH_CLIENT_SECRET` - Google OAuth client secret (required for authentication)
 - `APP_URL` - Application URL, e.g., `https://lib.jrd.pub` (required)
 - `OPENAI_API_KEY` - OpenAI API key for web upload translation (required for web upload)
 - `OPENAI_API_BASE_URL` - OpenAI API base URL (optional, defaults to https://api.openai.com/v1)
