@@ -39,6 +39,7 @@
   "dependencies": {
     "@xmldom/xmldom": "^0.8.11",
     "epub2": "^3.0.2",
+    "js-tiktoken": "^1.0.21",
     "jszip": "^3.10.1",
     "openai": "^5.10.2",
     "react": "^18.2.0",

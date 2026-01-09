@@ -1,4 +1,10 @@
 // ===================
+// Imports
+// ===================
+
+import { calculateBookCredits, TOKENS_PER_CREDIT } from '../utils/token-counter';
+
+// ===================
 // Auth Helper Functions
 // ===================
 
@@ -249,13 +255,7 @@ const CREDIT_PACKAGES = [
   { id: 'credits_15000', credits: 15000, price: 5000, currency: 'usd', name: '15,000 Credits' }, // $50
 ];
 
-// Cost per character for translation (1 credit = roughly 1 character of source text)
-const CREDITS_PER_CHARACTER = 1;
 const WELCOME_BONUS_CREDITS = 1000;
-
-function calculateBookCredits(contentLength: number): number {
-  return Math.ceil(contentLength * CREDITS_PER_CHARACTER);
-}
 
 async function getUserCredits(db: D1Database, userId: number): Promise<number> {
   const user = await db
@@ -930,18 +930,21 @@ async function handleBookUpload(
     // First, parse the EPUB to calculate required credits
     const bookData = await processor.parseEPUB(buffer);
 
-    // Calculate total content length for credit calculation
-    let totalContentLength = 0;
+    // Collect all texts for token-based credit calculation
+    const allTexts: string[] = [];
     for (const chapter of bookData.chapters) {
       for (const item of chapter.content) {
-        totalContentLength += item.text.length;
+        allTexts.push(item.text);
       }
     }
 
-    const requiredCredits = calculateBookCredits(totalContentLength);
+    // Calculate credits based on token count (1 credit = 100 tokens)
+    const model = env.OPENAI_MODEL || 'gpt-4o-mini';
+    const requiredCredits = calculateBookCredits(allTexts, targetLanguage, model);
     const userCredits = await getUserCredits(env.DB, user.id);
 
-    console.log(`📊 Book stats: ${totalContentLength} chars, ${requiredCredits} credits needed, user has ${userCredits}`);
+    const totalCharacters = allTexts.reduce((sum, text) => sum + text.length, 0);
+    console.log(`📊 Book stats: ${totalCharacters} chars, ~${requiredCredits * TOKENS_PER_CREDIT} tokens, ${requiredCredits} credits needed, user has ${userCredits}`);
 
     if (userCredits < requiredCredits) {
       return new Response(
