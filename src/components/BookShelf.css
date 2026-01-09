@@ -169,6 +169,43 @@
   background: rgba(255, 107, 107, 0.1);
 }
 
+/* User Credits in dropdown */
+.user-credits {
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.credits-label {
+  color: #888;
+  font-size: 13px;
+}
+
+.credits-amount {
+  color: #4ade80;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.buy-credits-btn {
+  width: 100%;
+  padding: 14px 16px;
+  background: none;
+  border: none;
+  color: #4ade80;
+  font-size: 14px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.2s;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.buy-credits-btn:hover {
+  background: rgba(74, 222, 128, 0.1);
+}
+
 /* Upload Modal */
 .upload-modal-overlay {
   position: fixed;
@@ -647,4 +684,161 @@
   .user-dropdown {
     min-width: 180px;
   }
+}
+
+/* Upload Error State */
+.upload-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  padding: 20px;
+  text-align: center;
+}
+
+.upload-error .error-message {
+  color: #ff6b6b;
+  font-size: 1rem;
+  margin: 0;
+  max-width: 100%;
+}
+
+.credit-details {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  padding: 15px 20px;
+  width: 100%;
+  max-width: 280px;
+}
+
+.credit-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 0;
+  font-size: 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.credit-row:last-child {
+  border-bottom: none;
+}
+
+.credit-row span:first-child {
+  color: #888;
+}
+
+.credit-row .required {
+  color: #ff6b6b;
+}
+
+.credit-row .available {
+  color: #4ade80;
+}
+
+.credit-row .needed {
+  color: #fbbf24;
+  font-weight: 600;
+}
+
+.error-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  max-width: 280px;
+}
+
+.buy-credits-btn-primary {
+  padding: 14px 24px;
+  background: #4ade80;
+  border: none;
+  border-radius: 8px;
+  color: #000;
+  cursor: pointer;
+  font-size: 1rem;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+.buy-credits-btn-primary:hover {
+  background: #22c55e;
+  transform: translateY(-2px);
+}
+
+.current-credits {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 14px;
+  margin-bottom: 15px;
+}
+
+.current-credits strong {
+  color: #4ade80;
+}
+
+/* Credits Modal */
+.credits-modal {
+  max-width: 450px;
+}
+
+.credits-balance {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 1rem;
+  text-align: center;
+  margin: 0 0 30px 0;
+}
+
+.credits-balance strong {
+  color: #4ade80;
+  font-size: 1.2rem;
+}
+
+.credit-packages {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  margin-bottom: 20px;
+}
+
+.credit-package {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  padding: 20px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 2px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.credit-package:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: #4ade80;
+  transform: translateY(-2px);
+}
+
+.package-credits {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: white;
+}
+
+.package-label {
+  color: #888;
+  font-size: 0.9rem;
+  flex: 1;
+  text-align: left;
+}
+
+.package-price {
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: #4ade80;
+}
+
+.credits-info {
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 0.85rem;
+  text-align: center;
+  margin: 0 0 20px 0;
 }

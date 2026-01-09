@@ -16,7 +16,11 @@ database_id = "your-database-id-here"
 
 [vars]
 APP_URL = "https://your-domain.com"
+# Stripe publishable key (safe to expose in client)
+STRIPE_PUBLISHABLE_KEY = "pk_test_..."
 
 # Secrets (set via `wrangler secret put`):
-# - GOOGLE_CLIENT_ID
-# - GOOGLE_CLIENT_SECRET
+# - GOOGLE_OAUTH_CLIENT_ID
+# - GOOGLE_OAUTH_CLIENT_SECRET
+# - STRIPE_SECRET_KEY
+# - STRIPE_WEBHOOK_SECRET

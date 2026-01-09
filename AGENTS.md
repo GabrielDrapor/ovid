@@ -294,8 +294,8 @@ GET  /*                         // Serve static assets
 interface Env {
   ASSETS: Fetcher;               // Cloudflare static assets
   DB: D1Database;                // D1 database binding
-  GOOGLE_CLIENT_ID: string;      // OAuth client ID
-  GOOGLE_CLIENT_SECRET: string;  // OAuth client secret
+  GOOGLE_OAUTH_CLIENT_ID: string;      // OAuth client ID
+  GOOGLE_OAUTH_CLIENT_SECRET: string;  // OAuth client secret
   APP_URL: string;               // e.g., https://lib.jrd.pub
   OPENAI_API_KEY: string;        // For web upload translation
   OPENAI_API_BASE_URL?: string;  // Optional API base URL
@@ -395,8 +395,8 @@ npm run db:local:legacy -- "SELECT title, uuid FROM books;"
 
 ```bash
 # === Cloudflare Worker Secrets (set via wrangler secret put) ===
-GOOGLE_CLIENT_ID=xxx.apps.googleusercontent.com  # Google OAuth client ID
-GOOGLE_CLIENT_SECRET=GOCSPX-xxx                  # Google OAuth client secret
+GOOGLE_OAUTH_CLIENT_ID=xxx.apps.googleusercontent.com  # Google OAuth client ID
+GOOGLE_OAUTH_CLIENT_SECRET=GOCSPX-xxx                  # Google OAuth client secret
 
 # === wrangler.toml [vars] ===
 APP_URL=https://lib.jrd.pub                      # Application URL

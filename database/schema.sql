@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS users (
     email TEXT UNIQUE NOT NULL,
     name TEXT,
     picture TEXT,
+    credits INTEGER NOT NULL DEFAULT 1000,  -- Welcome bonus credits
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -91,6 +92,20 @@ CREATE TABLE IF NOT EXISTS reading_progress (
     UNIQUE(user_id, book_uuid)
 );
 
+-- Credit transactions table to track all credit changes
+CREATE TABLE IF NOT EXISTS credit_transactions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    amount INTEGER NOT NULL,  -- positive for purchases, negative for usage
+    type TEXT NOT NULL,  -- 'signup_bonus', 'purchase', 'usage', 'refund'
+    description TEXT,
+    stripe_payment_intent_id TEXT,  -- for purchases via Stripe
+    book_uuid TEXT,  -- for usage transactions (which book consumed credits)
+    balance_after INTEGER NOT NULL,  -- user's credit balance after this transaction
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+);
+
 -- User-related indexes
 CREATE INDEX IF NOT EXISTS idx_users_google_id ON users(google_id);
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
@@ -98,3 +113,7 @@ CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(session_token);
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_reading_progress_user ON reading_progress(user_id);
 CREATE INDEX IF NOT EXISTS idx_reading_progress_book ON reading_progress(book_uuid);
+CREATE INDEX IF NOT EXISTS idx_credit_transactions_user ON credit_transactions(user_id);
+CREATE INDEX IF NOT EXISTS idx_credit_transactions_type ON credit_transactions(type);
+CREATE INDEX IF NOT EXISTS idx_credit_transactions_stripe ON credit_transactions(stripe_payment_intent_id);
+CREATE INDEX IF NOT EXISTS idx_credit_transactions_created ON credit_transactions(created_at);
