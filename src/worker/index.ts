@@ -1014,12 +1014,42 @@ function checkOAuthConfig(env: Env): { configured: boolean; errors: string[] } {
   return { configured, errors };
 }
 
+// Track if we've logged the Stripe warning (to avoid spamming logs)
+let stripeWarningLogged = false;
+
+function checkStripeConfig(env: Env): { configured: boolean; errors: string[] } {
+  const errors: string[] = [];
+
+  if (!env.STRIPE_SECRET_KEY) {
+    errors.push('STRIPE_SECRET_KEY');
+  }
+  if (!env.STRIPE_WEBHOOK_SECRET) {
+    errors.push('STRIPE_WEBHOOK_SECRET');
+  }
+  if (!env.STRIPE_PUBLISHABLE_KEY) {
+    errors.push('STRIPE_PUBLISHABLE_KEY');
+  }
+
+  const configured = errors.length === 0;
+
+  if (!configured && !stripeWarningLogged) {
+    console.warn(
+      `[Stripe Warning] Missing required environment variables: ${errors.join(', ')}. ` +
+      'Stripe payments will not work. Set these via `wrangler secret put` or in wrangler.toml [vars].'
+    );
+    stripeWarningLogged = true;
+  }
+
+  return { configured, errors };
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
-    // Check OAuth config on startup (logs warning once if not configured)
+    // Check config on startup (logs warnings once if not configured)
     checkOAuthConfig(env);
+    checkStripeConfig(env);
 
     // Handle API routes
     if (url.pathname.startsWith('/api/')) {
@@ -1084,11 +1114,31 @@ export default {
 
         // Create Stripe checkout session
         if (url.pathname === '/api/stripe/checkout' && request.method === 'POST') {
+          const stripeCheck = checkStripeConfig(env);
+          if (!stripeCheck.configured) {
+            return new Response(
+              JSON.stringify({
+                error: 'Stripe payments are not configured. Please contact the administrator.',
+                missing: stripeCheck.errors,
+              }),
+              { status: 503, headers: { 'Content-Type': 'application/json' } }
+            );
+          }
           return handleCreateCheckoutSession(request, env);
         }
 
         // Stripe webhook handler
         if (url.pathname === '/api/stripe/webhook' && request.method === 'POST') {
+          const stripeCheck = checkStripeConfig(env);
+          if (!stripeCheck.configured) {
+            return new Response(
+              JSON.stringify({
+                error: 'Stripe payments are not configured.',
+                missing: stripeCheck.errors,
+              }),
+              { status: 503, headers: { 'Content-Type': 'application/json' } }
+            );
+          }
           return handleStripeWebhook(request, env);
         }
 
