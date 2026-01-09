@@ -1017,13 +1017,13 @@ function checkOAuthConfig(env: Env): { configured: boolean; errors: string[] } {
 // Track if we've logged the Stripe warning (to avoid spamming logs)
 let stripeWarningLogged = false;
 
-function checkStripeConfig(env: Env): { configured: boolean; errors: string[] } {
+function checkStripeConfig(env: Env, requireWebhook = false): { configured: boolean; errors: string[] } {
   const errors: string[] = [];
 
   if (!env.STRIPE_SECRET_KEY) {
     errors.push('STRIPE_SECRET_KEY');
   }
-  if (!env.STRIPE_WEBHOOK_SECRET) {
+  if (requireWebhook && !env.STRIPE_WEBHOOK_SECRET) {
     errors.push('STRIPE_WEBHOOK_SECRET');
   }
   if (!env.STRIPE_PUBLISHABLE_KEY) {
@@ -1129,11 +1129,11 @@ export default {
 
         // Stripe webhook handler
         if (url.pathname === '/api/stripe/webhook' && request.method === 'POST') {
-          const stripeCheck = checkStripeConfig(env);
+          const stripeCheck = checkStripeConfig(env, true); // webhook secret required
           if (!stripeCheck.configured) {
             return new Response(
               JSON.stringify({
-                error: 'Stripe payments are not configured.',
+                error: 'Stripe webhook is not configured.',
                 missing: stripeCheck.errors,
               }),
               { status: 503, headers: { 'Content-Type': 'application/json' } }
