@@ -380,7 +380,7 @@ async function handleCreateCheckoutSession(
     // Create Stripe checkout session using fetch API
     const session = await stripeRequest(env, '/checkout/sessions', 'POST', {
       'mode': 'payment',
-      'success_url': `${env.APP_URL}?payment=success`,
+      'success_url': `${env.APP_URL}?payment=success&session_id={CHECKOUT_SESSION_ID}`,
       'cancel_url': `${env.APP_URL}?payment=cancelled`,
       'line_items[0][price_data][currency]': creditPackage.currency,
       'line_items[0][price_data][product_data][name]': creditPackage.name,
@@ -569,6 +569,109 @@ async function handleGetCreditTransactions(
   return new Response(JSON.stringify({ transactions: transactions.results }), {
     headers: { 'Content-Type': 'application/json' },
   });
+}
+
+async function handleVerifyCheckoutSession(
+  request: Request,
+  env: Env
+): Promise<Response> {
+  const user = await getCurrentUser(env.DB, request);
+  if (!user) {
+    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  const url = new URL(request.url);
+  const sessionId = url.searchParams.get('session_id');
+
+  if (!sessionId) {
+    return new Response(JSON.stringify({ error: 'Missing session_id' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  try {
+    // Retrieve checkout session from Stripe
+    const session = await stripeRequest(env, `/checkout/sessions/${sessionId}`, 'GET');
+
+    if (session.error) {
+      return new Response(JSON.stringify({ error: 'Invalid session' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    // Verify the session belongs to this user
+    if (session.metadata?.user_id !== user.id.toString()) {
+      return new Response(JSON.stringify({ error: 'Session does not belong to user' }), {
+        status: 403,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    // Check if payment was successful
+    if (session.payment_status !== 'paid') {
+      return new Response(JSON.stringify({
+        success: false,
+        status: session.payment_status,
+        message: 'Payment not completed'
+      }), {
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    // Check if we've already processed this session (avoid double credits)
+    const existingTransaction = await env.DB
+      .prepare('SELECT id FROM credit_transactions WHERE stripe_payment_intent_id = ?')
+      .bind(session.payment_intent)
+      .first();
+
+    if (existingTransaction) {
+      // Already processed, just return success
+      const credits = await getUserCredits(env.DB, user.id);
+      return new Response(JSON.stringify({
+        success: true,
+        alreadyProcessed: true,
+        credits
+      }), {
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    // Add credits to user
+    const creditsToAdd = parseInt(session.metadata.credits);
+    const packageId = session.metadata.package_id;
+
+    const creditPackage = CREDIT_PACKAGES.find(p => p.id === packageId);
+    await addCredits(
+      env.DB,
+      user.id,
+      creditsToAdd,
+      'purchase',
+      `Purchased ${creditPackage?.name || creditsToAdd + ' credits'}`,
+      session.payment_intent
+    );
+
+    const newCredits = await getUserCredits(env.DB, user.id);
+
+    return new Response(JSON.stringify({
+      success: true,
+      creditsAdded: creditsToAdd,
+      credits: newCredits
+    }), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+  } catch (error) {
+    console.error('Verify session error:', error);
+    return new Response(JSON.stringify({ error: 'Failed to verify session' }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
 }
 
 // ===================
@@ -1140,6 +1243,21 @@ export default {
             );
           }
           return handleStripeWebhook(request, env);
+        }
+
+        // Verify checkout session (for when webhook isn't available)
+        if (url.pathname === '/api/stripe/verify-session') {
+          const stripeCheck = checkStripeConfig(env);
+          if (!stripeCheck.configured) {
+            return new Response(
+              JSON.stringify({
+                error: 'Stripe is not configured.',
+                missing: stripeCheck.errors,
+              }),
+              { status: 503, headers: { 'Content-Type': 'application/json' } }
+            );
+          }
+          return handleVerifyCheckoutSession(request, env);
         }
 
         // ==================

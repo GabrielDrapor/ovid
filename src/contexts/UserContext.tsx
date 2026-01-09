@@ -74,10 +74,33 @@ export function UserProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const payment = urlParams.get('payment');
-    if (payment === 'success') {
-      // Refresh credits after successful payment
-      refreshCredits();
-      // Remove the query param from URL
+    const sessionId = urlParams.get('session_id');
+
+    if (payment === 'success' && sessionId) {
+      // Verify the checkout session and add credits
+      const verifyPayment = async () => {
+        try {
+          const response = await fetch(`/api/stripe/verify-session?session_id=${sessionId}`);
+          if (response.ok) {
+            const data = await response.json() as { success: boolean; credits?: number; creditsAdded?: number };
+            if (data.success && data.credits !== undefined) {
+              setCredits(data.credits);
+              if (data.creditsAdded) {
+                console.log(`Payment verified: ${data.creditsAdded} credits added`);
+              }
+            }
+          } else {
+            console.error('Failed to verify payment session');
+            // Fallback to refreshing credits
+            await refreshCredits();
+          }
+        } catch (error) {
+          console.error('Error verifying payment:', error);
+          await refreshCredits();
+        }
+      };
+      verifyPayment();
+      // Remove the query params from URL
       window.history.replaceState({}, '', window.location.pathname);
     } else if (payment === 'cancelled') {
       // Just remove the query param
