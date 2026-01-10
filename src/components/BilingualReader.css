@@ -39,10 +39,44 @@
   cursor: pointer;
   padding: 0;
   margin: 0;
-  transition: opacity 0.2s ease;
   text-indent: 1.5em;
   hyphens: auto;
   word-spacing: 0.1em;
+}
+
+/* Toggle animation for all clickable text elements */
+.toggleable-text {
+  transition: color 0.1s ease, opacity 0.1s ease, transform 0.1s ease;
+  transform-origin: center center;
+}
+
+.toggleable-text.toggling {
+  opacity: 0.9;
+  /* transform: scale(0.995); */
+}
+
+/* Translated text styling - dark grey color */
+.translated-text-style {
+  color: #333333;
+}
+
+/* Original text styling - maintain darker color */
+.original-text-style {
+  color: #1a1a1a;
+}
+
+/* Ensure translated styling applies to titles and chapters */
+.title-text.translated-text-style,
+.chapter-text.translated-text-style {
+  color: #333333;
+}
+
+.title-text.original-text-style {
+  color: #1a1a1a;
+}
+
+.chapter-text.original-text-style {
+  color: #333;
 }
 
 .fab-container {

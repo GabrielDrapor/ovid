@@ -45,6 +45,9 @@ const BilingualReader: React.FC<BilingualReaderProps> = ({
   const [showOriginal, setShowOriginal] = useState<{ [key: string]: boolean }>(
     {}
   );
+  const [togglingItems, setTogglingItems] = useState<{ [key: string]: boolean }>(
+    {}
+  );
 
   // Initialize showOriginal state to show original text by default when content changes
   useEffect(() => {
@@ -67,10 +70,20 @@ const BilingualReader: React.FC<BilingualReaderProps> = ({
   const readerContentRef = useRef<HTMLDivElement>(null);
 
   const toggleLanguage = (id: string) => {
-    setShowOriginal((prev) => ({
-      ...prev,
-      [id]: !prev[id],
-    }));
+    // Start the toggle animation
+    setTogglingItems((prev) => ({ ...prev, [id]: true }));
+
+    // After a brief delay, switch the text and end animation
+    setTimeout(() => {
+      setShowOriginal((prev) => ({
+        ...prev,
+        [id]: !prev[id],
+      }));
+      // End the toggling state after the text has switched
+      setTimeout(() => {
+        setTogglingItems((prev) => ({ ...prev, [id]: false }));
+      }, 50);
+    }, 150);
   };
 
   const toggleMenu = () => {
@@ -199,13 +212,25 @@ const BilingualReader: React.FC<BilingualReaderProps> = ({
             const isChinese = /[\u4e00-\u9fff]/.test(text);
 
             // Combine original EPUB classes with reader classes
-            let itemClass = 'paragraph';
+            let itemClass = 'paragraph toggleable-text';
             if (item.type === 'title') {
-              itemClass = 'title-text';
+              itemClass = 'title-text toggleable-text';
             } else if (item.type === 'chapter') {
-              itemClass = 'chapter-text';
+              itemClass = 'chapter-text toggleable-text';
             } else {
               itemClass += isChinese ? ' chinese-text' : ' english-text';
+            }
+
+            // Add toggle animation class
+            if (togglingItems[item.id]) {
+              itemClass += ' toggling';
+            }
+
+            // Add translated/original text style class
+            if (showOriginal[item.id]) {
+              itemClass += ' original-text-style';
+            } else {
+              itemClass += ' translated-text-style';
             }
 
             // Add original EPUB className if available
