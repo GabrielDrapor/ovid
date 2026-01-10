@@ -1091,6 +1091,108 @@ async function handleBookUpload(
   }
 }
 
+// ===================
+// Book Estimate Handler
+// ===================
+
+async function handleBookEstimate(
+  request: Request,
+  env: Env
+): Promise<Response> {
+  // Check authentication
+  const user = await getCurrentUser(env.DB, request);
+  if (!user) {
+    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  try {
+    const formData = await request.formData();
+    const file = formData.get('file') as File;
+    const targetLanguage = (formData.get('targetLanguage') as string) || 'zh';
+
+    if (!file) {
+      return new Response(JSON.stringify({ error: 'No file provided' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    // Validate file type
+    if (!file.name.endsWith('.epub')) {
+      return new Response(
+        JSON.stringify({ error: 'Only EPUB files are supported' }),
+        {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        }
+      );
+    }
+
+    // Read file as ArrayBuffer
+    const buffer = await file.arrayBuffer();
+
+    // Import BookProcessor (only for parsing, not translation)
+    const { BookProcessor } = await import('../utils/book-processor');
+    const processor = new BookProcessor(8, {
+      apiKey: env.OPENAI_API_KEY,
+      baseURL: env.OPENAI_API_BASE_URL,
+      model: env.OPENAI_MODEL,
+    });
+
+    // Parse the EPUB to calculate required credits
+    const bookData = await processor.parseEPUB(buffer);
+
+    // Collect all texts for token-based credit calculation
+    const allTexts: string[] = [];
+    let chapterCount = 0;
+    for (const chapter of bookData.chapters) {
+      chapterCount++;
+      for (const item of chapter.content) {
+        allTexts.push(item.text);
+      }
+    }
+
+    // Calculate credits based on token count
+    const model = env.OPENAI_MODEL || 'gpt-4o-mini';
+    const requiredCredits = calculateBookCredits(allTexts, targetLanguage, model);
+    const userCredits = await getUserCredits(env.DB, user.id);
+    const totalCharacters = allTexts.reduce((sum, text) => sum + text.length, 0);
+
+    return new Response(
+      JSON.stringify({
+        title: bookData.title || file.name.replace('.epub', ''),
+        author: bookData.author || 'Unknown',
+        chapters: chapterCount,
+        characters: totalCharacters,
+        estimatedTokens: requiredCredits * TOKENS_PER_CREDIT,
+        requiredCredits,
+        availableCredits: userCredits,
+        canAfford: userCredits >= requiredCredits,
+      }),
+      {
+        headers: { 'Content-Type': 'application/json' },
+      }
+    );
+  } catch (error) {
+    console.error('Book estimate error:', error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+
+    return new Response(
+      JSON.stringify({
+        error: 'Failed to estimate book',
+        details: errorMessage,
+      }),
+      {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      }
+    );
+  }
+}
+
 // Track if we've logged the OAuth warning (to avoid spamming logs)
 let oauthWarningLogged = false;
 
@@ -1266,6 +1368,11 @@ export default {
         // ==================
         // Book endpoints
         // ==================
+
+        // Handle book estimate (get credit cost before upload)
+        if (url.pathname === '/api/books/estimate' && request.method === 'POST') {
+          return handleBookEstimate(request, env);
+        }
 
         // Handle book upload
         if (url.pathname === '/api/books/upload' && request.method === 'POST') {

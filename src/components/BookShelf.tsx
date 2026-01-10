@@ -30,6 +30,18 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState('');
   const [uploadError, setUploadError] = useState<{ message: string; required?: number; available?: number } | null>(null);
+  const [estimating, setEstimating] = useState(false);
+  const [estimate, setEstimate] = useState<{
+    file: File;
+    title: string;
+    author: string;
+    chapters: number;
+    characters: number;
+    estimatedTokens: number;
+    requiredCredits: number;
+    availableCredits: number;
+    canAfford: boolean;
+  } | null>(null);
   const { user, loading: userLoading, login, logout, credits, creditPackages, purchaseCredits, refreshCredits } = useUser();
 
   const fetchBooks = async () => {
@@ -52,20 +64,60 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
     fetchBooks();
   }, []);
 
-  const handleUploadBook = async (file: File) => {
+  const handleFileSelect = async (file: File) => {
     if (!user) {
       alert('Please login to upload books');
       return;
     }
 
-    setUploading(true);
-    setUploadProgress('Uploading and processing EPUB...');
+    setEstimating(true);
     setUploadError(null);
 
     try {
       const formData = new FormData();
       formData.append('file', file);
-      formData.append('targetLanguage', 'zh'); // Default to Chinese
+      formData.append('targetLanguage', 'zh');
+
+      const response = await fetch('/api/books/estimate', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json() as { error?: string; details?: string };
+        throw new Error(errorData.error || 'Failed to estimate');
+      }
+
+      const estimateData = await response.json() as {
+        title: string;
+        author: string;
+        chapters: number;
+        characters: number;
+        estimatedTokens: number;
+        requiredCredits: number;
+        availableCredits: number;
+        canAfford: boolean;
+      };
+
+      setEstimate({ ...estimateData, file });
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to estimate book');
+    } finally {
+      setEstimating(false);
+    }
+  };
+
+  const handleConfirmUpload = async () => {
+    if (!estimate) return;
+
+    setUploading(true);
+    setUploadProgress('Translating book...');
+    setUploadError(null);
+
+    try {
+      const formData = new FormData();
+      formData.append('file', estimate.file);
+      formData.append('targetLanguage', 'zh');
       formData.append('sourceLanguage', 'en');
 
       const response = await fetch('/api/books/upload', {
@@ -76,7 +128,6 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
       if (!response.ok) {
         const errorData = await response.json() as { error?: string; required?: number; available?: number; message?: string };
 
-        // Handle insufficient credits error
         if (response.status === 402) {
           setUploadError({
             message: errorData.message || 'Insufficient credits',
@@ -85,6 +136,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
           });
           setUploading(false);
           setUploadProgress('');
+          setEstimate(null);
           return;
         }
 
@@ -92,24 +144,28 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
       }
 
       const result = await response.json() as { success: boolean; bookUuid: string; creditsUsed?: number };
-      setUploadProgress(`Upload successful! Used ${result.creditsUsed?.toLocaleString() || 0} credits.`);
+      setUploadProgress(`Success! Used ${result.creditsUsed?.toLocaleString() || 0} credits.`);
 
-      // Refresh books list and credits
       await fetchBooks();
       await refreshCredits();
 
-      // Close modal after a short delay
       setTimeout(() => {
         setShowUploadModal(false);
         setUploadProgress('');
         setUploading(false);
         setUploadError(null);
+        setEstimate(null);
       }, 2000);
     } catch (err) {
       setUploadProgress('');
       setUploading(false);
       alert(err instanceof Error ? err.message : 'Upload failed');
     }
+  };
+
+  const handleCancelEstimate = () => {
+    setEstimate(null);
+    setUploadError(null);
   };
 
   if (error) {
@@ -253,7 +309,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
 
       {/* Upload Modal */}
       {showUploadModal && (
-        <div className="upload-modal-overlay" onClick={() => !uploading && !uploadError && setShowUploadModal(false)}>
+        <div className="upload-modal-overlay" onClick={() => !uploading && !estimating && !uploadError && !estimate && setShowUploadModal(false)}>
           <div className="upload-modal-content" onClick={(e) => e.stopPropagation()}>
             <h2>Upload EPUB Book</h2>
             {uploadError ? (
@@ -295,7 +351,79 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                   </button>
                 </div>
               </div>
-            ) : !uploading ? (
+            ) : estimate ? (
+              <div className="estimate-confirmation">
+                <div className="book-info">
+                  <h3>{estimate.title}</h3>
+                  <p className="author">by {estimate.author}</p>
+                </div>
+                <div className="estimate-details">
+                  <div className="estimate-row">
+                    <span>Chapters:</span>
+                    <span>{estimate.chapters}</span>
+                  </div>
+                  <div className="estimate-row">
+                    <span>Characters:</span>
+                    <span>{estimate.characters.toLocaleString()}</span>
+                  </div>
+                  <div className="estimate-row">
+                    <span>Estimated tokens:</span>
+                    <span>~{estimate.estimatedTokens.toLocaleString()}</span>
+                  </div>
+                  <div className="estimate-row cost">
+                    <span>Translation cost:</span>
+                    <span className={estimate.canAfford ? 'affordable' : 'not-affordable'}>
+                      {estimate.requiredCredits.toLocaleString()} credits
+                    </span>
+                  </div>
+                  <div className="estimate-row balance">
+                    <span>Your balance:</span>
+                    <span>{estimate.availableCredits.toLocaleString()} credits</span>
+                  </div>
+                  {!estimate.canAfford && (
+                    <div className="estimate-row needed">
+                      <span>Need:</span>
+                      <span className="not-affordable">
+                        {(estimate.requiredCredits - estimate.availableCredits).toLocaleString()} more credits
+                      </span>
+                    </div>
+                  )}
+                </div>
+                <div className="estimate-actions">
+                  {estimate.canAfford ? (
+                    <button
+                      className="confirm-upload-btn"
+                      onClick={handleConfirmUpload}
+                    >
+                      Confirm & Translate
+                    </button>
+                  ) : (
+                    <button
+                      className="buy-credits-btn-primary"
+                      onClick={() => { setShowUploadModal(false); setEstimate(null); setShowCreditsModal(true); }}
+                    >
+                      Buy Credits
+                    </button>
+                  )}
+                  <button
+                    className="cancel-upload-btn"
+                    onClick={handleCancelEstimate}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : estimating ? (
+              <div className="upload-progress">
+                <div className="spinner"></div>
+                <p>Analyzing book...</p>
+              </div>
+            ) : uploading ? (
+              <div className="upload-progress">
+                <div className="spinner"></div>
+                <p>{uploadProgress}</p>
+              </div>
+            ) : (
               <div className="upload-area">
                 <div className="current-credits">
                   Your credits: <strong>{credits?.toLocaleString() ?? '...'}</strong>
@@ -306,7 +434,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                   onChange={(e) => {
                     const file = e.target.files?.[0];
                     if (file) {
-                      handleUploadBook(file);
+                      handleFileSelect(file);
                     }
                   }}
                   id="epub-file-input"
@@ -320,7 +448,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                   </svg>
                   <span>Click to select EPUB file</span>
                   <span className="upload-hint">The book will be automatically translated to Chinese</span>
-                  <span className="upload-hint">Cost: ~1 credit per character</span>
+                  <span className="upload-hint">1 credit = 100 tokens</span>
                 </label>
                 <button
                   className="cancel-upload-btn"
@@ -328,11 +456,6 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                 >
                   Cancel
                 </button>
-              </div>
-            ) : (
-              <div className="upload-progress">
-                <div className="spinner"></div>
-                <p>{uploadProgress}</p>
               </div>
             )}
           </div>
@@ -358,7 +481,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                 </button>
               ))}
             </div>
-            <p className="credits-info">Credits are used for book translations. ~1 credit per character.</p>
+            <p className="credits-info">Credits are used for book translations. 1 credit = 100 tokens.</p>
             <button
               className="cancel-upload-btn"
               onClick={() => setShowCreditsModal(false)}
