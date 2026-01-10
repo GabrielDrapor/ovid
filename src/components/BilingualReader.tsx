@@ -313,16 +313,19 @@ const BilingualReader: React.FC<BilingualReaderProps> = ({
         </button>
         {isMenuOpen && (
           <div className="fab-menu">
+            {onBackToShelf && (
+              <div className="fab-menu-section">
+                <button className="fab-menu-item" onClick={onBackToShelf}>
+                  Back to Shelf
+                </button>
+              </div>
+            )}
+
             <div className="fab-menu-section">
               <div className="fab-menu-header">Navigation</div>
               <button className="fab-menu-item" onClick={toggleChapters}>
                 Chapters
               </button>
-              {onBackToShelf && (
-                <button className="fab-menu-item" onClick={onBackToShelf}>
-                  Back to Shelf
-                </button>
-              )}
             </div>
 
             <div className="fab-menu-section">
