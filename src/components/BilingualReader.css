@@ -46,18 +46,18 @@
 
 /* Toggle animation for all clickable text elements */
 .toggleable-text {
-  transition: color 0.3s ease, opacity 0.25s ease, transform 0.25s ease;
+  transition: color 0.1s ease, opacity 0.1s ease, transform 0.1s ease;
   transform-origin: center center;
 }
 
 .toggleable-text.toggling {
-  opacity: 0.4;
-  transform: scale(0.995);
+  opacity: 0.9;
+  /* transform: scale(0.995); */
 }
 
 /* Translated text styling - dark grey color */
 .translated-text-style {
-  color: #555555;
+  color: #333333;
 }
 
 /* Original text styling - maintain darker color */
@@ -68,7 +68,7 @@
 /* Ensure translated styling applies to titles and chapters */
 .title-text.translated-text-style,
 .chapter-text.translated-text-style {
-  color: #555555;
+  color: #333333;
 }
 
 .title-text.original-text-style {
