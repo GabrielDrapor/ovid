@@ -357,61 +357,70 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                   <h3>{estimate.title}</h3>
                   <p className="author">by {estimate.author}</p>
                 </div>
-                <div className="estimate-details">
-                  <div className="estimate-row">
-                    <span>Chapters:</span>
-                    <span>{estimate.chapters}</span>
+                {uploading ? (
+                  <div className="upload-progress-inline">
+                    <div className="spinner"></div>
+                    <p>{uploadProgress}</p>
                   </div>
-                  <div className="estimate-row">
-                    <span>Characters:</span>
-                    <span>{estimate.characters.toLocaleString()}</span>
-                  </div>
-                  <div className="estimate-row">
-                    <span>Estimated tokens:</span>
-                    <span>~{estimate.estimatedTokens.toLocaleString()}</span>
-                  </div>
-                  <div className="estimate-row cost">
-                    <span>Translation cost:</span>
-                    <span className={estimate.canAfford ? 'affordable' : 'not-affordable'}>
-                      {estimate.requiredCredits.toLocaleString()} credits
-                    </span>
-                  </div>
-                  <div className="estimate-row balance">
-                    <span>Your balance:</span>
-                    <span>{estimate.availableCredits.toLocaleString()} credits</span>
-                  </div>
-                  {!estimate.canAfford && (
-                    <div className="estimate-row needed">
-                      <span>Need:</span>
-                      <span className="not-affordable">
-                        {(estimate.requiredCredits - estimate.availableCredits).toLocaleString()} more credits
-                      </span>
+                ) : (
+                  <>
+                    <div className="estimate-details">
+                      <div className="estimate-row">
+                        <span>Chapters:</span>
+                        <span>{estimate.chapters}</span>
+                      </div>
+                      <div className="estimate-row">
+                        <span>Characters:</span>
+                        <span>{estimate.characters.toLocaleString()}</span>
+                      </div>
+                      <div className="estimate-row">
+                        <span>Estimated tokens:</span>
+                        <span>~{estimate.estimatedTokens.toLocaleString()}</span>
+                      </div>
+                      <div className="estimate-row cost">
+                        <span>Translation cost:</span>
+                        <span className={estimate.canAfford ? 'affordable' : 'not-affordable'}>
+                          {estimate.requiredCredits.toLocaleString()} credits
+                        </span>
+                      </div>
+                      <div className="estimate-row balance">
+                        <span>Your balance:</span>
+                        <span>{estimate.availableCredits.toLocaleString()} credits</span>
+                      </div>
+                      {!estimate.canAfford && (
+                        <div className="estimate-row needed">
+                          <span>Need:</span>
+                          <span className="not-affordable">
+                            {(estimate.requiredCredits - estimate.availableCredits).toLocaleString()} more credits
+                          </span>
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
-                <div className="estimate-actions">
-                  {estimate.canAfford ? (
-                    <button
-                      className="confirm-upload-btn"
-                      onClick={handleConfirmUpload}
-                    >
-                      Confirm & Translate
-                    </button>
-                  ) : (
-                    <button
-                      className="buy-credits-btn-primary"
-                      onClick={() => { setShowUploadModal(false); setEstimate(null); setShowCreditsModal(true); }}
-                    >
-                      Buy Credits
-                    </button>
-                  )}
-                  <button
-                    className="cancel-upload-btn"
-                    onClick={handleCancelEstimate}
-                  >
-                    Cancel
-                  </button>
-                </div>
+                    <div className="estimate-actions">
+                      {estimate.canAfford ? (
+                        <button
+                          className="confirm-upload-btn"
+                          onClick={handleConfirmUpload}
+                        >
+                          Confirm & Translate
+                        </button>
+                      ) : (
+                        <button
+                          className="buy-credits-btn-primary"
+                          onClick={() => { setShowUploadModal(false); setEstimate(null); setShowCreditsModal(true); }}
+                        >
+                          Buy Credits
+                        </button>
+                      )}
+                      <button
+                        className="cancel-upload-btn"
+                        onClick={handleCancelEstimate}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
             ) : estimating ? (
               <div className="upload-progress">
