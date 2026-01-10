@@ -334,6 +334,22 @@
   text-align: center;
 }
 
+.upload-progress-inline {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 30px 20px;
+  margin-top: 16px;
+}
+
+.upload-progress-inline p {
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 0.95rem;
+  text-align: center;
+  margin: 0;
+}
+
 .spinner {
   width: 40px;
   height: 40px;
@@ -841,4 +857,102 @@
   font-size: 0.85rem;
   text-align: center;
   margin: 0 0 20px 0;
+}
+
+/* Estimate Confirmation */
+.estimate-confirmation {
+  display: flex;
+  flex-direction: column;
+  gap: 25px;
+}
+
+.estimate-confirmation .book-info {
+  text-align: center;
+  padding-bottom: 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.estimate-confirmation .book-info h3 {
+  color: white;
+  font-size: 1.4rem;
+  margin: 0 0 8px 0;
+  font-weight: 500;
+}
+
+.estimate-confirmation .book-info .author {
+  color: #888;
+  font-size: 0.95rem;
+  margin: 0;
+}
+
+.estimate-details {
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 10px;
+  padding: 20px;
+}
+
+.estimate-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 0;
+  font-size: 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.estimate-row:last-child {
+  border-bottom: none;
+}
+
+.estimate-row span:first-child {
+  color: #888;
+}
+
+.estimate-row span:last-child {
+  color: white;
+}
+
+.estimate-row.cost span:last-child {
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.estimate-row.cost .affordable {
+  color: #4ade80;
+}
+
+.estimate-row.cost .not-affordable {
+  color: #ff6b6b;
+}
+
+.estimate-row.balance span:last-child {
+  color: #4ade80;
+}
+
+.estimate-row.needed .not-affordable {
+  color: #fbbf24;
+  font-weight: 600;
+}
+
+.estimate-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.confirm-upload-btn {
+  padding: 14px 24px;
+  background: #4ade80;
+  border: none;
+  border-radius: 8px;
+  color: #000;
+  cursor: pointer;
+  font-size: 1rem;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+.confirm-upload-btn:hover {
+  background: #22c55e;
+  transform: translateY(-2px);
 }
