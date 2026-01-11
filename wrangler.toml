@@ -1,0 +1,34 @@
+name = "ovid"
+main = "src/worker/index.ts"
+compatibility_date = "2023-12-01"
+
+[build]
+command = "yarn build"
+
+[assets]
+directory = "./build"
+binding = "ASSETS"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "ovid-db"
+database_id = "df1769fb-c23b-4151-85cc-0e00ed591f2b"
+
+[observability]
+[observability.logs]
+enabled = true
+head_sampling_rate = 1
+invocation_logs = true
+persist = true
+
+
+[vars]
+APP_URL = "https://lib.jrd.pub"
+
+# Secrets - set via Cloudflare dashboard or `wrangler secret put`:
+# - GOOGLE_OAUTH_CLIENT_ID
+# - GOOGLE_OAUTH_CLIENT_SECRET
+# - STRIPE_PUBLISHABLE_KEY
+# - STRIPE_SECRET_KEY
+# - STRIPE_WEBHOOK_SECRET
+# - OPENAI_API_KEY

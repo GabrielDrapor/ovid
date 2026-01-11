@@ -26,11 +26,9 @@ yarn-error.log*
 # Claude AI specific
 .claude
 
-# Wrangler - ignore local configs but track example
+# Wrangler
 .wrangler/
 .wrangler_cfg/
-wrangler.toml
-!wrangler.toml.example
 
 # Data files (EPUB books, content files)
 *.epub
