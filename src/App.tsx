@@ -144,6 +144,11 @@ function App() {
     syncFromUrl();
   };
 
+  const handleBackToShelf = () => {
+    window.history.pushState({}, '', '/');
+    syncFromUrl();
+  };
+
   // Show book shelf on root path
   if (showBookShelf) {
     return (
@@ -209,6 +214,7 @@ function App() {
         isLoading={loading}
         setShowOriginalTitle={setShowOriginalTitle}
         bookUuid={bookUuid || undefined}
+        onBackToShelf={handleBackToShelf}
       />
     </div>
   );

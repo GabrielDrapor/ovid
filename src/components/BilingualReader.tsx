@@ -29,6 +29,7 @@ interface BilingualReaderProps {
   isLoading: boolean;
   setShowOriginalTitle: (value: boolean) => void;
   bookUuid?: string;
+  onBackToShelf?: () => void;
 }
 
 const BilingualReader: React.FC<BilingualReaderProps> = ({
@@ -41,6 +42,7 @@ const BilingualReader: React.FC<BilingualReaderProps> = ({
   isLoading,
   setShowOriginalTitle,
   bookUuid,
+  onBackToShelf,
 }) => {
   const [showOriginal, setShowOriginal] = useState<{ [key: string]: boolean }>(
     {}
@@ -311,6 +313,14 @@ const BilingualReader: React.FC<BilingualReaderProps> = ({
         </button>
         {isMenuOpen && (
           <div className="fab-menu">
+            {onBackToShelf && (
+              <div className="fab-menu-section">
+                <button className="fab-menu-item" onClick={onBackToShelf}>
+                  Back to Shelf
+                </button>
+              </div>
+            )}
+
             <div className="fab-menu-section">
               <div className="fab-menu-header">Navigation</div>
               <button className="fab-menu-item" onClick={toggleChapters}>
