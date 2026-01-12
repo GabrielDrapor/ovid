@@ -37,6 +37,7 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@google/genai": "^1.35.0",
     "@xmldom/xmldom": "^0.8.11",
     "epub2": "^3.0.2",
     "js-tiktoken": "^1.0.21",

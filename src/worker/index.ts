@@ -130,6 +130,28 @@ export default {
           return handleBookUpload(request, env);
         }
 
+        // ==================
+        // Cover image endpoints
+        // ==================
+        const coverMatch = url.pathname.match(/^\/api\/covers\/([^\/]+)\/(cover|spine)\.(png|jpg|jpeg|webp)$/);
+        if (coverMatch && env.BOOK_COVERS) {
+          const bookUuid = coverMatch[1];
+          const imageType = coverMatch[2];
+          const extension = coverMatch[3];
+          const key = `${bookUuid}/${imageType}.${extension}`;
+
+          const object = await env.BOOK_COVERS.get(key);
+          if (!object) {
+            return new Response('Cover not found', { status: 404 });
+          }
+
+          const headers = new Headers();
+          object.writeHttpMetadata(headers);
+          headers.set('Cache-Control', 'public, max-age=31536000'); // Cache for 1 year
+
+          return new Response(object.body, { headers });
+        }
+
         if (url.pathname === '/api/books') {
           const user = await getCurrentUser(env.DB, request);
           const books = await getAllBooks(env.DB, user?.id);

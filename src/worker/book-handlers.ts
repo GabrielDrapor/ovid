@@ -5,8 +5,9 @@
 import { Env } from './types';
 import { getCurrentUser } from './auth';
 import { getUserCredits, deductCredits } from './credits';
-import { insertProcessedBook } from './db';
+import { insertProcessedBook, BookImageUrls } from './db';
 import { calculateBookCredits, TOKENS_PER_CREDIT } from '../utils/token-counter';
+import { CoverGenerator, uploadCoverToR2 } from '../utils/cover-generator';
 
 /**
  * Handle book upload with translation
@@ -96,8 +97,53 @@ export async function handleBookUpload(
 
     const bookUuid = crypto.randomUUID();
 
+    // Generate book covers using Nano Banana Pro
+    let imageUrls: BookImageUrls | undefined;
+    if (env.GEMINI_API_KEY && env.BOOK_COVERS) {
+      try {
+        console.log('🎨 Generating book cover and spine...');
+        const coverGenerator = new CoverGenerator(env.GEMINI_API_KEY);
+
+        const covers = await coverGenerator.generateBoth({
+          title: processedBook.metadata.title,
+          originalTitle: processedBook.metadata.originalTitle,
+          author: processedBook.metadata.author,
+        });
+
+        // Upload to R2
+        const [coverUrl, spineUrl] = await Promise.all([
+          uploadCoverToR2(
+            env.BOOK_COVERS,
+            covers.coverImageBase64,
+            covers.coverMimeType,
+            bookUuid,
+            'cover'
+          ),
+          uploadCoverToR2(
+            env.BOOK_COVERS,
+            covers.spineImageBase64,
+            covers.spineMimeType,
+            bookUuid,
+            'spine'
+          ),
+        ]);
+
+        imageUrls = {
+          coverImgUrl: coverUrl,
+          spineImgUrl: spineUrl,
+        };
+
+        console.log('✅ Cover and spine generated successfully');
+      } catch (coverError) {
+        // Log error but don't fail the upload
+        console.error('⚠️ Cover generation failed (continuing without covers):', coverError);
+      }
+    } else {
+      console.log('⏭️ Skipping cover generation (GEMINI_API_KEY or BOOK_COVERS not configured)');
+    }
+
     // Insert into database
-    await insertProcessedBook(env.DB, processedBook, bookUuid, user.id);
+    await insertProcessedBook(env.DB, processedBook, bookUuid, user.id, imageUrls);
 
     // Deduct credits
     await deductCredits(

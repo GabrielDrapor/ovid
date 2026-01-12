@@ -173,41 +173,49 @@ export async function getAllBooks(db: D1Database, userId?: number) {
   return books.results;
 }
 
+export interface ProcessedBookData {
+  metadata: {
+    title: string;
+    originalTitle: string;
+    author: string;
+    languagePair: string;
+    styles: string;
+  };
+  chapters: Array<{
+    number: number;
+    translatedTitle: string;
+    originalTitle: string;
+    content: Array<{
+      id: string;
+      originalText: string;
+      translatedText: string;
+      type: string;
+      tagName?: string;
+      className?: string;
+      styles?: string;
+    }>;
+  }>;
+}
+
+export interface BookImageUrls {
+  coverImgUrl?: string;
+  spineImgUrl?: string;
+}
+
 /**
  * Insert a processed book into the database
  */
 export async function insertProcessedBook(
   db: D1Database,
-  processedBook: {
-    metadata: {
-      title: string;
-      originalTitle: string;
-      author: string;
-      languagePair: string;
-      styles: string;
-    };
-    chapters: Array<{
-      number: number;
-      translatedTitle: string;
-      originalTitle: string;
-      content: Array<{
-        id: string;
-        originalText: string;
-        translatedText: string;
-        type: string;
-        tagName?: string;
-        className?: string;
-        styles?: string;
-      }>;
-    }>;
-  },
+  processedBook: ProcessedBookData,
   bookUuid: string,
-  userId: number
+  userId: number,
+  imageUrls?: BookImageUrls
 ): Promise<number> {
-  // Insert book metadata
+  // Insert book metadata with optional cover/spine URLs
   await db.prepare(
-    `INSERT INTO books (title, original_title, author, language_pair, styles, uuid, user_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO books (title, original_title, author, language_pair, styles, uuid, user_id, book_cover_img_url, book_spine_img_url)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
     .bind(
       processedBook.metadata.title,
@@ -216,7 +224,9 @@ export async function insertProcessedBook(
       processedBook.metadata.languagePair,
       processedBook.metadata.styles,
       bookUuid,
-      userId
+      userId,
+      imageUrls?.coverImgUrl || null,
+      imageUrls?.spineImgUrl || null
     )
     .run();
 
