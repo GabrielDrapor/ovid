@@ -105,6 +105,9 @@ class BookImporter {
     this.applyMode = options['apply'] || null;
 
     this.translator = new Translator({
+      apiKey: process.env.OPENAI_API_KEY,
+      baseURL: process.env.OPENAI_API_BASE_URL,
+      model: process.env.OPENAI_MODEL,
       concurrency: this.itemConcurrency,
       kvStore: new KVStore(),
     });
@@ -552,7 +555,28 @@ class BookImporter {
             }
           };
 
-          const finalizeParsing = () => {
+          // Fallback to spine processing
+          const processSpineFallback = () => {
+            console.log('   ⚠️  No content from TOC. Falling back to spine order.');
+            orderedChapters.length = 0; // Clear
+            const spineItems = epub.spine.contents || [];
+            let processed = 0;
+            if (spineItems.length === 0) {
+              reject(new Error('No chapters found in TOC or spine'));
+              return;
+            }
+            spineItems.forEach((item: any, idx: number) => {
+              epub.getChapter(item.id, (err: any, html: string) => {
+                if (!err && html) {
+                  processChapter(idx, idx, item.title || `Chapter ${idx + 1}`, html, item.id);
+                }
+                processed++;
+                if (processed === spineItems.length) finalizeResult();
+              });
+            });
+          };
+
+          const finalizeResult = () => {
             let present = orderedChapters
               .filter((ch) => ch && ch.content && ch.content.length > 0)
               .map((ch) => ch as CLIChapter);
@@ -591,23 +615,26 @@ class BookImporter {
             });
           };
 
-          if (chapterEntries.length === 0) {
-            console.log('   ⚠️  No TOC entries found. Falling back to spine order.');
-            const spineItems = epub.spine.contents || [];
-            let processed = 0;
-            if (spineItems.length === 0) {
-              reject(new Error('No chapters found in TOC or spine'));
+          const finalizeParsing = () => {
+            const present = orderedChapters
+              .filter((ch) => ch && ch.content && ch.content.length > 0);
+
+            // Check if we have any actual content (not just title items)
+            const hasRealContent = present.some(
+              (ch) => ch!.content.some((item) => item.type !== 'chapter')
+            );
+
+            // If TOC processing yielded no real content, fallback to spine
+            if (present.length === 0 || !hasRealContent) {
+              processSpineFallback();
               return;
             }
-            spineItems.forEach((item: any, idx: number) => {
-              epub.getChapter(item.id, (err: any, html: string) => {
-                if (!err && html) {
-                  processChapter(idx, idx, item.title || `Chapter ${idx + 1}`, html, item.id);
-                }
-                processed++;
-                if (processed === spineItems.length) finalizeParsing();
-              });
-            });
+
+            finalizeResult();
+          };
+
+          if (chapterEntries.length === 0) {
+            processSpineFallback();
           }
         } catch (parseError) {
           reject(parseError);
