@@ -14,6 +14,7 @@ import { LLMClient, Tool } from './LLMClient';
 export interface KVStoreInterface {
   get(key: string): string | null;
   set(key: string, value: string): void;
+  getAll?(): Record<string, string>;
 }
 
 /**
@@ -30,6 +31,10 @@ export class SimpleKVStore implements KVStoreInterface {
 
   set(key: string, value: string): void {
     this.data[key] = value;
+  }
+
+  getAll(): Record<string, string> {
+    return { ...this.data };
   }
 }
 
@@ -113,6 +118,48 @@ export class Translator {
   }
 
   /**
+   * Find glossary entries that are relevant to the given text.
+   * Searches for glossary keys that appear in the text (case-insensitive).
+   */
+  private getRelevantGlossary(text: string): Record<string, string> {
+    if (!this.kvStore.getAll) {
+      return {};
+    }
+
+    const allEntries = this.kvStore.getAll();
+    const relevant: Record<string, string> = {};
+    const textLower = text.toLowerCase();
+
+    for (const [key, value] of Object.entries(allEntries)) {
+      // Check if the key appears in the text (case-insensitive word boundary match)
+      const keyLower = key.toLowerCase();
+      // Use word boundary detection for better matching
+      const regex = new RegExp(`\\b${keyLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+      if (regex.test(text) || textLower.includes(keyLower)) {
+        relevant[key] = value;
+      }
+    }
+
+    return relevant;
+  }
+
+  /**
+   * Format glossary entries for inclusion in prompt
+   */
+  private formatGlossaryForPrompt(glossary: Record<string, string>): string {
+    const entries = Object.entries(glossary);
+    if (entries.length === 0) {
+      return '';
+    }
+
+    const formatted = entries
+      .map(([key, value]) => `  "${key}" → "${value}"`)
+      .join('\n');
+
+    return `\nGlossary (MUST use these exact translations for consistency):\n${formatted}\n`;
+  }
+
+  /**
    * Translate a single text
    */
   async translateText(
@@ -135,6 +182,10 @@ export class Translator {
           ? `\nContext (Preceding text):\n${options.context.join('\n')}\n`
           : '';
 
+      // Get relevant glossary entries for this text
+      const relevantGlossary = this.getRelevantGlossary(text);
+      const glossaryStr = this.formatGlossaryForPrompt(relevantGlossary);
+
       const translation = await this.llmClient.chat({
         messages: [
           {
@@ -145,9 +196,10 @@ Rules:
 2. Maintain the original style, tone, and formatting.
 3. If the input is a title or short phrase, translate it as such.
 4. Return ONLY the translation. Do NOT wrap the translation in quotes unless the source text has them.
-5. Use the provided tools to ensure consistency for proper nouns.
-   - Use 'kv_read' to check for existing translations of names/places.
-   - Use 'kv_write' to save new translations for names/places.`,
+5. For proper nouns (names, places, terms):
+   - If a translation is provided in the Glossary below, you MUST use it exactly.
+   - For NEW proper nouns not in the glossary, use 'kv_write' to save your translation for consistency.
+   - Use 'kv_read' only if you need to check a term that might be in the glossary but wasn't auto-detected.${glossaryStr}`,
           },
           {
             role: 'user',
@@ -161,7 +213,7 @@ Rules:
             function: {
               name: 'kv_read',
               description:
-                'Read a translation for a proper noun (name, place, specific term) from the glossary.',
+                'Read a translation for a proper noun (name, place, specific term) from the glossary. Use this to check if a term has an established translation.',
               parameters: {
                 type: 'object',
                 properties: {
@@ -183,13 +235,13 @@ Rules:
             function: {
               name: 'kv_write',
               description:
-                'Save a translation for a proper noun to the glossary for future consistency.',
+                'IMPORTANT: Save a translation for a NEW proper noun to the glossary. Call this for any character name, place name, or specific term you translate that is not already in the glossary. This ensures consistency across the entire book.',
               parameters: {
                 type: 'object',
                 properties: {
                   key: {
                     type: 'string',
-                    description: 'The proper noun or name in source language',
+                    description: 'The proper noun or name in source language (e.g., "Boxer", "Manor Farm")',
                   },
                   value: {
                     type: 'string',
