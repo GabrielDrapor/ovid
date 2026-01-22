@@ -98,8 +98,8 @@ class BookImporter {
 
     const cc = options['chapters-concurrency'] || options['chaptersConcurrency'];
     const ic = options['items-concurrency'] || options['itemsConcurrency'] || options['concurrency'];
-    this.chapterConcurrency = cc ? Math.max(1, parseInt(cc, 10)) : 2;
-    this.itemConcurrency = ic ? Math.max(1, parseInt(ic, 10)) : 8;
+    this.chapterConcurrency = cc ? Math.max(1, parseInt(cc, 10)) : 1; // Sequential for consistency
+    this.itemConcurrency = ic ? Math.max(1, parseInt(ic, 10)) : 1; // Sequential for consistency
 
     this.sqlOut = options['sql-out'] || options['sqlOut'] || null;
     this.applyMode = options['apply'] || null;
@@ -110,6 +110,24 @@ class BookImporter {
       model: process.env.OPENAI_MODEL,
       concurrency: this.itemConcurrency,
       kvStore: new KVStore(),
+    });
+
+    // Pre-register common translation variants for proper nouns
+    // These help the post-processor catch and fix common transliteration variants
+    this.translator.registerCommonVariants({
+      // Common -er/-per ending variants
+      'Whymper': ['温普尔', '温伯', '温珀尔'],
+      // Animal Farm characters - common transliteration variants
+      'Snowball': ['斯诺鲍', '斯诺波', '斯诺伯'],
+      'Boxer': ['鲍克瑟', '博克瑟', '波克瑟'],
+      'Squealer': ['斯奎拉', '斯奎勒', '尖嗓子'],
+      'Clover': ['克洛弗', '克劳弗'],
+      'Mollie': ['莫莉', '莫丽', '茉莉'],
+      'Benjamin': ['本杰明', '便雅悯'],
+      'Muriel': ['穆丽尔', '缪丽尔', '穆里尔'],
+      // Common proper noun transliteration patterns
+      'Holmes': ['福尔摩斯', '霍姆斯'],
+      'Watson': ['华生', '沃森', '瓦特森'],
     });
 
     this.validateInputs();
@@ -383,7 +401,9 @@ class BookImporter {
             fragment?: string
           ) => {
             const parser = new DOMParser();
-            const doc = parser.parseFromString(html, 'text/html');
+            // Wrap HTML in proper structure if missing body tag to avoid xmldom parsing issues
+            const wrappedHtml = html.includes('<body') ? html : `<html><body>${html}</body></html>`;
+            const doc = parser.parseFromString(wrappedHtml, 'text/html');
 
             // Extract internal styles
             const styleTags = doc.getElementsByTagName('style');
