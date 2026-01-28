@@ -46,7 +46,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
 
   const fetchBooks = async () => {
     try {
-      const response = await fetch('/api/books');
+      const response = await fetch('/api/v2/books');
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }

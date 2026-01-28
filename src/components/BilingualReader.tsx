@@ -1,3 +1,9 @@
+/**
+ * @deprecated This is the V1 BilingualReader component.
+ * Use BilingualReaderV2 instead, which uses XPath-based translations
+ * and preserves original EPUB HTML formatting.
+ * This file will be removed in a future version.
+ */
 import React, { useState, useEffect, useRef } from 'react';
 import './BilingualReader.css';
 
@@ -308,8 +314,8 @@ const BilingualReader: React.FC<BilingualReaderProps> = ({
       </main>
 
       <div className="fab-container">
-        <button className="fab" onClick={toggleMenu}>
-          ⋮
+        <button className="fab" onClick={toggleMenu} aria-label="Menu">
+          <span className="fab-dots"></span>
         </button>
         {isMenuOpen && (
           <div className="fab-menu">

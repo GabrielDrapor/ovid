@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import BilingualReader, { ContentItem } from './components/BilingualReader';
 import BookShelf from './components/BookShelf';
+import AppV2 from './AppV2';
 import { UserProvider } from './contexts/UserContext';
 import './App.css';
 
@@ -27,6 +28,7 @@ function App() {
   const [currentChapter, setCurrentChapter] = useState(1);
   const [bookUuid, setBookUuid] = useState<string | null>(null);
   const [showBookShelf, setShowBookShelf] = useState(false);
+  const [isV2Book, setIsV2Book] = useState(false);
 
   // Sync state from URL
   const syncFromUrl = () => {
@@ -38,6 +40,18 @@ function App() {
       setShowBookShelf(true);
       setBookUuid(null);
       setBookContent(null);
+      setLoading(false);
+      setIsV2Book(false);
+      return;
+    }
+
+    // V2 Book path: /v2/book/:uuid
+    const matchV2 = path.match(/^\/v2\/book\/([^\/]+)$/);
+    if (matchV2) {
+      const uuid = matchV2[1];
+      setBookUuid(uuid);
+      setShowBookShelf(false);
+      setIsV2Book(true);
       setLoading(false);
       return;
     }
@@ -60,6 +74,7 @@ function App() {
       setBookUuid(uuid);
       setCurrentChapter(isNaN(chapter) ? 1 : chapter);
       setShowBookShelf(false);
+      setIsV2Book(false);
       return;
     }
 
@@ -67,6 +82,7 @@ function App() {
     setError('Invalid URL. Expected / or /book/:uuid');
     setLoading(false);
     setShowBookShelf(false);
+    setIsV2Book(false);
   };
 
   // Initial load and event listeners
@@ -136,8 +152,8 @@ function App() {
     const savedChapter = localStorage.getItem(`ovid_progress_${uuid}`);
     const chapterToLoad = savedChapter ? parseInt(savedChapter, 10) : 1;
 
-    // Navigation: Go to book home (or saved chapter)
-    const url = `/book/${uuid}#chapter-${chapterToLoad}`;
+    // Navigation: Go to V2 book reader
+    const url = `/v2/book/${uuid}#chapter-${chapterToLoad}`;
     window.history.pushState({}, '', url);
 
     // Manually trigger sync because pushState doesn't fire popstate
@@ -158,6 +174,11 @@ function App() {
         </div>
       </UserProvider>
     );
+  }
+
+  // V2 Book reader (XPath-based)
+  if (isV2Book && bookUuid) {
+    return <AppV2 bookUuid={bookUuid} onBackToShelf={handleBackToShelf} />;
   }
 
   if (loading && !bookContent) {

@@ -2,7 +2,7 @@
   max-width: 680px;
   margin: 0 auto;
   padding: 40px 50px;
-  font-family: 'Georgia', 'Times New Roman', serif;
+  font-family: ui-serif, 'Georgia', 'Times New Roman', serif !important;
   font-weight: 400;
   line-height: 1.7;
   text-align: left;
@@ -90,13 +90,45 @@
   width: 30px;
   height: 30px;
   border-radius: 25%;
-  background-color: #333;
-  color: white;
-  border: none;
+  background-color: #333 !important;
+  color: white !important;
+  border: none !important;
   font-size: 20px;
   cursor: pointer;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
   transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.fab-dots {
+  width: 4px;
+  height: 4px;
+  background-color: white;
+  border-radius: 50%;
+  position: relative;
+  pointer-events: none;
+}
+
+.fab-dots::before,
+.fab-dots::after {
+  content: '';
+  position: absolute;
+  width: 4px;
+  height: 4px;
+  background-color: white;
+  border-radius: 50%;
+  left: 0;
+}
+
+.fab-dots::before {
+  top: -7px;
+}
+
+.fab-dots::after {
+  top: 7px;
 }
 
 .fab:hover {

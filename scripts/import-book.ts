@@ -1,7 +1,11 @@
 #!/usr/bin/env ts-node
 
 /**
- * Ovid Book Import System
+ * @deprecated This is the V1 import script.
+ * Use import-book-v2.ts instead, which uses XPath-based translations
+ * and preserves original EPUB HTML formatting.
+ *
+ * Ovid Book Import System (V1 - DEPRECATED)
  *
  * Imports EPUB/TXT files and generates bilingual content using translation APIs
  *
