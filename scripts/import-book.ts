@@ -25,9 +25,12 @@ import { DOMParser } from '@xmldom/xmldom';
 import {
   Translator,
   SUPPORTED_LANGUAGES,
+  ParagraphInput,
 } from '../src/utils/translator';
 import { KVStore } from '../src/utils/KVStore';
 import { buildBookImportSql } from '../src/utils/sql-builder';
+import { CheckpointManager } from '../src/utils/translation/CheckpointManager';
+import { detectParagraphType, ParagraphType } from '../src/utils/translation/types';
 import type {
   ContentItem,
   Chapter,
@@ -59,6 +62,31 @@ interface ImportOptions {
   sqlOut?: string;
   apply?: 'local' | 'remote' | null;
   help?: boolean;
+  /**
+   * Enable sequential translation mode for higher quality
+   * Uses translated context from preceding paragraphs
+   */
+  sequential?: boolean;
+  /**
+   * Checkpoint file for resume support
+   */
+  checkpoint?: string;
+  /**
+   * Clear existing checkpoint and start fresh
+   */
+  'clear-checkpoint'?: boolean;
+  /**
+   * Number of context paragraphs before (default: 2)
+   */
+  'context-before'?: string;
+  /**
+   * Number of context paragraphs after (default: 2)
+   */
+  'context-after'?: string;
+  /**
+   * Delay between API calls in ms (default: 500)
+   */
+  'api-delay'?: string;
 }
 
 interface TranslatedContent {
@@ -86,6 +114,14 @@ class BookImporter {
   private sqlOut: string | null;
   private applyMode: 'local' | 'remote' | null;
   private translator: Translator;
+  // New options for enhanced translation
+  private sequential: boolean;
+  private checkpointFile: string | null;
+  private clearCheckpoint: boolean;
+  private contextBefore: number;
+  private contextAfter: number;
+  private apiDelay: number;
+  private checkpointManager: CheckpointManager | null = null;
 
   constructor(options: ImportOptions) {
     this.file = options.file;
@@ -107,6 +143,20 @@ class BookImporter {
 
     this.sqlOut = options['sql-out'] || options['sqlOut'] || null;
     this.applyMode = options['apply'] || null;
+
+    // New enhanced translation options
+    this.sequential = options.sequential === true || options.sequential === 'true' as any;
+    this.checkpointFile = options.checkpoint || null;
+    this.clearCheckpoint = options['clear-checkpoint'] === true;
+    this.contextBefore = options['context-before']
+      ? parseInt(options['context-before'], 10)
+      : 2;
+    this.contextAfter = options['context-after']
+      ? parseInt(options['context-after'], 10)
+      : 2;
+    this.apiDelay = options['api-delay']
+      ? parseInt(options['api-delay'], 10)
+      : 500;
 
     this.translator = new Translator({
       apiKey: process.env.OPENAI_API_KEY,
@@ -185,6 +235,10 @@ class BookImporter {
     console.log('='.repeat(40));
     console.log(`📖 File: ${this.file}`);
     console.log(`🌍 Target Language: ${SUPPORTED_LANGUAGES[this.targetLang]}`);
+    console.log(`⚡ Translation Mode: ${this.sequential ? 'Sequential (high quality)' : 'Parallel (fast)'}`);
+    if (this.checkpointFile) {
+      console.log(`💾 Checkpoint: ${this.checkpointFile}`);
+    }
     console.log('');
 
     try {
@@ -677,6 +731,26 @@ class BookImporter {
   private async translateContent(bookData: BookData): Promise<TranslatedContent> {
     let totalSegments = 0;
 
+    // Initialize checkpoint manager if checkpoint file specified
+    if (this.checkpointFile) {
+      this.checkpointManager = new CheckpointManager(this.checkpointFile);
+      if (this.clearCheckpoint) {
+        console.log('   Clearing existing checkpoint...');
+        this.checkpointManager.clear();
+      }
+      const existingCount = this.checkpointManager.getCompletedCount();
+      if (existingCount > 0) {
+        console.log(`   Resuming from checkpoint: ${existingCount} items already translated`);
+      }
+    }
+
+    if (this.sequential) {
+      // Sequential mode: higher quality with translated context
+      console.log('   Using sequential translation mode (higher quality)');
+      return this.translateContentSequential(bookData);
+    }
+
+    // Parallel mode (default): faster but uses source text context only
     const chaptersToTranslate = bookData.chapters.map((chapter) => ({
       title: chapter.title,
       items: chapter.content.map((item) => item.text),
@@ -710,6 +784,157 @@ class BookImporter {
 
     console.log('');
     return { chapters: results, totalSegments };
+  }
+
+  /**
+   * Translate content sequentially with checkpoint support.
+   * Uses translated context from preceding paragraphs for higher quality.
+   */
+  private async translateContentSequential(bookData: BookData): Promise<TranslatedContent> {
+    const results: TranslatedChapter[] = [];
+    let totalSegments = 0;
+
+    // Flatten all paragraphs for sequential processing
+    const allParagraphs: Array<{
+      chapterIdx: number;
+      itemIdx: number;
+      id: string;
+      item: ContentItem;
+    }> = [];
+
+    for (let chapterIdx = 0; chapterIdx < bookData.chapters.length; chapterIdx++) {
+      const chapter = bookData.chapters[chapterIdx];
+      for (let itemIdx = 0; itemIdx < chapter.content.length; itemIdx++) {
+        const item = chapter.content[itemIdx];
+        allParagraphs.push({
+          chapterIdx,
+          itemIdx,
+          id: item.id || `ch${chapterIdx}_p${itemIdx}`,
+          item,
+        });
+      }
+    }
+
+    const totalItems = allParagraphs.length + bookData.chapters.length; // +1 for each chapter title
+    let completedItems = 0;
+
+    // Pre-load existing translations from checkpoint
+    const existingTranslations: Record<string, string> = this.checkpointManager
+      ? this.checkpointManager.getTranslationsDict()
+      : {};
+
+    // Initialize result chapters
+    for (const chapter of bookData.chapters) {
+      results.push({
+        ...chapter,
+        translatedTitle: '',
+        content: chapter.content.map((item) => ({
+          ...item,
+          originalText: item.text,
+          translatedText: '',
+        })),
+      });
+    }
+
+    // Translate chapter titles first
+    for (let i = 0; i < bookData.chapters.length; i++) {
+      const chapter = bookData.chapters[i];
+      const titleId = `title_ch${i}`;
+
+      if (existingTranslations[titleId]) {
+        results[i].translatedTitle = existingTranslations[titleId];
+        console.log(`   ⏭️  Skipping title (from checkpoint): "${chapter.title.substring(0, 30)}..."`);
+      } else {
+        const translatedTitle = await this.translator.translateText(chapter.title, {
+          sourceLanguage: this.sourceLang,
+          targetLanguage: this.targetLang,
+        });
+        results[i].translatedTitle = translatedTitle;
+
+        // Save to checkpoint
+        if (this.checkpointManager) {
+          this.checkpointManager.save({
+            id: titleId,
+            chapter: i,
+            type: ParagraphType.TITLE,
+            original: chapter.title,
+            translated: translatedTitle,
+          });
+        }
+      }
+      completedItems++;
+    }
+
+    // Convert to ParagraphInput format for sequential translation
+    const paragraphInputs: ParagraphInput[] = allParagraphs.map((p) => ({
+      id: p.id,
+      text: p.item.text,
+      type: p.item.type,
+      tagName: p.item.tagName,
+      className: p.item.className,
+    }));
+
+    // Filter out already translated paragraphs
+    const toTranslateIndices: number[] = [];
+    for (let i = 0; i < paragraphInputs.length; i++) {
+      if (!existingTranslations[paragraphInputs[i].id]) {
+        toTranslateIndices.push(i);
+      } else {
+        // Restore from checkpoint
+        const p = allParagraphs[i];
+        results[p.chapterIdx].content[p.itemIdx].translatedText =
+          existingTranslations[paragraphInputs[i].id];
+        completedItems++;
+      }
+    }
+
+    if (toTranslateIndices.length === 0) {
+      console.log('   All paragraphs already translated from checkpoint!');
+      return { chapters: results, totalSegments: allParagraphs.length };
+    }
+
+    console.log(`   Translating ${toTranslateIndices.length} of ${allParagraphs.length} paragraphs...`);
+
+    // Translate remaining paragraphs sequentially
+    const translations = await this.translator.translateSequential(
+      paragraphInputs,
+      {
+        sourceLanguage: this.sourceLang,
+        targetLanguage: this.targetLang,
+        sequential: true,
+        contextBefore: this.contextBefore,
+        contextAfter: this.contextAfter,
+        delayBetweenCalls: this.apiDelay,
+        onProgress: (progress, current, total) => {
+          process.stdout.write(`\r   Progress: ${current}/${total} (${progress}%)`);
+          totalSegments = current;
+        },
+      }
+    );
+
+    // Update results and save checkpoints
+    for (let i = 0; i < allParagraphs.length; i++) {
+      const p = allParagraphs[i];
+      const translation = translations[i];
+
+      if (!existingTranslations[paragraphInputs[i].id]) {
+        results[p.chapterIdx].content[p.itemIdx].translatedText = translation;
+
+        // Save to checkpoint
+        if (this.checkpointManager) {
+          this.checkpointManager.save({
+            id: paragraphInputs[i].id,
+            chapter: p.chapterIdx,
+            type: detectParagraphType(p.item.text, p.item.tagName, p.item.className),
+            original: p.item.text,
+            translated: translation,
+          });
+        }
+      }
+    }
+
+    console.log(''); // New line after progress
+    return { chapters: results, totalSegments: allParagraphs.length };
   }
 
   private async importToDatabase(
@@ -817,14 +1042,32 @@ Options:
   --items-concurrency     Number of items per chapter to translate in parallel (default: 8)
   --concurrency           Alias for --items-concurrency
 
+Enhanced Translation Options:
+  --sequential       Enable sequential translation mode (slower but higher quality)
+                     Uses translated context from preceding paragraphs
+  --checkpoint       Checkpoint file for resume support (JSONL format)
+  --clear-checkpoint Clear existing checkpoint and start fresh
+  --context-before   Number of preceding paragraphs for context (default: 2)
+  --context-after    Number of following paragraphs for context (default: 2)
+  --api-delay        Delay between API calls in ms (default: 500)
+
 Environment Variables:
   OPENAI_API_KEY        Your OpenAI API key (required for translation)
   OPENAI_API_BASE_URL   API base URL (default: https://api.openai.com/v1)
   OPENAI_MODEL          Model to use (default: gpt-4o-mini)
 
 Examples:
+  # Basic import with parallel translation (fast)
   ts-node scripts/import-book.ts --file="book.txt" --target="zh" --title="My Book"
   ts-node scripts/import-book.ts --file="novel.epub" --target="es"
+
+  # High quality sequential translation with checkpoint
+  ts-node scripts/import-book.ts --file="novel.epub" --target="zh" --sequential --checkpoint=".checkpoint/novel.jsonl"
+
+  # Resume interrupted translation
+  ts-node scripts/import-book.ts --file="novel.epub" --target="zh" --sequential --checkpoint=".checkpoint/novel.jsonl"
+
+  # With SQL output
   ts-node scripts/import-book.ts --file="novel.epub" --target="zh" --sql-out=exports/novel.sql --apply=local
 
 Supported Languages: ${Object.entries(SUPPORTED_LANGUAGES)

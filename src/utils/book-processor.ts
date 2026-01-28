@@ -3,7 +3,8 @@
  * Handles EPUB parsing and translation in Cloudflare Workers
  */
 
-import { Translator } from './translator';
+import { Translator, ParagraphInput } from './translator';
+import { detectParagraphType } from './translation/types';
 import JSZip from 'jszip';
 import { DOMParser } from '@xmldom/xmldom';
 
@@ -285,14 +286,27 @@ export class BookProcessor {
 
   /**
    * Translate book content
+   * @param sequential - Enable sequential mode for higher quality translation
    */
   async translateBook(
     bookData: BookData,
     targetLanguage: string,
     sourceLanguage: string = 'en',
     chapterConcurrency: number = 2,
-    onProgress?: (current: number, total: number) => void
+    onProgress?: (current: number, total: number) => void,
+    sequential: boolean = false
   ): Promise<ProcessedBook> {
+    if (sequential) {
+      // Sequential mode: higher quality with translated context
+      return this.translateBookSequential(
+        bookData,
+        targetLanguage,
+        sourceLanguage,
+        onProgress
+      );
+    }
+
+    // Parallel mode (default): faster
     const chaptersToTranslate = bookData.chapters.map((chapter) => ({
       title: chapter.title,
       items: chapter.content.map((item) => item.text),
@@ -340,6 +354,86 @@ export class BookProcessor {
   }
 
   /**
+   * Translate book content sequentially with context.
+   * Higher quality mode that uses translated context from preceding paragraphs.
+   */
+  private async translateBookSequential(
+    bookData: BookData,
+    targetLanguage: string,
+    sourceLanguage: string,
+    onProgress?: (current: number, total: number) => void
+  ): Promise<ProcessedBook> {
+    const processedChapters: TranslatedChapter[] = [];
+    let totalItems = bookData.chapters.reduce(
+      (sum, ch) => sum + ch.content.length + 1, // +1 for title
+      0
+    );
+    let completedItems = 0;
+
+    for (const chapter of bookData.chapters) {
+      // Translate chapter title
+      const translatedTitle = await this.translator.translateText(chapter.title, {
+        sourceLanguage,
+        targetLanguage,
+      });
+      completedItems++;
+      if (onProgress) {
+        onProgress(completedItems, totalItems);
+      }
+
+      // Convert content to ParagraphInput format
+      const paragraphInputs: ParagraphInput[] = chapter.content.map((item, idx) => ({
+        id: item.id || `p_${idx}`,
+        text: item.text,
+        type: item.type,
+        tagName: item.tagName,
+        className: item.className,
+      }));
+
+      // Translate content sequentially
+      const translatedItems = await this.translator.translateSequential(
+        paragraphInputs,
+        {
+          sourceLanguage,
+          targetLanguage,
+          sequential: true,
+          contextBefore: 2,
+          contextAfter: 2,
+          delayBetweenCalls: 300, // Shorter delay for Worker
+          onProgress: (progress, current, total) => {
+            if (onProgress) {
+              onProgress(completedItems + current, totalItems);
+            }
+          },
+        }
+      );
+
+      completedItems += chapter.content.length;
+
+      processedChapters.push({
+        ...chapter,
+        translatedTitle,
+        content: chapter.content.map((item, idx) => ({
+          ...item,
+          originalText: item.text,
+          translatedText: translatedItems[idx],
+        })),
+      });
+    }
+
+    return {
+      metadata: {
+        title: bookData.title,
+        originalTitle: bookData.title,
+        author: bookData.author,
+        languagePair: `${sourceLanguage}-${targetLanguage}`,
+        styles: bookData.styles || '',
+      },
+      chapters: processedChapters,
+    };
+  }
+
+  /**
    * Process EPUB file: parse and translate
    */
   async processEPUB(
@@ -349,6 +443,8 @@ export class BookProcessor {
     options?: {
       chapterConcurrency?: number;
       onProgress?: (current: number, total: number) => void;
+      /** Enable sequential translation for higher quality */
+      sequential?: boolean;
     }
   ): Promise<ProcessedBook> {
     // Parse EPUB
@@ -360,7 +456,8 @@ export class BookProcessor {
       targetLanguage,
       sourceLanguage,
       options?.chapterConcurrency || 2,
-      options?.onProgress
+      options?.onProgress,
+      options?.sequential || false
     );
 
     return processedBook;

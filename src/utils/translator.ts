@@ -1,13 +1,29 @@
 /**
  * Unified Translation Module for Ovid
  *
- * Two-Phase Translation Architecture:
+ * Architecture:
  * 1. Pre-scan phase: Extract all proper nouns from the entire book and build a unified glossary
- * 2. Translation phase: Translate paragraphs using the pre-built glossary
+ * 2. Translation phase: Translate paragraphs using the pre-built glossary with optional sequential mode
  * 3. Post-processing: Enforce consistency by replacing any remaining variants
+ *
+ * Two translation modes:
+ * - Standard mode: Uses translateChapters with parallel processing after glossary extraction
+ * - Sequential mode: Uses translateSequential with translated context from preceding paragraphs
  */
 
 import { LLMClient } from './LLMClient';
+import {
+  Paragraph,
+  ParagraphType,
+  Glossary,
+  extractRelevantTerms,
+  detectParagraphType,
+} from './translation/types';
+import { ContextManager } from './translation/ContextManager';
+import {
+  getSystemPrompt,
+  buildTranslationPrompt,
+} from './translation/prompts';
 
 /**
  * Interface for glossary KV store implementations.
@@ -73,6 +89,40 @@ export interface TranslateOptions {
   onProgress?: (progress: number, current: number, total: number) => void;
   chapterConcurrency?: number;
   context?: string[]; // Previous paragraphs (translated)
+  /**
+   * Enable sequential translation mode for higher quality.
+   * Uses translated context from preceding paragraphs instead of parallel execution.
+   * Slower but produces more coherent translations.
+   */
+  sequential?: boolean;
+  /**
+   * Number of preceding paragraphs to include as context (default: 2)
+   */
+  contextBefore?: number;
+  /**
+   * Number of following paragraphs to include as context (default: 2)
+   */
+  contextAfter?: number;
+  /**
+   * Delay between API calls in milliseconds (default: 500)
+   * Used for rate limiting in sequential mode
+   */
+  delayBetweenCalls?: number;
+  /**
+   * Pre-loaded glossary for consistent proper noun translation
+   */
+  glossary?: Glossary;
+}
+
+/**
+ * Extended paragraph input for sequential translation
+ */
+export interface ParagraphInput {
+  id: string;
+  text: string;
+  type?: string; // 'paragraph', 'chapter', 'title', etc.
+  tagName?: string;
+  className?: string;
 }
 
 export interface Chapter {
@@ -715,6 +765,224 @@ IMPORTANT: The translations must be CONSISTENT. If "Whymper" is "温珀", then "
   }
 
   /**
+   * Translate paragraphs sequentially with translated context.
+   * This mode is slower but produces higher quality, more coherent translations.
+   *
+   * Key features:
+   * - Uses translated output from preceding paragraphs as context
+   * - Supports paragraph type detection for specialized prompts
+   * - Injects relevant glossary terms directly into prompts
+   * - Rate limiting between API calls
+   */
+  async translateSequential(
+    paragraphs: ParagraphInput[],
+    options: TranslateOptions = {}
+  ): Promise<string[]> {
+    if (paragraphs.length === 0) {
+      return [];
+    }
+
+    const {
+      sourceLanguage = 'en',
+      targetLanguage = 'zh',
+      contextBefore = 2,
+      contextAfter = 2,
+      delayBetweenCalls = 500,
+      glossary = {},
+      onProgress,
+    } = options;
+
+    // Convert to internal Paragraph format
+    const internalParagraphs: Paragraph[] = paragraphs.map((p, idx) => ({
+      id: p.id || `p_${idx}`,
+      chapter: 0, // Single chapter mode
+      type: detectParagraphType(p.text, p.tagName, p.className),
+      original: p.text,
+      htmlElement: p.tagName,
+      className: p.className,
+    }));
+
+    // Initialize context manager
+    const contextManager = new ContextManager(
+      internalParagraphs,
+      contextBefore,
+      contextAfter
+    );
+
+    // Build full glossary from KV store + provided glossary
+    const fullGlossary: Glossary = { ...glossary };
+    const kvGlossary = this.kvStore.getAll?.() || {};
+    Object.assign(fullGlossary, kvGlossary);
+
+    const results: string[] = new Array(paragraphs.length);
+
+    for (let i = 0; i < internalParagraphs.length; i++) {
+      const para = internalParagraphs[i];
+
+      // Extract relevant glossary terms for this paragraph
+      const relevantTerms = extractRelevantTerms(para.original, fullGlossary);
+
+      // Get formatted context string
+      const contextStr = contextManager.formatContextForPrompt(i);
+
+      // Build the translation prompt
+      const userPrompt = buildTranslationPrompt(
+        para,
+        relevantTerms,
+        contextStr,
+        targetLanguage
+      );
+
+      try {
+        // Make API call with improved prompt
+        const translation = await this.llmClient.chat({
+          messages: [
+            {
+              role: 'system',
+              content: getSystemPrompt(targetLanguage),
+            },
+            {
+              role: 'user',
+              content: userPrompt,
+            },
+          ],
+          max_tokens: 8192,
+          temperature: this.config.temperature,
+        });
+
+        // Apply consistency enforcement
+        const enforced = this.enforceGlossaryConsistency(translation, para.original);
+        results[i] = enforced;
+
+        // Store translation for context
+        contextManager.addTranslation(para.id, enforced);
+
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error ? error.message : 'Unknown error';
+        console.warn(
+          `⚠️  Translation failed for paragraph ${para.id}: ${errorMessage}`
+        );
+        results[i] = `[Translation failed: ${para.original.substring(0, 30)}...]`;
+      }
+
+      // Report progress
+      if (onProgress) {
+        const progress = Math.round(((i + 1) / paragraphs.length) * 100);
+        onProgress(progress, i + 1, paragraphs.length);
+      }
+
+      // Rate limiting delay
+      if (i < paragraphs.length - 1 && delayBetweenCalls > 0) {
+        await new Promise((resolve) => setTimeout(resolve, delayBetweenCalls));
+      }
+    }
+
+    return results;
+  }
+
+  /**
+   * Translate chapter items sequentially with context.
+   * Higher quality mode that processes one paragraph at a time,
+   * using previous translations as context.
+   */
+  async translateChapterSequential(
+    chapter: Chapter,
+    options: TranslateOptions = {}
+  ): Promise<TranslatedChapter> {
+    const {
+      sourceLanguage = 'en',
+      targetLanguage = 'zh',
+      onProgress,
+    } = options;
+
+    // Translate title first
+    const translatedTitle = await this.translateText(chapter.title, {
+      sourceLanguage,
+      targetLanguage,
+    });
+
+    // Convert items to ParagraphInput format
+    const paragraphInputs: ParagraphInput[] = chapter.items.map((text, idx) => ({
+      id: `item_${idx}`,
+      text,
+    }));
+
+    // Translate items sequentially
+    const translatedItems = await this.translateSequential(paragraphInputs, {
+      ...options,
+      onProgress: (progress, current, total) => {
+        if (onProgress) {
+          // Account for title in progress
+          const adjustedCurrent = current + 1;
+          const adjustedTotal = total + 1;
+          const adjustedProgress = Math.round(
+            (adjustedCurrent / adjustedTotal) * 100
+          );
+          onProgress(adjustedProgress, adjustedCurrent, adjustedTotal);
+        }
+      },
+    });
+
+    return {
+      title: translatedTitle,
+      items: translatedItems,
+    };
+  }
+
+  /**
+   * Translate chapters with optional sequential mode.
+   * When sequential=true, uses translateChapterSequential for each chapter.
+   */
+  async translateChaptersEnhanced(
+    chapters: Chapter[],
+    options: TranslateOptions = {}
+  ): Promise<TranslatedChapter[]> {
+    const { sequential = false } = options;
+
+    if (sequential) {
+      // First extract proper nouns from all text
+      const allTexts: string[] = [];
+      for (const chapter of chapters) {
+        allTexts.push(chapter.title);
+        allTexts.push(...chapter.items);
+      }
+      await this.extractProperNouns(allTexts, options);
+      console.log('');
+
+      // Sequential mode: process chapters one at a time for maximum coherence
+      console.log('📖 Translating chapters (sequential mode)...');
+      const results: TranslatedChapter[] = [];
+      let totalItems = chapters.reduce((sum, ch) => sum + ch.items.length + 1, 0);
+      let completedItems = 0;
+
+      for (let i = 0; i < chapters.length; i++) {
+        const chapter = chapters[i];
+        const chapterItemCount = chapter.items.length + 1;
+
+        const translated = await this.translateChapterSequential(chapter, {
+          ...options,
+          onProgress: (_, current, total) => {
+            const currentTotal = completedItems + current;
+            if (options.onProgress) {
+              const progress = Math.round((currentTotal / totalItems) * 100);
+              options.onProgress(progress, currentTotal, totalItems);
+            }
+          },
+        });
+
+        results.push(translated);
+        completedItems += chapterItemCount;
+      }
+
+      return results;
+    } else {
+      // Standard mode: use existing translateChapters with Phase 1-3
+      return this.translateChapters(chapters, options);
+    }
+  }
+
+  /**
    * Check if translator is properly configured
    */
   isConfigured(): boolean {
@@ -736,5 +1004,12 @@ IMPORTANT: The translations must be CONSISTENT. If "Whymper" is "温珀", then "
    */
   getGlossary(): Record<string, string> {
     return this.kvStore.getAll?.() || {};
+  }
+
+  /**
+   * Get the KV store for external access (e.g., pre-loading glossary)
+   */
+  getKVStore(): KVStoreInterface {
+    return this.kvStore;
   }
 }
