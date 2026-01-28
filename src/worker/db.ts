@@ -2,6 +2,15 @@
  * Database query functions
  */
 
+// ==================
+// V1 Database Functions (DEPRECATED)
+// These functions use the old books/chapters/content_items tables.
+// Use V2 functions below instead, which use XPath-based translations.
+// ==================
+
+/**
+ * @deprecated Use V2 API instead
+ */
 export async function getBookWithContent(db: D1Database, bookUuid: string) {
   const book = await db
     .prepare('SELECT * FROM books WHERE uuid = ?')
@@ -26,6 +35,9 @@ export async function getBookWithContent(db: D1Database, bookUuid: string) {
   return { book, content: contentItems.results };
 }
 
+/**
+ * @deprecated Use getBookChaptersV2 instead
+ */
 export async function getBookChapters(db: D1Database, bookUuid: string) {
   const book = await db
     .prepare('SELECT id FROM books WHERE uuid = ?')
@@ -49,6 +61,9 @@ export async function getBookChapters(db: D1Database, bookUuid: string) {
   return chapters.results;
 }
 
+/**
+ * @deprecated Use getChapterContentV2 instead
+ */
 export async function getChapterContent(
   db: D1Database,
   chapterNumber: number,
@@ -146,6 +161,9 @@ export async function getChapterContent(
   return { book, chapter, content: items };
 }
 
+/**
+ * @deprecated Use getAllBooksV2 instead
+ */
 export async function getAllBooks(db: D1Database, userId?: number) {
   let query: string;
   let params: any[] = [];
@@ -176,6 +194,107 @@ export async function getAllBooks(db: D1Database, userId?: number) {
 /**
  * Insert a processed book into the database
  */
+// ==================
+// V2 Database Functions (XPath-based)
+// ==================
+
+export async function getAllBooksV2(db: D1Database) {
+  const books = await db
+    .prepare(
+      `SELECT id, uuid, title, original_title, author, language_pair,
+              book_cover_img_url, book_spine_img_url,
+              created_at, updated_at
+       FROM books_v2
+       ORDER BY created_at DESC`
+    )
+    .all();
+
+  return books.results;
+}
+
+export async function getBookChaptersV2(db: D1Database, bookUuid: string) {
+  const book = await db
+    .prepare('SELECT id FROM books_v2 WHERE uuid = ?')
+    .bind(bookUuid)
+    .first();
+
+  if (!book) {
+    throw new Error('Book not found');
+  }
+
+  const chapters = await db
+    .prepare(
+      `SELECT id, chapter_number, title, original_title, order_index
+       FROM chapters_v2
+       WHERE book_id = ?
+       ORDER BY order_index ASC`
+    )
+    .bind(book.id)
+    .all();
+
+  return chapters.results;
+}
+
+export async function getChapterContentV2(
+  db: D1Database,
+  chapterNumber: number,
+  bookUuid: string
+) {
+  const book = await db
+    .prepare('SELECT * FROM books_v2 WHERE uuid = ?')
+    .bind(bookUuid)
+    .first();
+
+  if (!book) {
+    throw new Error('Book not found');
+  }
+
+  const chapter = await db
+    .prepare(
+      `SELECT id, chapter_number, title, original_title, raw_html, order_index
+       FROM chapters_v2
+       WHERE book_id = ? AND chapter_number = ?`
+    )
+    .bind(book.id, chapterNumber)
+    .first();
+
+  if (!chapter) {
+    throw new Error('Chapter not found');
+  }
+
+  const translations = await db
+    .prepare(
+      `SELECT xpath, original_text, original_html, translated_text, order_index
+       FROM translations_v2
+       WHERE chapter_id = ?
+       ORDER BY order_index ASC`
+    )
+    .bind(chapter.id)
+    .all();
+
+  // Get raw_html from database or construct from translations
+  let rawHtml = (chapter as any).raw_html;
+
+  // If raw_html is not available (too large during import), construct from translations
+  if (!rawHtml || rawHtml.length === 0) {
+    // XPath format: /body[1]/p[1] (element-level, no text() suffix)
+    // Use original_html if available to preserve formatting
+    rawHtml = translations.results.map((t: any) => {
+      const match = t.xpath.match(/\/([a-z0-9]+)\[\d+\]$/i);
+      const tagName = match ? match[1] : 'p';
+      const content = t.original_html || t.original_text;
+      return `<${tagName} data-xpath="${t.xpath}">${content}</${tagName}>`;
+    }).join('\n');
+  }
+
+  return {
+    book,
+    chapter,
+    rawHtml,
+    translations: translations.results,
+  };
+}
+
 export async function insertProcessedBook(
   db: D1Database,
   processedBook: {

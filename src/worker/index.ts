@@ -25,6 +25,9 @@ import {
   getBookChapters,
   getChapterContent,
   getAllBooks,
+  getAllBooksV2,
+  getBookChaptersV2,
+  getChapterContentV2,
 } from './db';
 import {
   handleBookUpload,
@@ -138,6 +141,53 @@ export default {
           });
         }
 
+        // ==================
+        // V2 Book endpoints (XPath-based)
+        // ==================
+        if (url.pathname === '/api/v2/books') {
+          const books = await getAllBooksV2(env.DB);
+          return new Response(JSON.stringify(books), {
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+
+        // V2 Book API: /api/v2/book/:uuid/...
+        const apiMatchV2 = url.pathname.match(/^\/api\/v2\/book\/([^\/]+)\/(.+)$/);
+        if (apiMatchV2) {
+          const bookUuid = apiMatchV2[1];
+          const endpoint = apiMatchV2[2];
+
+          if (endpoint === 'chapters') {
+            const chapters = await getBookChaptersV2(env.DB, bookUuid);
+            return new Response(JSON.stringify(chapters), {
+              headers: { 'Content-Type': 'application/json' },
+            });
+          }
+
+          if (endpoint.startsWith('chapter/')) {
+            const chapterNumber = parseInt(endpoint.split('/')[1] || '1');
+            const chapterData = await getChapterContentV2(env.DB, chapterNumber, bookUuid);
+
+            return new Response(JSON.stringify({
+              uuid: chapterData.book.uuid,
+              title: chapterData.book.title,
+              originalTitle: chapterData.book.original_title,
+              author: chapterData.book.author,
+              styles: chapterData.book.styles,
+              currentChapter: chapterNumber,
+              chapterInfo: {
+                number: chapterData.chapter.chapter_number,
+                title: chapterData.chapter.title,
+                originalTitle: chapterData.chapter.original_title,
+              },
+              rawHtml: chapterData.rawHtml,
+              translations: chapterData.translations,
+            }), {
+              headers: { 'Content-Type': 'application/json' },
+            });
+          }
+        }
+
         // Book API: /api/book/:uuid/...
         const apiMatch = url.pathname.match(/^\/api\/book\/([^\/]+)\/(.+)$/);
         if (apiMatch) {
@@ -208,6 +258,33 @@ export default {
       } catch (error) {
         console.error('API Error:', error);
         return new Response('Internal Server Error', { status: 500 });
+      }
+    }
+
+    // Handle V2 book URLs: /v2/book/:uuid
+    if (url.pathname.startsWith('/v2/book/')) {
+      const bookUuid = url.pathname.split('/')[3];
+      if (bookUuid) {
+        try {
+          const book = await env.DB.prepare('SELECT uuid FROM books_v2 WHERE uuid = ?')
+            .bind(bookUuid)
+            .first();
+
+          if (book) {
+            try {
+              return env.ASSETS.fetch(new Request(new URL('/index.html', request.url)));
+            } catch {
+              return new Response(
+                `<!DOCTYPE html><html><head><title>Ovid V2 - Reading ${bookUuid}</title></head><body><div id="root">Loading...</div></body></html>`,
+                { headers: { 'Content-Type': 'text/html' } }
+              );
+            }
+          } else {
+            return new Response('Book not found', { status: 404 });
+          }
+        } catch {
+          return new Response('Database error', { status: 500 });
+        }
       }
     }
 
