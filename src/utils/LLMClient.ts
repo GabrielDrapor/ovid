@@ -33,6 +33,10 @@ export interface CompletionOptions {
 
 export class LLMClient {
   private config: Required<LLMConfig>;
+  private hasLoggedConfig = false;
+  private requestCount = 0;
+  private successCount = 0;
+  private errorCount = 0;
 
   constructor(config: LLMConfig) {
     this.config = {
@@ -43,12 +47,36 @@ export class LLMClient {
     };
   }
 
+  /**
+   * Get current request statistics
+   */
+  getStats(): { requests: number; successes: number; errors: number } {
+    return {
+      requests: this.requestCount,
+      successes: this.successCount,
+      errors: this.errorCount,
+    };
+  }
+
+  /**
+   * Reset request statistics
+   */
+  resetStats(): void {
+    this.requestCount = 0;
+    this.successCount = 0;
+    this.errorCount = 0;
+  }
+
   async chat(options: CompletionOptions): Promise<string> {
     const url = `${this.config.baseURL}/chat/completions`;
-    console.log('🔧 LLM API URL:', url);
-    console.log('🔧 LLM Model:', this.config.model);
-    console.log('🔧 API Key present:', !!this.config.apiKey);
-    console.log('🔧 API Key length:', this.config.apiKey?.length);
+
+    // Log configuration only once per client instance
+    if (!this.hasLoggedConfig) {
+      console.log(`🔧 LLM: ${this.config.model} @ ${this.config.baseURL}`);
+      this.hasLoggedConfig = true;
+    }
+
+    this.requestCount++;
 
     let messages = [...options.messages];
     let iterations = 0;
@@ -124,6 +152,8 @@ export class LLMClient {
             }
           }
         }
+        this.errorCount++;
+        process.stdout?.write?.('x');
         throw lastError;
       })();
 
@@ -134,7 +164,15 @@ export class LLMClient {
       if (choice.finish_reason !== 'tool_calls' && !message.tool_calls) {
         const content = message.content?.trim();
         if (!content && !message.content) {
+          this.errorCount++;
+          process.stdout?.write?.('x');
           throw new Error('Empty response from LLM API');
+        }
+        this.successCount++;
+        // Print progress dot, newline every 50 for readability
+        process.stdout?.write?.('.');
+        if (this.successCount % 50 === 0) {
+          process.stdout?.write?.(`[${this.successCount}]\n`);
         }
         return content || '';
       }
@@ -174,6 +212,8 @@ export class LLMClient {
       return message.content || '';
     }
 
+    this.errorCount++;
+    process.stdout?.write?.('x');
     throw new Error('Max tool iteration limit reached');
   }
 

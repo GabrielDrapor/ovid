@@ -1,348 +1,220 @@
 #!/usr/bin/env ts-node
 
 /**
- * @deprecated This is the V1 import script.
- * Use import-book-v2.ts instead, which uses XPath-based translations
- * and preserves original EPUB HTML formatting.
+ * Ovid Book Import
  *
- * Ovid Book Import System (V1 - DEPRECATED)
- *
- * Imports EPUB/TXT files and generates bilingual content using translation APIs
+ * Imports EPUB books with XPath-based translations.
+ * Uses the Translator class for proper noun extraction and consistent translations.
  *
  * Usage:
- *   ts-node scripts/import-book.ts --file="book.epub" --target="zh"
- *   ts-node scripts/import-book.ts --file="book.txt" --title="Book Title" --author="Author" --target="es"
+ *   yarn import-book --file="book.epub" --target="zh"
  */
 
 import * as dotenv from 'dotenv';
 dotenv.config({ override: true });
 import * as fs from 'fs';
 import * as path from 'path';
+import * as crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import { execSync } from 'child_process';
-import { DOMParser } from '@xmldom/xmldom';
-
-import {
-  Translator,
-  SUPPORTED_LANGUAGES,
-  ParagraphInput,
-} from '../src/utils/translator';
+import { DOMParser, XMLSerializer } from '@xmldom/xmldom';
+import { Translator } from '../src/utils/translator';
 import { KVStore } from '../src/utils/KVStore';
-import { buildBookImportSql } from '../src/utils/sql-builder';
-import { CheckpointManager } from '../src/utils/translation/CheckpointManager';
-import { detectParagraphType, ParagraphType } from '../src/utils/translation/types';
-import type {
-  ContentItem,
-  Chapter,
-  BookData,
-  TranslatedContentItem,
-  TranslatedChapter,
-} from '../src/utils/book-processor';
 
 // Ensure Wrangler writes config/logs inside the workspace
 process.env.XDG_CONFIG_HOME =
   process.env.XDG_CONFIG_HOME || path.resolve(process.cwd(), '.wrangler_cfg');
 
-const SUPPORTED_FORMATS = ['.epub', '.txt', '.pdf'];
+interface TextNode {
+  xpath: string;
+  text: string; // Plain text content (for translation)
+  html: string; // Original innerHTML (preserves formatting)
+  orderIndex: number;
+}
+
+interface ChapterData {
+  number: number;
+  title: string;
+  originalTitle: string;
+  rawHtml: string;
+  textNodes: TextNode[];
+}
+
+interface BookData {
+  title: string;
+  author: string;
+  language: string;
+  styles: string;
+  chapters: ChapterData[];
+}
+
+interface TranslatedChapter extends ChapterData {
+  translations: Map<string, string>; // xpath -> translated text
+}
 
 interface ImportOptions {
   file: string;
   target?: string;
-  title?: string;
-  author?: string;
   source?: string;
   'limit-chapters'?: string;
-  'limit-paragraphs'?: string;
-  'chapters-concurrency'?: string;
-  chaptersConcurrency?: string;
-  'items-concurrency'?: string;
-  itemsConcurrency?: string;
   concurrency?: string;
-  'sql-out'?: string;
-  sqlOut?: string;
-  apply?: 'local' | 'remote' | null;
+  'chapter-concurrency'?: string; // Number of chapters to translate in parallel
+  delay?: string; // Delay in ms between batches to avoid rate limiting
+  cover?: string;
+  spine?: string;
   help?: boolean;
-  /**
-   * Enable sequential translation mode for higher quality
-   * Uses translated context from preceding paragraphs
-   */
-  sequential?: boolean;
-  /**
-   * Checkpoint file for resume support
-   */
-  checkpoint?: string;
-  /**
-   * Clear existing checkpoint and start fresh
-   */
-  'clear-checkpoint'?: boolean;
-  /**
-   * Number of context paragraphs before (default: 2)
-   */
-  'context-before'?: string;
-  /**
-   * Number of context paragraphs after (default: 2)
-   */
-  'context-after'?: string;
-  /**
-   * Delay between API calls in ms (default: 500)
-   */
-  'api-delay'?: string;
 }
 
-interface TranslatedContent {
-  chapters: TranslatedChapter[];
-  totalSegments: number;
-}
-
-// Extended chapter type for CLI (includes extra metadata)
-interface CLIChapter extends Chapter {
-  orderIndex?: number;
-  tocIndex?: number;
-  spineIndex?: number;
-}
+const SUPPORTED_LANGUAGES: Record<string, string> = {
+  zh: 'Chinese',
+  es: 'Spanish',
+  fr: 'French',
+  de: 'German',
+  ja: 'Japanese',
+  ko: 'Korean',
+  ru: 'Russian',
+  en: 'English',
+};
 
 class BookImporter {
   private file: string;
   private targetLang: string;
-  private title?: string;
-  private author?: string;
   private sourceLang: string;
   private limitChapters?: number;
-  private limitParagraphs?: number;
+  private concurrency: number;
   private chapterConcurrency: number;
-  private itemConcurrency: number;
-  private sqlOut: string | null;
-  private applyMode: 'local' | 'remote' | null;
+  private batchDelay: number;
+  private coverUrl?: string;
+  private spineUrl?: string;
   private translator: Translator;
-  // New options for enhanced translation
-  private sequential: boolean;
-  private checkpointFile: string | null;
-  private clearCheckpoint: boolean;
-  private contextBefore: number;
-  private contextAfter: number;
-  private apiDelay: number;
-  private checkpointManager: CheckpointManager | null = null;
 
   constructor(options: ImportOptions) {
-    this.file = options.file;
+    this.file = this.resolveFilePath(options.file) || '';
+    if (!this.file) {
+      throw new Error('File not found');
+    }
+
     this.targetLang = options.target || 'zh';
-    this.title = options.title;
-    this.author = options.author;
     this.sourceLang = options.source || 'en';
     this.limitChapters = options['limit-chapters']
       ? parseInt(options['limit-chapters'], 10)
       : undefined;
-    this.limitParagraphs = options['limit-paragraphs']
-      ? parseInt(options['limit-paragraphs'], 10)
-      : undefined;
+    this.concurrency = options.concurrency
+      ? parseInt(options.concurrency, 10)
+      : 10;
+    this.chapterConcurrency = options['chapter-concurrency']
+      ? parseInt(options['chapter-concurrency'], 10)
+      : 3; // Translate 3 chapters in parallel by default
+    this.batchDelay = options.delay
+      ? parseInt(options.delay, 10)
+      : 200; // Default 200ms delay between batches
+    this.coverUrl = options.cover;
+    this.spineUrl = options.spine;
 
-    const cc = options['chapters-concurrency'] || options['chaptersConcurrency'];
-    const ic = options['items-concurrency'] || options['itemsConcurrency'] || options['concurrency'];
-    this.chapterConcurrency = cc ? Math.max(1, parseInt(cc, 10)) : 1; // Sequential for consistency
-    this.itemConcurrency = ic ? Math.max(1, parseInt(ic, 10)) : 1; // Sequential for consistency
+    // Initialize Translator with file-based KVStore for glossary persistence
+    const apiKey = process.env.OPENAI_API_KEY || '';
+    const apiBaseUrl = process.env.OPENAI_API_BASE_URL || 'https://openrouter.ai/api/v1';
+    const model = process.env.OPENAI_MODEL || 'google/gemini-3-flash-preview';
 
-    this.sqlOut = options['sql-out'] || options['sqlOut'] || null;
-    this.applyMode = options['apply'] || null;
+    if (!apiKey) {
+      throw new Error('OPENAI_API_KEY is required');
+    }
 
-    // New enhanced translation options
-    this.sequential = options.sequential === true || options.sequential === 'true' as any;
-    this.checkpointFile = options.checkpoint || null;
-    this.clearCheckpoint = options['clear-checkpoint'] === true;
-    this.contextBefore = options['context-before']
-      ? parseInt(options['context-before'], 10)
-      : 2;
-    this.contextAfter = options['context-after']
-      ? parseInt(options['context-after'], 10)
-      : 2;
-    this.apiDelay = options['api-delay']
-      ? parseInt(options['api-delay'], 10)
-      : 500;
+    // Create book-specific glossary file
+    const bookName = path.basename(this.file, '.epub').replace(/[^a-zA-Z0-9]/g, '_');
+    const kvStore = new KVStore(`.ovid_glossary_${bookName}.json`);
 
     this.translator = new Translator({
-      apiKey: process.env.OPENAI_API_KEY,
-      baseURL: process.env.OPENAI_API_BASE_URL,
-      model: process.env.OPENAI_MODEL,
-      concurrency: this.itemConcurrency,
-      kvStore: new KVStore(),
+      apiKey,
+      baseURL: apiBaseUrl,
+      model,
+      concurrency: this.concurrency,
+      kvStore,
     });
-
-    // Pre-register common translation variants for proper nouns
-    // These help the post-processor catch and fix common transliteration variants
-    this.translator.registerCommonVariants({
-      // Common -er/-per ending variants
-      'Whymper': ['温普尔', '温伯', '温珀尔'],
-      // Animal Farm characters - common transliteration variants
-      'Snowball': ['斯诺鲍', '斯诺波', '斯诺伯'],
-      'Boxer': ['鲍克瑟', '博克瑟', '波克瑟'],
-      'Squealer': ['斯奎拉', '斯奎勒', '尖嗓子'],
-      'Clover': ['克洛弗', '克劳弗'],
-      'Mollie': ['莫莉', '莫丽', '茉莉'],
-      'Benjamin': ['本杰明', '便雅悯'],
-      'Muriel': ['穆丽尔', '缪丽尔', '穆里尔'],
-      // Common proper noun transliteration patterns
-      'Holmes': ['福尔摩斯', '霍姆斯'],
-      'Watson': ['华生', '沃森', '瓦特森'],
-    });
-
-    this.validateInputs();
-  }
-
-  private validateInputs(): void {
-    this.file = this.resolveFilePath(this.file) || '';
-    if (!this.file) {
-      throw new Error(`File not found. Looked in: ./, ./epubs, ./@epubs`);
-    }
-
-    const ext = path.extname(this.file).toLowerCase();
-    if (!SUPPORTED_FORMATS.includes(ext)) {
-      throw new Error(`Unsupported format: ${ext}. Supported: ${SUPPORTED_FORMATS.join(', ')}`);
-    }
-
-    if (!SUPPORTED_LANGUAGES[this.targetLang]) {
-      throw new Error(
-        `Unsupported target language: ${this.targetLang}. Supported: ${Object.keys(SUPPORTED_LANGUAGES).join(', ')}`
-      );
-    }
   }
 
   private resolveFilePath(input: string): string | null {
-    if (!input || typeof input !== 'string') return null;
+    if (!input) return null;
     if (path.isAbsolute(input) && fs.existsSync(input)) return input;
 
-    const candidates: string[] = [];
-    const cleaned = input.replace(/^\.\//, '');
-
-    candidates.push(input);
-    if (cleaned.startsWith('epubs/')) candidates.push(`@${cleaned}`);
-    if (cleaned.startsWith('@epubs/')) candidates.push(cleaned.replace(/^@/, ''));
-
-    const baseName = path.basename(cleaned);
-    if (!cleaned.includes('/')) {
-      candidates.push(path.join('epubs', baseName));
-      candidates.push(path.join('@epubs', baseName));
-    }
+    const candidates = [
+      input,
+      path.join(process.cwd(), input),
+      path.join(process.cwd(), 'epubs', input),
+    ];
 
     for (const c of candidates) {
-      const abs = path.resolve(process.cwd(), c);
-      if (fs.existsSync(abs)) return abs;
+      if (fs.existsSync(c)) return c;
     }
-
     return null;
   }
 
   async import(): Promise<string> {
-    console.log('📚 Ovid Book Import System');
-    console.log('='.repeat(40));
+    console.log('📚 Ovid Book Import');
+    console.log('='.repeat(50));
     console.log(`📖 File: ${this.file}`);
     console.log(`🌍 Target Language: ${SUPPORTED_LANGUAGES[this.targetLang]}`);
-    console.log(`⚡ Translation Mode: ${this.sequential ? 'Sequential (high quality)' : 'Parallel (fast)'}`);
-    if (this.checkpointFile) {
-      console.log(`💾 Checkpoint: ${this.checkpointFile}`);
-    }
+    console.log(`⚡ Concurrency: ${this.concurrency} paragraphs, ${this.chapterConcurrency} chapters, Delay: ${this.batchDelay}ms`);
     console.log('');
 
     try {
-      console.log('🔍 Step 1: Parsing book file...');
-      const bookData = await this.parseBook();
+      console.log('🔍 Step 1: Parsing EPUB and extracting HTML...');
+      const bookData = await this.parseEpub();
       console.log(`   ✅ Found ${bookData.chapters.length} chapters`);
 
-      console.log('🔄 Step 2: Generating translations...');
-      const translatedContent = await this.translateContent(bookData);
-      console.log(`   ✅ Translated ${translatedContent.totalSegments} text segments`);
+      const totalTextNodes = bookData.chapters.reduce(
+        (sum, ch) => sum + ch.textNodes.length, 0
+      );
+      console.log(`   ✅ Found ${totalTextNodes} text nodes to translate`);
 
-      console.log('💾 Step 3: Importing to database...');
-      const bookId = await this.importToDatabase(bookData, translatedContent);
-      console.log(`   ✅ Book imported with UUID: ${bookId}`);
+      // Phase 1: Extract proper nouns for consistent translation
+      console.log('📝 Step 2: Extracting proper nouns (glossary)...');
+      const allTexts: string[] = [];
+      for (const chapter of bookData.chapters) {
+        allTexts.push(chapter.title);
+        allTexts.push(...chapter.textNodes.map(n => n.text));
+      }
+      const glossary = await this.translator.extractProperNouns(allTexts, {
+        sourceLanguage: this.sourceLang,
+        targetLanguage: this.targetLang,
+      });
+      console.log(`   ✅ Extracted ${Object.keys(glossary).length} proper nouns`);
+
+      console.log('🔄 Step 3: Translating text nodes...');
+      const translatedChapters = await this.translateBook(bookData);
+      console.log('\n   ✅ Translation complete');
+
+      console.log('💾 Step 4: Saving to database...');
+      const bookUuid = await this.saveToDatabase(bookData, translatedChapters);
+      console.log(`   ✅ Book saved with UUID: ${bookUuid}`);
 
       console.log('');
       console.log('🎉 Import completed successfully!');
-      console.log(`📱 Access your book at: /book/${bookId}`);
+      console.log(`📱 Access your book at: /book/${bookUuid}`);
 
-      return bookId;
+      return bookUuid;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       console.error('❌ Import failed:', errorMessage);
-      process.exit(1);
+      throw error;
     }
   }
 
-  private async parseBook(): Promise<BookData> {
-    const ext = path.extname(this.file).toLowerCase();
-
-    switch (ext) {
-      case '.txt':
-        return this.parseTxtFile();
-      case '.epub':
-        return this.parseEpubFile();
-      case '.pdf':
-        return this.parsePdfFile();
-      default:
-        throw new Error(`Parser not implemented for ${ext}`);
-    }
-  }
-
-  private parseTxtFile(): BookData {
-    const content = fs.readFileSync(this.file, 'utf8');
-    const lines = content.split('\n').filter((line) => line.trim());
-
-    const chapters: CLIChapter[] = [];
-    let currentChapter: CLIChapter | null = null;
-    let chapterCount = 0;
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-
-      if (this.isChapterHeader(trimmed)) {
-        if (currentChapter) chapters.push(currentChapter);
-        chapterCount++;
-        currentChapter = {
-          number: chapterCount,
-          title: trimmed,
-          originalTitle: trimmed,
-          content: [],
-        };
-      } else if (trimmed && currentChapter) {
-        currentChapter.content.push({
-          id: `p-${currentChapter.number}-${currentChapter.content.length + 1}`,
-          text: trimmed,
-          type: 'paragraph',
-        });
-      }
-    }
-
-    if (currentChapter) chapters.push(currentChapter);
-
-    return {
-      title: this.title || path.basename(this.file, '.txt'),
-      originalTitle: this.title || path.basename(this.file, '.txt'),
-      author: this.author || 'Unknown Author',
-      language: this.sourceLang,
-      chapters,
-    };
-  }
-
-  private isChapterHeader(line: string): boolean {
-    return /^(Chapter|CHAPTER|第.{1,3}章|\d+\.)/i.test(line) && line.length < 100;
-  }
-
-  private parseEpubFile(): Promise<BookData> {
+  private async parseEpub(): Promise<BookData> {
     const { EPub } = require('epub2');
-    const crypto = require('crypto');
 
     return new Promise((resolve, reject) => {
       const epub = new EPub(this.file);
+
       epub.on('end', async () => {
         try {
           const metadata = {
-            title: this.title || epub.metadata.title || path.basename(this.file, '.epub'),
-            author: this.author || epub.metadata.creator || 'Unknown Author',
-            language: this.sourceLang || epub.metadata.language || 'en',
+            title: epub.metadata.title || path.basename(this.file, '.epub'),
+            author: epub.metadata.creator || 'Unknown Author',
+            language: epub.metadata.language || 'en',
           };
 
-          console.log(`   Using TOC-based chapter detection`);
-          console.log(`   Found ${epub.toc.length} TOC entries`);
-
-          // Extract styles
+          // Extract global styles
           let globalStyles = '';
           for (const id in epub.manifest) {
             const item = epub.manifest[id];
@@ -356,27 +228,10 @@ class BookImporter {
                 });
                 globalStyles += `/* ${item.href} */\n${styleContent}\n`;
               } catch (e) {
-                console.warn(`      ⚠️  Failed to read style ${item.href}`);
+                console.warn(`   ⚠️ Failed to read style: ${item.href}`);
               }
             }
           }
-
-          let chapterEntries = (epub.toc || []).filter((entry: any) => {
-            const title = (entry.title || '').toLowerCase();
-            const href = (entry.href || '').toLowerCase();
-            const isCover = title.includes('cover') || href.includes('cover');
-            const isToc = title.includes('table of contents') ||
-              title === 'contents' ||
-              href.includes('nav') ||
-              title.includes('toc');
-            return !(isCover || isToc);
-          });
-
-          if (chapterEntries.length === 0 && epub.toc?.length > 0) {
-            chapterEntries = epub.toc.slice();
-          }
-
-          console.log(`   TOC chapters considered: ${chapterEntries.length}`);
 
           // Build href to id mapping
           const hrefToId: Record<string, string> = {};
@@ -388,332 +243,139 @@ class BookImporter {
             if (filename && !hrefToId[filename]) hrefToId[filename] = id;
           }
 
-          // Build spine index mapping
-          const spineIndexById: Record<string, number> = {};
-          const spineIndexByHref: Record<string, number> = {};
-          (epub.spine.contents || []).forEach((item: any, idx: number) => {
-            spineIndexById[item.id] = idx;
-            const man = epub.manifest[item.id];
-            if (man?.href) {
-              const n = path.posix.normalize(decodeURI(man.href)).replace(/^\/*/, '');
-              spineIndexByHref[n] = idx;
-            }
+          // Use TOC for chapter detection (supports fragment IDs for single-file EPUBs)
+          let chapterEntries = (epub.toc || []).filter((entry: any) => {
+            const title = (entry.title || '').toLowerCase();
+            const href = (entry.href || '').toLowerCase();
+            const isCover = title.includes('cover') || href.includes('cover');
+            const isToc = title.includes('table of contents') ||
+              title === 'contents' ||
+              href.includes('nav') ||
+              title.includes('toc');
+            return !(isCover || isToc);
           });
 
-          const orderedChapters: (CLIChapter | null)[] = new Array(chapterEntries.length).fill(null);
-          let processedChapters = 0;
-          const processedHashes = new Set<string>();
-          const self = this;
+          // Fallback to spine if no TOC entries
+          if (chapterEntries.length === 0) {
+            console.log('   ⚠️ No TOC entries found, falling back to spine items');
+            for (const item of (epub.spine?.contents || [])) {
+              const manifest = epub.manifest[item.id];
+              if (manifest) {
+                const href = manifest.href || '';
+                const isTitle = href.includes('title') || href.includes('cover');
+                if (!isTitle) {
+                  chapterEntries.push({
+                    title: `Chapter ${chapterEntries.length + 1}`,
+                    href: manifest.href,
+                    id: item.id,
+                  });
+                }
+              }
+            }
+          }
 
+          console.log(`   📚 Found ${chapterEntries.length} chapters in TOC`);
+
+          // Group TOC entries by file to detect fragment boundaries
+          const tocEntriesByFile = new Map<string, Array<{ fragment?: string; index: number }>>();
           chapterEntries.forEach((entry: any, index: number) => {
-            const href = (entry.href || '').split('#')[0];
-            const normalizedHref = path.posix.normalize(decodeURI(href)).replace(/^\/*/, '');
+            const [filePath, fragment] = (entry.href || '').split('#');
+            const normalizedPath = path.posix.normalize(decodeURI(filePath)).replace(/^\/*/, '');
+            if (!tocEntriesByFile.has(normalizedPath)) {
+              tocEntriesByFile.set(normalizedPath, []);
+            }
+            tocEntriesByFile.get(normalizedPath)!.push({ fragment, index });
+          });
 
+          // Limit chapters if specified
+          let entriesToProcess = chapterEntries;
+          if (this.limitChapters && this.limitChapters > 0) {
+            entriesToProcess = chapterEntries.slice(0, this.limitChapters);
+          }
+
+          const chapters: ChapterData[] = [];
+          const processedHashes = new Set<string>();
+
+          for (let i = 0; i < entriesToProcess.length; i++) {
+            const entry = entriesToProcess[i];
+            const [filePath, fragment] = (entry.href || '').split('#');
+            const normalizedPath = path.posix.normalize(decodeURI(filePath)).replace(/^\/*/, '');
+
+            // Find manifest ID for this file
             let fileId: string | null = null;
-            if (hrefToId[normalizedHref]) {
-              fileId = hrefToId[normalizedHref];
+            if (hrefToId[normalizedPath]) {
+              fileId = hrefToId[normalizedPath];
             } else {
-              const filename = normalizedHref.split('/').pop();
-              if (filename && hrefToId[filename]) fileId = hrefToId[filename];
+              const filename = normalizedPath.split('/').pop();
+              if (filename && hrefToId[filename]) {
+                fileId = hrefToId[filename];
+              }
             }
 
             if (!fileId) {
-              console.log(`   ❌ Could not find file for: ${entry.title} (${href})`);
-              processedChapters++;
-              if (processedChapters === chapterEntries.length) finalizeParsing();
-              return;
+              console.log(`   ❌ Could not find file for: ${entry.title} (${filePath})`);
+              continue;
             }
 
-            const spineIndex = spineIndexById[fileId] !== undefined
-              ? spineIndexById[fileId]
-              : spineIndexByHref[normalizedHref] !== undefined
-                ? spineIndexByHref[normalizedHref]
-                : Number.POSITIVE_INFINITY;
-
-            epub.getChapter(fileId, (err: any, html: string) => {
-              if (err || !html) {
-                console.log(`   ⚠️ Could not read content for: ${entry.title} (${fileId})`);
-              } else {
-                const fragment = (entry.href || '').split('#')[1];
-                const contentHash = crypto.createHash('md5').update(html + (fragment || '')).digest('hex');
-
-                if (processedHashes.has(contentHash)) {
-                  console.log(`   ⏭️  Skipping duplicate content: "${entry.title}"`);
-                } else {
-                  processChapter(index, spineIndex, entry.title, html, fileId!, fragment);
-                  processedHashes.add(contentHash);
-                }
-              }
-
-              processedChapters++;
-              if (processedChapters === chapterEntries.length) finalizeParsing();
-            });
-          });
-
-          const processChapter = (
-            tocIndex: number,
-            spineIndex: number,
-            title: string,
-            html: string,
-            fileId: string,
-            fragment?: string
-          ) => {
-            const parser = new DOMParser();
-            // Wrap HTML in proper structure if missing body tag to avoid xmldom parsing issues
-            const wrappedHtml = html.includes('<body') ? html : `<html><body>${html}</body></html>`;
-            const doc = parser.parseFromString(wrappedHtml, 'text/html');
-
-            // Extract internal styles
-            const styleTags = doc.getElementsByTagName('style');
-            for (let i = 0; i < styleTags.length; i++) {
-              const s = styleTags[i].textContent;
-              if (s) globalStyles += `/* Internal ${fileId} */\n${s}\n`;
-            }
-
-            let startNode: any = doc.getElementsByTagName('body')[0] || doc;
-            if (fragment) {
-              const target = doc.getElementById(fragment);
-              if (target) {
-                console.log(`      📍 Starting at fragment: ${fragment}`);
-                startNode = target;
-              }
-            }
-
-            const fragmentIds = chapterEntries
-              .filter((e: any) => (e.href || '').startsWith(fileId + '#'))
-              .map((e: any) => e.href.split('#')[1]);
-
-            let stopExtracting = false;
-            const items: ContentItem[] = [];
-
-            items.push({
-              id: `t-${tocIndex + 1}-0`,
-              text: title,
-              type: 'chapter',
-              tagName: 'h3',
-            });
-
-            let started = !fragment;
-            stopExtracting = false;
-
-            const extractItems = (node: any) => {
-              if (!node || stopExtracting) return;
-
-              if (node.getAttribute && node.getAttribute('id')) {
-                const id = node.getAttribute('id');
-                if (id === fragment) {
-                  started = true;
-                } else if (fragmentIds.includes(id)) {
-                  if (started) {
-                    stopExtracting = true;
-                    return;
-                  }
-                }
-              }
-
-              const nodeName = (node.nodeName || '').toLowerCase();
-              if (nodeName === 'script' || nodeName === 'style') return;
-
-              const meaningfulTags = ['p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote', 'li', 'section', 'header', 'footer'];
-
-              if (started && meaningfulTags.includes(nodeName)) {
-                let text = (node.textContent || '').trim();
-                if (text.length > 0) {
-                  let rawText = '';
-                  const children = node.childNodes;
-                  if (children) {
-                    for (let i = 0; i < children.length; i++) {
-                      const child = children[i];
-                      const childName = (child.nodeName || '').toLowerCase();
-
-                      if (child.nodeType === 3) {
-                        rawText += child.nodeValue;
-                      } else if (childName === 'sup' || (child.getAttribute && (child.getAttribute('class') || '').includes('footnote'))) {
-                        rawText += `<sup>${child.textContent}</sup>`;
-                      } else if (childName === 'a') {
-                        const linkText = (child.textContent || '').trim();
-                        const footnoteMatch = linkText.match(/^(.*?)(\d+)$/);
-                        if (footnoteMatch && (footnoteMatch[1] === '' || footnoteMatch[1].length < 5)) {
-                          rawText += `${footnoteMatch[1]}<sup>${footnoteMatch[2]}</sup>`;
-                        } else {
-                          rawText += child.textContent || '';
-                        }
-                      } else {
-                        rawText += child.textContent || '';
-                      }
-                    }
-                  } else {
-                    rawText = text;
-                  }
-
-                  const className = node.getAttribute ? node.getAttribute('class') : '';
-                  const inlineStyle = node.getAttribute ? node.getAttribute('style') : '';
-
-                  const cleanText = rawText.replace(/<[^>]*>/g, '').trim();
-                  if (items.length > 0) {
-                    const prevItem = items[items.length - 1];
-                    const prevText = prevItem.text.replace(/<[^>]*>/g, '').trim();
-                    if (cleanText === prevText && cleanText.length > 0) {
-                      console.log(`      ⏭️  Skipping internal duplicate text: "${cleanText.substring(0, 30)}..."`);
-                      return;
-                    }
-                  }
-
-                  items.push({
-                    id: `p-${tocIndex + 1}-${items.length}`,
-                    text: rawText.trim(),
-                    type: nodeName.startsWith('h') ? 'chapter' : 'paragraph',
-                    tagName: nodeName,
-                    className: className || undefined,
-                    styles: inlineStyle || undefined,
-                  });
-                  return;
-                }
-              }
-
-              const children = node.childNodes;
-              if (children) {
-                for (let i = 0; i < children.length; i++) {
-                  extractItems(children[i]);
-                }
-              }
-            };
-
-            extractItems(doc.getElementsByTagName('body')[0] || doc);
-
-            let filteredItems = items.filter(
-              (it) => it.type === 'chapter' || it.text.length > 5 || it.className?.includes('part')
-            );
-
-            // Deduplicate headers
-            if (filteredItems.length > 1) {
-              const normalize = (s: string) =>
-                s.toLowerCase()
-                  .replace(/^((chapter|part|section|appendix|book)\s+)?(\d+|[ivx]+)[:.]?\s*/gi, '')
-                  .replace(/[^a-z0-9\u4e00-\u9fa5]/g, '')
-                  .trim();
-
-              const tocTitleClean = normalize(title);
-
-              if (tocTitleClean.length > 0) {
-                let itemsToRemove = 0;
-                let currentAccumulator = '';
-
-                for (let i = 1; i < Math.min(filteredItems.length, 4); i++) {
-                  currentAccumulator += ' ' + filteredItems[i].text;
-                  const accClean = normalize(currentAccumulator);
-
-                  if (accClean === tocTitleClean ||
-                    (accClean.length > 5 && accClean.includes(tocTitleClean)) ||
-                    (tocTitleClean.length > 5 && tocTitleClean.includes(accClean))) {
-                    itemsToRemove = i;
-                  } else if (accClean.length > tocTitleClean.length + 10) {
-                    break;
-                  }
-                }
-
-                if (itemsToRemove > 0) {
-                  console.log(`      ✨ Deduplicated ${itemsToRemove} content header items for: "${title}"`);
-                  filteredItems.splice(1, itemsToRemove);
-                }
-              }
-            }
-
-            if (filteredItems.length > 0) {
-              orderedChapters[tocIndex] = {
-                number: tocIndex + 1,
-                orderIndex: tocIndex + 1,
-                tocIndex,
-                spineIndex,
-                title,
-                originalTitle: title,
-                content: filteredItems,
-              };
-              console.log(`   ✅ "${title}" (${filteredItems.length - 1} items)`);
-            }
-          };
-
-          // Fallback to spine processing
-          const processSpineFallback = () => {
-            console.log('   ⚠️  No content from TOC. Falling back to spine order.');
-            orderedChapters.length = 0; // Clear
-            const spineItems = epub.spine.contents || [];
-            let processed = 0;
-            if (spineItems.length === 0) {
-              reject(new Error('No chapters found in TOC or spine'));
-              return;
-            }
-            spineItems.forEach((item: any, idx: number) => {
-              epub.getChapter(item.id, (err: any, html: string) => {
-                if (!err && html) {
-                  processChapter(idx, idx, item.title || `Chapter ${idx + 1}`, html, item.id);
-                }
-                processed++;
-                if (processed === spineItems.length) finalizeResult();
+            const html = await new Promise<string>((res, rej) => {
+              epub.getChapter(fileId!, (err: any, data: string) => {
+                if (err) rej(err);
+                else res(data);
               });
             });
-          };
 
-          const finalizeResult = () => {
-            let present = orderedChapters
-              .filter((ch) => ch && ch.content && ch.content.length > 0)
-              .map((ch) => ch as CLIChapter);
+            // Get fragment IDs for this file to detect chapter boundaries
+            const fileFragments = tocEntriesByFile.get(normalizedPath) || [];
+            const currentFragmentIndex = fileFragments.findIndex(f => f.index === i);
+            const nextFragment = currentFragmentIndex >= 0 && currentFragmentIndex < fileFragments.length - 1
+              ? fileFragments[currentFragmentIndex + 1].fragment
+              : undefined;
 
-            present.sort((a, b) => {
-              const sa = a.spineIndex ?? Number.POSITIVE_INFINITY;
-              const sb = b.spineIndex ?? Number.POSITIVE_INFINITY;
-              if (sa !== sb) return sa - sb;
-              return (a.tocIndex || 0) - (b.tocIndex || 0);
-            });
+            // Extract text nodes - use fragment-aware extraction if needed
+            let textNodes: TextNode[];
+            let rawHtml: string;
 
-            if (typeof self.limitChapters === 'number' && self.limitChapters > 0) {
-              present = present.slice(0, self.limitChapters);
+            if (fragment) {
+              // Fragment-based extraction for single-file EPUBs
+              const result = this.extractTextNodesFromFragment(html, fragment, nextFragment);
+              textNodes = result.textNodes;
+              rawHtml = result.rawHtml;
+            } else {
+              // Full file extraction
+              textNodes = this.extractTextNodes(html);
+              const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+              rawHtml = bodyMatch ? bodyMatch[1].trim() : html;
             }
 
-            present.forEach((ch, index) => {
-              ch.number = index + 1;
-              ch.orderIndex = index + 1;
-              if (Array.isArray(ch.content)) {
-                ch.content = ch.content.map((p, i) => ({
-                  ...p,
-                  id: p.type === 'chapter' ? `t-${index + 1}-${i}` : `p-${index + 1}-${i}`,
-                }));
-              }
-            });
-
-            console.log(`   Final result: ${present.length} chapters`);
-
-            resolve({
-              title: metadata.title,
-              originalTitle: metadata.title,
-              author: metadata.author,
-              language: metadata.language,
-              chapters: present,
-              styles: globalStyles,
-            });
-          };
-
-          const finalizeParsing = () => {
-            const present = orderedChapters
-              .filter((ch) => ch && ch.content && ch.content.length > 0);
-
-            // Check if we have any actual content (not just title items)
-            const hasRealContent = present.some(
-              (ch) => ch!.content.some((item) => item.type !== 'chapter')
-            );
-
-            // If TOC processing yielded no real content, fallback to spine
-            if (present.length === 0 || !hasRealContent) {
-              processSpineFallback();
-              return;
+            // Skip duplicate content (same file without fragment boundary changes)
+            const contentHash = crypto.createHash('md5').update(rawHtml + (fragment || '')).digest('hex');
+            if (processedHashes.has(contentHash)) {
+              console.log(`   ⏭️  Skipping duplicate content: "${entry.title}"`);
+              continue;
             }
+            processedHashes.add(contentHash);
 
-            finalizeResult();
-          };
+            // Use TOC title, or extract from content if available
+            let title = entry.title || `Chapter ${chapters.length + 1}`;
 
-          if (chapterEntries.length === 0) {
-            processSpineFallback();
+            chapters.push({
+              number: chapters.length + 1,
+              title: title,
+              originalTitle: title,
+              rawHtml,
+              textNodes,
+            });
+
+            console.log(`   📖 Chapter ${chapters.length}: "${title}" (${textNodes.length} text nodes)${fragment ? ` [fragment: #${fragment}]` : ''}`);
           }
+
+          resolve({
+            title: metadata.title,
+            author: metadata.author,
+            language: metadata.language,
+            styles: globalStyles,
+            chapters,
+          });
         } catch (parseError) {
           reject(parseError);
         }
@@ -724,286 +386,629 @@ class BookImporter {
     });
   }
 
-  private parsePdfFile(): BookData {
-    throw new Error('PDF parsing not yet implemented. Use TXT files for now.');
-  }
+  /**
+   * Extract meaningful text from block-level elements only.
+   * This preserves paragraph structure - inline elements (em, i, strong, span)
+   * are included in their parent block's text, not extracted separately.
+   */
+  private extractTextNodes(html: string): TextNode[] {
+    const textNodes: TextNode[] = [];
+    let orderIndex = 0;
 
-  private async translateContent(bookData: BookData): Promise<TranslatedContent> {
-    let totalSegments = 0;
+    // Helper to decode HTML entities
+    const decodeEntities = (text: string): string => {
+      return text
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(parseInt(code)))
+        .replace(/\s+/g, ' ')
+        .trim();
+    };
 
-    // Initialize checkpoint manager if checkpoint file specified
-    if (this.checkpointFile) {
-      this.checkpointManager = new CheckpointManager(this.checkpointFile);
-      if (this.clearCheckpoint) {
-        console.log('   Clearing existing checkpoint...');
-        this.checkpointManager.clear();
+    // Skip these tags entirely
+    const skipTags = new Set(['script', 'style', 'noscript', 'head', 'meta', 'link']);
+
+    // Block-level elements - extract full textContent from these
+    const blockTags = new Set([
+      'p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+      'li', 'blockquote', 'pre', 'td', 'th', 'dt', 'dd',
+      'figcaption', 'article', 'section', 'aside', 'header', 'footer'
+    ]);
+
+    // Try to extract body content first
+    const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+    const contentToProcess = bodyMatch ? bodyMatch[1] : html;
+
+    // Parse with xmldom - use text/xml for XHTML
+    const parser = new DOMParser();
+    // Wrap in a root element to ensure valid XML
+    const wrappedHtml = `<root>${contentToProcess}</root>`;
+    const doc = parser.parseFromString(wrappedHtml, 'text/xml');
+
+    // Find the root element we created
+    const root = doc.getElementsByTagName('root')[0];
+    if (!root) {
+      console.warn('   ⚠️ Failed to parse HTML, falling back to regex extraction');
+      return this.extractTextNodesRegex(html);
+    }
+
+    // Helper to get full text content of an element (including all children)
+    const getFullTextContent = (node: any): string => {
+      let text = '';
+      const children = node.childNodes;
+      if (children) {
+        for (let i = 0; i < children.length; i++) {
+          const child = children[i];
+          if (child.nodeType === 3) { // TEXT_NODE
+            text += child.textContent || '';
+          } else if (child.nodeType === 1) { // ELEMENT_NODE
+            text += getFullTextContent(child);
+          }
+        }
       }
-      const existingCount = this.checkpointManager.getCompletedCount();
-      if (existingCount > 0) {
-        console.log(`   Resuming from checkpoint: ${existingCount} items already translated`);
+      return text;
+    };
+
+    // Helper to get innerHTML of an element (preserves formatting tags)
+    const serializer = new XMLSerializer();
+    const getInnerHtml = (node: any): string => {
+      let html = '';
+      const children = node.childNodes;
+      if (children) {
+        for (let i = 0; i < children.length; i++) {
+          const child = children[i];
+          if (child.nodeType === 3) { // TEXT_NODE
+            html += child.textContent || '';
+          } else if (child.nodeType === 1) { // ELEMENT_NODE
+            html += serializer.serializeToString(child);
+          }
+        }
+      }
+      return html;
+    };
+
+    // Recursive function to walk DOM and extract from block elements
+    const walkNode = (node: any, pathSegments: string[]) => {
+      const nodeType = node.nodeType;
+
+      if (nodeType === 1) { // Node.ELEMENT_NODE
+        const tagName = (node.tagName || node.nodeName || '').toLowerCase();
+
+        // Skip certain tags
+        if (skipTags.has(tagName)) return;
+
+        // Count this element's index among siblings of same tag name
+        let elementIndex = 1;
+        let sibling = node.previousSibling;
+        while (sibling) {
+          if (sibling.nodeType === 1) { // ELEMENT_NODE
+            const sibTagName = (sibling.tagName || sibling.nodeName || '').toLowerCase();
+            if (sibTagName === tagName) {
+              elementIndex++;
+            }
+          }
+          sibling = sibling.previousSibling;
+        }
+
+        const currentPath = [...pathSegments, `${tagName}[${elementIndex}]`];
+
+        // If this is a block element, extract full text content
+        if (blockTags.has(tagName)) {
+          const fullText = decodeEntities(getFullTextContent(node));
+          if (fullText.length >= 2) {
+            // XPath points to this block element (not text() child)
+            const xpath = '/' + currentPath.join('/');
+            textNodes.push({
+              xpath,
+              text: fullText,
+              html: getInnerHtml(node), // Preserve formatting
+              orderIndex: orderIndex++,
+            });
+          }
+          // Don't recurse into block elements - we've captured all their text
+          return;
+        }
+
+        // For non-block elements (like divs containing blocks), recurse
+        const children = node.childNodes;
+        if (children) {
+          for (let i = 0; i < children.length; i++) {
+            walkNode(children[i], currentPath);
+          }
+        }
+      }
+    };
+
+    // Walk from root's children, treating root as body[1]
+    const children = root.childNodes;
+    if (children) {
+      for (let i = 0; i < children.length; i++) {
+        const child = children[i] as any;
+        if (child.nodeType === 1) { // ELEMENT_NODE
+          const tagName = ((child as any).tagName || (child as any).nodeName || '').toLowerCase();
+          if (skipTags.has(tagName)) continue;
+
+          let elementIndex = 1;
+          let sibling = child.previousSibling as any;
+          while (sibling) {
+            if (sibling.nodeType === 1) {
+              const sibTagName = (sibling.tagName || sibling.nodeName || '').toLowerCase();
+              if (sibTagName === tagName) {
+                elementIndex++;
+              }
+            }
+            sibling = sibling.previousSibling;
+          }
+
+          const currentPath = ['body[1]', `${tagName}[${elementIndex}]`];
+
+          // If this top-level element is a block, extract its text
+          if (blockTags.has(tagName)) {
+            const fullText = decodeEntities(getFullTextContent(child));
+            if (fullText.length >= 2) {
+              const xpath = '/' + currentPath.join('/');
+              textNodes.push({
+                xpath,
+                text: fullText,
+                html: getInnerHtml(child), // Preserve formatting
+                orderIndex: orderIndex++,
+              });
+            }
+          } else {
+            // Otherwise recurse to find block elements inside
+            walkNode(child, ['body[1]']);
+          }
+        }
       }
     }
 
-    if (this.sequential) {
-      // Sequential mode: higher quality with translated context
-      console.log('   Using sequential translation mode (higher quality)');
-      return this.translateContentSequential(bookData);
+    // If no text nodes found, fall back to regex
+    if (textNodes.length === 0) {
+      console.warn('   ⚠️ DOM walk found no text, falling back to regex extraction');
+      return this.extractTextNodesRegex(html);
     }
 
-    // Parallel mode (default): faster but uses source text context only
-    const chaptersToTranslate = bookData.chapters.map((chapter) => ({
-      title: chapter.title,
-      items: chapter.content.map((item) => item.text),
-    }));
-
-    const translatedChapters = await this.translator.translateChapters(
-      chaptersToTranslate,
-      {
-        sourceLanguage: this.sourceLang,
-        targetLanguage: this.targetLang,
-        chapterConcurrency: this.chapterConcurrency,
-        onProgress: (progress, current, total) => {
-          totalSegments = current;
-          if (current % 10 === 0) process.stdout.write('.');
-        },
-      }
-    );
-
-    const results: TranslatedChapter[] = bookData.chapters.map((chapter, idx) => {
-      const translated = translatedChapters[idx];
-      return {
-        ...chapter,
-        translatedTitle: translated.title,
-        content: chapter.content.map((item, itemIdx) => ({
-          ...item,
-          originalText: item.text,
-          translatedText: translated.items[itemIdx],
-        })),
-      };
-    });
-
-    console.log('');
-    return { chapters: results, totalSegments };
+    return textNodes;
   }
 
   /**
-   * Translate content sequentially with checkpoint support.
-   * Uses translated context from preceding paragraphs for higher quality.
+   * Extract text nodes from a fragment within an HTML file.
+   * Used for single-file EPUBs where multiple chapters are in one file,
+   * separated by fragment IDs (e.g., chapter.html#section2).
    */
-  private async translateContentSequential(bookData: BookData): Promise<TranslatedContent> {
-    const results: TranslatedChapter[] = [];
-    let totalSegments = 0;
+  private extractTextNodesFromFragment(
+    html: string,
+    startFragment: string,
+    endFragment?: string
+  ): { textNodes: TextNode[]; rawHtml: string } {
+    const textNodes: TextNode[] = [];
+    let orderIndex = 0;
 
-    // Flatten all paragraphs for sequential processing
-    const allParagraphs: Array<{
-      chapterIdx: number;
-      itemIdx: number;
-      id: string;
-      item: ContentItem;
-    }> = [];
+    // Helper to decode HTML entities
+    const decodeEntities = (text: string): string => {
+      return text
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(parseInt(code)))
+        .replace(/\s+/g, ' ')
+        .trim();
+    };
 
-    for (let chapterIdx = 0; chapterIdx < bookData.chapters.length; chapterIdx++) {
-      const chapter = bookData.chapters[chapterIdx];
-      for (let itemIdx = 0; itemIdx < chapter.content.length; itemIdx++) {
-        const item = chapter.content[itemIdx];
-        allParagraphs.push({
-          chapterIdx,
-          itemIdx,
-          id: item.id || `ch${chapterIdx}_p${itemIdx}`,
-          item,
-        });
+    const skipTags = new Set(['script', 'style', 'noscript', 'head', 'meta', 'link']);
+    const blockTags = new Set([
+      'p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+      'li', 'blockquote', 'pre', 'td', 'th', 'dt', 'dd',
+      'figcaption', 'article', 'section', 'aside', 'header', 'footer'
+    ]);
+
+    // Parse the HTML
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+    const body = doc.getElementsByTagName('body')[0] || doc;
+
+    // Find the starting element by fragment ID
+    let startNode: any = null;
+    const findById = (node: any, id: string): any => {
+      if (node.getAttribute && node.getAttribute('id') === id) {
+        return node;
+      }
+      const children = node.childNodes;
+      if (children) {
+        for (let i = 0; i < children.length; i++) {
+          const result = findById(children[i], id);
+          if (result) return result;
+        }
+      }
+      return null;
+    };
+
+    startNode = findById(body, startFragment);
+    if (!startNode) {
+      console.warn(`   ⚠️ Fragment #${startFragment} not found, extracting from beginning`);
+      startNode = body;
+    }
+
+    // Track element counts for XPath generation (chapter-scoped, starting from 1)
+    const tagCounts: Record<string, number> = {};
+    const serializer = new XMLSerializer();
+    let rawHtmlParts: string[] = [];
+    let started = !startFragment || startNode === body;
+    let stopped = false;
+
+    // Helper to get full text content
+    const getFullTextContent = (node: any): string => {
+      let text = '';
+      const children = node.childNodes;
+      if (children) {
+        for (let i = 0; i < children.length; i++) {
+          const child = children[i];
+          if (child.nodeType === 3) { // TEXT_NODE
+            text += child.textContent || '';
+          } else if (child.nodeType === 1) { // ELEMENT_NODE
+            text += getFullTextContent(child);
+          }
+        }
+      }
+      return text;
+    };
+
+    // Helper to get innerHTML
+    const getInnerHtml = (node: any): string => {
+      let innerHtml = '';
+      const children = node.childNodes;
+      if (children) {
+        for (let i = 0; i < children.length; i++) {
+          const child = children[i];
+          if (child.nodeType === 3) {
+            innerHtml += child.textContent || '';
+          } else if (child.nodeType === 1) {
+            innerHtml += serializer.serializeToString(child);
+          }
+        }
+      }
+      return innerHtml;
+    };
+
+    // Recursive walk to extract text nodes within fragment boundaries
+    const walkNode = (node: any) => {
+      if (!node || stopped) return;
+
+      const nodeType = node.nodeType;
+
+      if (nodeType === 1) { // ELEMENT_NODE
+        const tagName = (node.tagName || node.nodeName || '').toLowerCase();
+
+        // Check if this is the end fragment
+        if (endFragment && node.getAttribute && node.getAttribute('id') === endFragment) {
+          stopped = true;
+          return;
+        }
+
+        // Check if this is the start fragment
+        if (!started && node.getAttribute && node.getAttribute('id') === startFragment) {
+          started = true;
+        }
+
+        if (skipTags.has(tagName)) return;
+
+        // If we've started and this is a block element, extract it
+        if (started && blockTags.has(tagName)) {
+          const fullText = decodeEntities(getFullTextContent(node));
+          if (fullText.length >= 2) {
+            // Generate chapter-scoped XPath
+            tagCounts[tagName] = (tagCounts[tagName] || 0) + 1;
+            const xpath = `/body[1]/${tagName}[${tagCounts[tagName]}]`;
+
+            textNodes.push({
+              xpath,
+              text: fullText,
+              html: getInnerHtml(node),
+              orderIndex: orderIndex++,
+            });
+
+            // Add to raw HTML for this fragment
+            rawHtmlParts.push(serializer.serializeToString(node));
+          }
+          return; // Don't recurse into block elements
+        }
+
+        // Recurse into children
+        const children = node.childNodes;
+        if (children) {
+          for (let i = 0; i < children.length; i++) {
+            walkNode(children[i]);
+          }
+        }
+      }
+    };
+
+    // Start walking from the body or start node
+    if (startNode === body) {
+      const children = body.childNodes;
+      if (children) {
+        for (let i = 0; i < children.length; i++) {
+          walkNode(children[i]);
+        }
+      }
+    } else {
+      // If we have a specific start node, first include it if it's a block element
+      const startTagName = (startNode.tagName || startNode.nodeName || '').toLowerCase();
+      if (blockTags.has(startTagName)) {
+        const fullText = decodeEntities(getFullTextContent(startNode));
+        if (fullText.length >= 2) {
+          tagCounts[startTagName] = (tagCounts[startTagName] || 0) + 1;
+          const xpath = `/body[1]/${startTagName}[${tagCounts[startTagName]}]`;
+          textNodes.push({
+            xpath,
+            text: fullText,
+            html: getInnerHtml(startNode),
+            orderIndex: orderIndex++,
+          });
+          rawHtmlParts.push(serializer.serializeToString(startNode));
+        }
+      }
+
+      // Then continue from the start node's next siblings and parent's siblings
+      started = true;
+      let currentNode = startNode.nextSibling;
+      while (currentNode && !stopped) {
+        walkNode(currentNode);
+        currentNode = currentNode.nextSibling;
+      }
+
+      // If we haven't hit the end fragment, continue up and to the right
+      if (!stopped && startNode.parentNode && startNode.parentNode !== body) {
+        let parent = startNode.parentNode;
+        while (parent && parent !== body && !stopped) {
+          let sibling = parent.nextSibling;
+          while (sibling && !stopped) {
+            walkNode(sibling);
+            sibling = sibling.nextSibling;
+          }
+          parent = parent.parentNode;
+        }
       }
     }
 
-    const totalItems = allParagraphs.length + bookData.chapters.length; // +1 for each chapter title
-    let completedItems = 0;
+    // If no text nodes found, fall back to full extraction
+    if (textNodes.length === 0) {
+      console.warn(`   ⚠️ No content found in fragment #${startFragment}, trying full extraction`);
+      return {
+        textNodes: this.extractTextNodes(html),
+        rawHtml: html.match(/<body[^>]*>([\s\S]*?)<\/body>/i)?.[1] || html,
+      };
+    }
 
-    // Pre-load existing translations from checkpoint
-    const existingTranslations: Record<string, string> = this.checkpointManager
-      ? this.checkpointManager.getTranslationsDict()
-      : {};
+    return {
+      textNodes,
+      rawHtml: rawHtmlParts.join('\n'),
+    };
+  }
 
-    // Initialize result chapters
-    for (const chapter of bookData.chapters) {
-      results.push({
-        ...chapter,
-        translatedTitle: '',
-        content: chapter.content.map((item) => ({
-          ...item,
-          originalText: item.text,
-          translatedText: '',
-        })),
+  /**
+   * Fallback regex-based text extraction
+   */
+  private extractTextNodesRegex(html: string): TextNode[] {
+    const textNodes: TextNode[] = [];
+    let orderIndex = 0;
+
+    // Helper to decode HTML entities
+    const decodeEntities = (text: string): string => {
+      return text
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(parseInt(code)))
+        .replace(/\s+/g, ' ')
+        .trim();
+    };
+
+    // Remove script and style content
+    let cleanHtml = html.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
+    cleanHtml = cleanHtml.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
+
+    // Extract text from paragraph-like elements
+    const tagPattern = /<(p|h[1-6]|div|li|blockquote|td|th|dt|dd)\b[^>]*>([\s\S]*?)<\/\1>/gi;
+    const tagCounts: Record<string, number> = {};
+    const seen = new Set<string>();
+    let match;
+
+    while ((match = tagPattern.exec(cleanHtml)) !== null) {
+      const tagName = match[1].toLowerCase();
+      const content = match[2];
+
+      // Strip nested tags to get text content
+      const textContent = decodeEntities(content.replace(/<[^>]+>/g, ' '));
+
+      // Skip empty or very short content
+      if (textContent.length < 2) continue;
+
+      // Skip duplicates
+      if (seen.has(textContent)) continue;
+      seen.add(textContent);
+
+      // Increment tag counter
+      tagCounts[tagName] = (tagCounts[tagName] || 0) + 1;
+
+      textNodes.push({
+        xpath: `/body[1]/${tagName}[${tagCounts[tagName]}]`,
+        text: textContent,
+        html: content, // Original content with HTML tags
+        orderIndex: orderIndex++,
       });
     }
 
-    // Translate chapter titles first
-    for (let i = 0; i < bookData.chapters.length; i++) {
-      const chapter = bookData.chapters[i];
-      const titleId = `title_ch${i}`;
+    return textNodes;
+  }
 
-      if (existingTranslations[titleId]) {
-        results[i].translatedTitle = existingTranslations[titleId];
-        console.log(`   ⏭️  Skipping title (from checkpoint): "${chapter.title.substring(0, 30)}..."`);
-      } else {
-        const translatedTitle = await this.translator.translateText(chapter.title, {
-          sourceLanguage: this.sourceLang,
-          targetLanguage: this.targetLang,
-        });
-        results[i].translatedTitle = translatedTitle;
+  /**
+   * Translate all text nodes in the book
+   */
+  private async translateBook(bookData: BookData): Promise<TranslatedChapter[]> {
+    const translatedChapters: TranslatedChapter[] = new Array(bookData.chapters.length);
+    let chapterIndex = 0;
+    let completedChapters = 0;
 
-        // Save to checkpoint
-        if (this.checkpointManager) {
-          this.checkpointManager.save({
-            id: titleId,
-            chapter: i,
-            type: ParagraphType.TITLE,
-            original: chapter.title,
-            translated: translatedTitle,
-          });
+    // Worker function to translate a single chapter
+    const translateChapter = async (chapter: ChapterData, index: number): Promise<void> => {
+      console.log(`   📖 [${index + 1}/${bookData.chapters.length}] Translating chapter ${chapter.number}: "${chapter.title}"...`);
+
+      const translations = new Map<string, string>();
+      const texts = chapter.textNodes.map(n => n.text);
+
+      // Batch translate with concurrency control
+      const batchSize = this.concurrency;
+      for (let i = 0; i < texts.length; i += batchSize) {
+        const batch = texts.slice(i, i + batchSize);
+        const batchNodes = chapter.textNodes.slice(i, i + batchSize);
+
+        const translatedBatch = await Promise.all(
+          batch.map(text => this.translator.translateText(text, {
+            sourceLanguage: this.sourceLang,
+            targetLanguage: this.targetLang,
+          }))
+        );
+
+        for (let j = 0; j < batchNodes.length; j++) {
+          translations.set(batchNodes[j].xpath, translatedBatch[j]);
+        }
+
+        // Delay between batches to avoid rate limiting
+        if (i + batchSize < texts.length && this.batchDelay > 0) {
+          await new Promise(resolve => setTimeout(resolve, this.batchDelay));
         }
       }
-      completedItems++;
-    }
 
-    // Convert to ParagraphInput format for sequential translation
-    const paragraphInputs: ParagraphInput[] = allParagraphs.map((p) => ({
-      id: p.id,
-      text: p.item.text,
-      type: p.item.type,
-      tagName: p.item.tagName,
-      className: p.item.className,
-    }));
-
-    // Filter out already translated paragraphs
-    const toTranslateIndices: number[] = [];
-    for (let i = 0; i < paragraphInputs.length; i++) {
-      if (!existingTranslations[paragraphInputs[i].id]) {
-        toTranslateIndices.push(i);
-      } else {
-        // Restore from checkpoint
-        const p = allParagraphs[i];
-        results[p.chapterIdx].content[p.itemIdx].translatedText =
-          existingTranslations[paragraphInputs[i].id];
-        completedItems++;
-      }
-    }
-
-    if (toTranslateIndices.length === 0) {
-      console.log('   All paragraphs already translated from checkpoint!');
-      return { chapters: results, totalSegments: allParagraphs.length };
-    }
-
-    console.log(`   Translating ${toTranslateIndices.length} of ${allParagraphs.length} paragraphs...`);
-
-    // Translate remaining paragraphs sequentially
-    const translations = await this.translator.translateSequential(
-      paragraphInputs,
-      {
+      // Also translate chapter title
+      const translatedTitle = await this.translator.translateText(chapter.title, {
         sourceLanguage: this.sourceLang,
         targetLanguage: this.targetLang,
-        sequential: true,
-        contextBefore: this.contextBefore,
-        contextAfter: this.contextAfter,
-        delayBetweenCalls: this.apiDelay,
-        onProgress: (progress, current, total) => {
-          process.stdout.write(`\r   Progress: ${current}/${total} (${progress}%)`);
-          totalSegments = current;
-        },
+      });
+
+      translatedChapters[index] = {
+        ...chapter,
+        title: translatedTitle,
+        translations,
+      };
+
+      completedChapters++;
+      console.log(`   ✅ [${completedChapters}/${bookData.chapters.length}] Completed chapter ${chapter.number}: "${chapter.title}"`);
+    };
+
+    // Create worker pool for parallel chapter translation
+    const workers = Array.from(
+      { length: Math.min(this.chapterConcurrency, bookData.chapters.length) },
+      async () => {
+        while (true) {
+          const currentIndex = chapterIndex++;
+          if (currentIndex >= bookData.chapters.length) break;
+          await translateChapter(bookData.chapters[currentIndex], currentIndex);
+        }
       }
     );
 
-    // Update results and save checkpoints
-    for (let i = 0; i < allParagraphs.length; i++) {
-      const p = allParagraphs[i];
-      const translation = translations[i];
+    await Promise.all(workers);
 
-      if (!existingTranslations[paragraphInputs[i].id]) {
-        results[p.chapterIdx].content[p.itemIdx].translatedText = translation;
-
-        // Save to checkpoint
-        if (this.checkpointManager) {
-          this.checkpointManager.save({
-            id: paragraphInputs[i].id,
-            chapter: p.chapterIdx,
-            type: detectParagraphType(p.item.text, p.item.tagName, p.item.className),
-            original: p.item.text,
-            translated: translation,
-          });
-        }
-      }
-    }
-
-    console.log(''); // New line after progress
-    return { chapters: results, totalSegments: allParagraphs.length };
+    return translatedChapters;
   }
 
-  private async importToDatabase(
+  /**
+   * Save the book to the database in batches
+   */
+  private async saveToDatabase(
     bookData: BookData,
-    translatedContent: TranslatedContent
+    translatedChapters: TranslatedChapter[]
   ): Promise<string> {
     const bookUuid = uuidv4();
     const languagePair = `${this.sourceLang}-${this.targetLang}`;
 
-    // Use shared SQL builder
-    const sql = buildBookImportSql({
-      bookUuid,
-      metadata: {
-        title: bookData.title,
-        originalTitle: bookData.title,
-        author: bookData.author,
-        languagePair,
-        styles: bookData.styles,
-      },
-      chapters: translatedContent.chapters,
-      userId: null, // CLI imports are public
+    // Escape SQL string
+    const escapeSQL = (str: string): string => {
+      if (str === null || str === undefined) return 'NULL';
+      return "'" + str.replace(/'/g, "''") + "'";
+    };
+
+    // First, initialize the v2 schema if needed
+    console.log('   📋 Ensuring v2 schema exists...');
+    execSync(`./node_modules/.bin/wrangler d1 execute ovid-db --local --file=database/schema_v2.sql`, {
+      stdio: 'inherit',
     });
 
-    if (this.sqlOut) {
-      const outPath = path.resolve(process.cwd(), this.sqlOut);
-      const dir = path.dirname(outPath);
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(outPath, sql, 'utf8');
-      console.log(`   📝 Wrote SQL to ${outPath}`);
+    // Insert book (small statement)
+    console.log('   📥 Inserting book metadata...');
+    const bookSql = `INSERT INTO books_v2 (uuid, title, original_title, author, language_pair, styles, book_cover_img_url, book_spine_img_url) VALUES (${escapeSQL(bookUuid)}, ${escapeSQL(translatedChapters[0]?.title || bookData.title)}, ${escapeSQL(bookData.title)}, ${escapeSQL(bookData.author)}, ${escapeSQL(languagePair)}, ${escapeSQL(bookData.styles)}, ${this.coverUrl ? escapeSQL(this.coverUrl) : 'NULL'}, ${this.spineUrl ? escapeSQL(this.spineUrl) : 'NULL'});`;
 
-      if (this.applyMode === 'local') {
-        console.log('   📥 Applying SQL file to local D1...');
-        execSync(`npx wrangler d1 execute ovid-db --local --file=${outPath}`, { stdio: 'inherit' });
-      } else if (this.applyMode === 'remote') {
-        console.log('   ☁️  Applying SQL file to remote D1...');
-        execSync(`npx wrangler d1 execute ovid-db --remote --file=${outPath}`, { stdio: 'inherit' });
-      } else {
-        console.log('   ℹ️  SQL not applied automatically (use --apply=local|remote to apply).');
+    const bookSqlPath = path.resolve(process.cwd(), `.temp_book_${bookUuid}.sql`);
+    fs.writeFileSync(bookSqlPath, bookSql, 'utf8');
+    try {
+      execSync(`./node_modules/.bin/wrangler d1 execute ovid-db --local --file="${bookSqlPath}"`, { stdio: 'inherit' });
+    } finally {
+      if (fs.existsSync(bookSqlPath)) fs.unlinkSync(bookSqlPath);
+    }
+
+    // Insert chapters and translations
+    // D1/Wrangler has a max statement size limit, so skip raw_html for large chapters
+    // D1's limit appears to be around 100KB for statements
+    // Skip raw_html storage entirely - we now store original_html per translation instead
+    // This avoids D1/wrangler statement size limits
+    const MAX_RAW_HTML_SIZE = 0; // Disabled - use per-translation original_html instead
+
+    for (const chapter of translatedChapters) {
+      console.log(`   📥 Inserting chapter ${chapter.number}...`);
+
+      // Check if raw_html is too large
+      const rawHtmlSize = Buffer.byteLength(chapter.rawHtml, 'utf8');
+      const shouldStoreRawHtml = rawHtmlSize < MAX_RAW_HTML_SIZE;
+
+      if (!shouldStoreRawHtml) {
+        console.log(`      ⚠️ Raw HTML too large (${Math.round(rawHtmlSize / 1024)}KB), will reconstruct at runtime`);
       }
 
-      return bookUuid;
+      // Insert chapter - only include raw_html if it's small enough
+      const chapterSql = shouldStoreRawHtml
+        ? `INSERT INTO chapters_v2 (book_id, chapter_number, title, original_title, raw_html, order_index) VALUES ((SELECT id FROM books_v2 WHERE uuid = ${escapeSQL(bookUuid)}), ${chapter.number}, ${escapeSQL(chapter.title)}, ${escapeSQL(chapter.originalTitle)}, ${escapeSQL(chapter.rawHtml)}, ${chapter.number});`
+        : `INSERT INTO chapters_v2 (book_id, chapter_number, title, original_title, order_index) VALUES ((SELECT id FROM books_v2 WHERE uuid = ${escapeSQL(bookUuid)}), ${chapter.number}, ${escapeSQL(chapter.title)}, ${escapeSQL(chapter.originalTitle)}, ${chapter.number});`;
+
+      const chapterSqlPath = path.resolve(process.cwd(), `.temp_chapter_${bookUuid}_${chapter.number}.sql`);
+      fs.writeFileSync(chapterSqlPath, chapterSql, 'utf8');
+      try {
+        execSync(`./node_modules/.bin/wrangler d1 execute ovid-db --local --file="${chapterSqlPath}"`, { stdio: 'inherit' });
+      } finally {
+        if (fs.existsSync(chapterSqlPath)) fs.unlinkSync(chapterSqlPath);
+      }
+
+      // Insert translations in batches of 50
+      const batchSize = 50;
+      const totalNodes = chapter.textNodes.length;
+
+      for (let i = 0; i < totalNodes; i += batchSize) {
+        const batch = chapter.textNodes.slice(i, i + batchSize);
+        const translationsSql = batch.map(node => {
+          const translatedText = chapter.translations.get(node.xpath) || node.text;
+          return `INSERT INTO translations_v2 (chapter_id, xpath, original_text, original_html, translated_text, order_index) VALUES ((SELECT id FROM chapters_v2 WHERE book_id = (SELECT id FROM books_v2 WHERE uuid = ${escapeSQL(bookUuid)}) AND chapter_number = ${chapter.number}), ${escapeSQL(node.xpath)}, ${escapeSQL(node.text)}, ${escapeSQL(node.html)}, ${escapeSQL(translatedText)}, ${node.orderIndex});`;
+        }).join('\n');
+
+        const transSqlPath = path.resolve(process.cwd(), `.temp_trans_${bookUuid}_${chapter.number}_${i}.sql`);
+        fs.writeFileSync(transSqlPath, translationsSql, 'utf8');
+        try {
+          execSync(`./node_modules/.bin/wrangler d1 execute ovid-db --local --file="${transSqlPath}"`, { stdio: 'pipe' });
+          process.stdout.write(`\r      Translations: ${Math.min(i + batchSize, totalNodes)}/${totalNodes}`);
+        } finally {
+          if (fs.existsSync(transSqlPath)) fs.unlinkSync(transSqlPath);
+        }
+      }
+      console.log(''); // New line after progress
     }
 
-    // Default: local execution
-    const tempSqlPath = path.resolve(process.cwd(), `.temp_import_${bookUuid}.sql`);
-
-    try {
-      console.log('   📝 Generating temporary SQL for import...');
-      fs.writeFileSync(tempSqlPath, sql, 'utf8');
-
-      console.log('   📥 Executing SQL import...');
-      const env = { ...process.env };
-      Object.keys(env).forEach((key) => {
-        if (key.startsWith('npm_config_')) delete env[key];
-      });
-
-      execSync(`npx wrangler d1 execute ovid-db --local --file="${tempSqlPath}"`, {
-        stdio: 'inherit',
-        env,
-      });
-
-      return bookUuid;
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      console.error('Database import error:', errorMessage);
-      throw error;
-    } finally {
-      if (fs.existsSync(tempSqlPath)) fs.unlinkSync(tempSqlPath);
-    }
+    return bookUuid;
   }
 }
 
@@ -1025,54 +1030,31 @@ function parseArgs(): ImportOptions {
 
 function showHelp(): void {
   console.log(`
-📚 Ovid Book Import System
+📚 Ovid Book Import
+
+Imports EPUB books with proper noun extraction and consistent translations.
 
 Usage:
-  ts-node scripts/import-book.ts --file="book.epub" --target="zh"
+  yarn import-book --file="book.epub" --target="zh"
 
 Options:
-  --file         Path to book file (TXT, EPUB, PDF)
-  --target       Target language code (${Object.keys(SUPPORTED_LANGUAGES).join(', ')})
-  --title        Book title (for TXT files)
-  --author       Book author (for TXT files)
-  --source       Source language code (default: en)
-  --sql-out      Write a single SQL file with all INSERTs instead of executing
-  --apply        Apply the generated SQL automatically: local | remote
-  --chapters-concurrency  Number of chapters to translate in parallel (default: 2)
-  --items-concurrency     Number of items per chapter to translate in parallel (default: 8)
-  --concurrency           Alias for --items-concurrency
-
-Enhanced Translation Options:
-  --sequential       Enable sequential translation mode (slower but higher quality)
-                     Uses translated context from preceding paragraphs
-  --checkpoint       Checkpoint file for resume support (JSONL format)
-  --clear-checkpoint Clear existing checkpoint and start fresh
-  --context-before   Number of preceding paragraphs for context (default: 2)
-  --context-after    Number of following paragraphs for context (default: 2)
-  --api-delay        Delay between API calls in ms (default: 500)
+  --file              Path to EPUB file
+  --target            Target language code (zh, es, fr, de, ja, ko, ru)
+  --source            Source language code (default: en)
+  --limit-chapters    Limit number of chapters to import
+  --concurrency       Number of parallel paragraph translations (default: 10)
+  --chapter-concurrency  Number of chapters to translate in parallel (default: 3)
+  --delay             Delay in ms between batches to avoid rate limiting (default: 200)
+  --help              Show this help
 
 Environment Variables:
-  OPENAI_API_KEY        Your OpenAI API key (required for translation)
-  OPENAI_API_BASE_URL   API base URL (default: https://api.openai.com/v1)
-  OPENAI_MODEL          Model to use (default: gpt-4o-mini)
+  OPENAI_API_KEY        API key (for OpenRouter or OpenAI-compatible API)
+  OPENAI_API_BASE_URL   API base URL (default: https://openrouter.ai/api/v1)
+  OPENAI_MODEL          Model to use (default: google/gemini-3-flash-preview)
 
 Examples:
-  # Basic import with parallel translation (fast)
-  ts-node scripts/import-book.ts --file="book.txt" --target="zh" --title="My Book"
-  ts-node scripts/import-book.ts --file="novel.epub" --target="es"
-
-  # High quality sequential translation with checkpoint
-  ts-node scripts/import-book.ts --file="novel.epub" --target="zh" --sequential --checkpoint=".checkpoint/novel.jsonl"
-
-  # Resume interrupted translation
-  ts-node scripts/import-book.ts --file="novel.epub" --target="zh" --sequential --checkpoint=".checkpoint/novel.jsonl"
-
-  # With SQL output
-  ts-node scripts/import-book.ts --file="novel.epub" --target="zh" --sql-out=exports/novel.sql --apply=local
-
-Supported Languages: ${Object.entries(SUPPORTED_LANGUAGES)
-    .map(([k, v]) => `${k}(${v})`)
-    .join(', ')}
+  yarn import-book --file="animal_farm.epub" --target="zh"
+  yarn import-book --file="book.epub" --target="zh" --limit-chapters=2
 `);
 }
 

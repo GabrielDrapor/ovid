@@ -21,10 +21,6 @@ import {
   checkStripeConfig,
 } from './credits';
 import {
-  getBookWithContent,
-  getBookChapters,
-  getChapterContent,
-  getAllBooks,
   getAllBooksV2,
   getBookChaptersV2,
   getChapterContentV2,
@@ -133,29 +129,19 @@ export default {
           return handleBookUpload(request, env);
         }
 
-        if (url.pathname === '/api/books') {
-          const user = await getCurrentUser(env.DB, request);
-          const books = await getAllBooks(env.DB, user?.id);
-          return new Response(JSON.stringify(books), {
-            headers: { 'Content-Type': 'application/json' },
-          });
-        }
-
-        // ==================
-        // V2 Book endpoints (XPath-based)
-        // ==================
-        if (url.pathname === '/api/v2/books') {
+        // All book listing now uses V2
+        if (url.pathname === '/api/books' || url.pathname === '/api/v2/books') {
           const books = await getAllBooksV2(env.DB);
           return new Response(JSON.stringify(books), {
             headers: { 'Content-Type': 'application/json' },
           });
         }
 
-        // V2 Book API: /api/v2/book/:uuid/...
-        const apiMatchV2 = url.pathname.match(/^\/api\/v2\/book\/([^\/]+)\/(.+)$/);
-        if (apiMatchV2) {
-          const bookUuid = apiMatchV2[1];
-          const endpoint = apiMatchV2[2];
+        // Book API: /api/book/:uuid/... and /api/v2/book/:uuid/... (all use V2)
+        const apiMatch = url.pathname.match(/^\/api(?:\/v2)?\/book\/([^\/]+)\/(.+)$/);
+        if (apiMatch) {
+          const bookUuid = apiMatch[1];
+          const endpoint = apiMatch[2];
 
           if (endpoint === 'chapters') {
             const chapters = await getBookChaptersV2(env.DB, bookUuid);
@@ -188,72 +174,6 @@ export default {
           }
         }
 
-        // Book API: /api/book/:uuid/...
-        const apiMatch = url.pathname.match(/^\/api\/book\/([^\/]+)\/(.+)$/);
-        if (apiMatch) {
-          const bookUuid = apiMatch[1];
-          const endpoint = apiMatch[2];
-
-          if (endpoint === 'content') {
-            const bookData = await getBookWithContent(env.DB, bookUuid);
-            return new Response(JSON.stringify({
-              uuid: bookData.book.uuid,
-              title: bookData.book.title,
-              originalTitle: bookData.book.original_title,
-              author: bookData.book.author,
-              styles: bookData.book.styles,
-              content: bookData.content.map((item: any) => ({
-                id: item.item_id,
-                original: item.original_text,
-                translated: item.translated_text,
-                type: item.type,
-                className: item.class_name,
-                tagName: item.tag_name,
-                styles: item.styles,
-              })),
-            }), {
-              headers: { 'Content-Type': 'application/json' },
-            });
-          }
-
-          if (endpoint === 'chapters') {
-            const chapters = await getBookChapters(env.DB, bookUuid);
-            return new Response(JSON.stringify(chapters), {
-              headers: { 'Content-Type': 'application/json' },
-            });
-          }
-
-          if (endpoint.startsWith('chapter/')) {
-            const chapterNumber = parseInt(endpoint.split('/')[1] || '1');
-            const chapterData = await getChapterContent(env.DB, chapterNumber, bookUuid);
-
-            return new Response(JSON.stringify({
-              uuid: chapterData.book.uuid,
-              title: chapterData.book.title,
-              originalTitle: chapterData.book.original_title,
-              author: chapterData.book.author,
-              styles: chapterData.book.styles,
-              currentChapter: chapterNumber,
-              chapterInfo: {
-                number: chapterData.chapter.chapter_number,
-                title: chapterData.chapter.title,
-                originalTitle: chapterData.chapter.original_title,
-              },
-              content: chapterData.content.map((item: any) => ({
-                id: item.item_id,
-                original: item.original_text,
-                translated: item.translated_text,
-                type: item.type,
-                className: item.class_name,
-                tagName: item.tag_name,
-                styles: item.styles,
-              })),
-            }), {
-              headers: { 'Content-Type': 'application/json' },
-            });
-          }
-        }
-
         return new Response('API endpoint not found', { status: 404 });
       } catch (error) {
         console.error('API Error:', error);
@@ -261,39 +181,13 @@ export default {
       }
     }
 
-    // Handle V2 book URLs: /v2/book/:uuid
-    if (url.pathname.startsWith('/v2/book/')) {
-      const bookUuid = url.pathname.split('/')[3];
+    // Handle book URLs: /book/:uuid and /v2/book/:uuid (all use V2 database)
+    const bookUrlMatch = url.pathname.match(/^\/(?:v2\/)?book\/([^\/]+)/);
+    if (bookUrlMatch) {
+      const bookUuid = bookUrlMatch[1];
       if (bookUuid) {
         try {
           const book = await env.DB.prepare('SELECT uuid FROM books_v2 WHERE uuid = ?')
-            .bind(bookUuid)
-            .first();
-
-          if (book) {
-            try {
-              return env.ASSETS.fetch(new Request(new URL('/index.html', request.url)));
-            } catch {
-              return new Response(
-                `<!DOCTYPE html><html><head><title>Ovid V2 - Reading ${bookUuid}</title></head><body><div id="root">Loading...</div></body></html>`,
-                { headers: { 'Content-Type': 'text/html' } }
-              );
-            }
-          } else {
-            return new Response('Book not found', { status: 404 });
-          }
-        } catch {
-          return new Response('Database error', { status: 500 });
-        }
-      }
-    }
-
-    // Handle book URLs: /book/:uuid
-    if (url.pathname.startsWith('/book/')) {
-      const bookUuid = url.pathname.split('/')[2];
-      if (bookUuid) {
-        try {
-          const book = await env.DB.prepare('SELECT uuid FROM books WHERE uuid = ?')
             .bind(bookUuid)
             .first();
 

@@ -359,7 +359,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
               onClick={goToPreviousChapter}
               title="Previous Chapter"
             >
-              Previous Chapter
+              ↶
             </button>
           </div>
         )}
@@ -380,7 +380,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
               onClick={goToNextChapter}
               title="Next Chapter"
             >
-              Next Chapter
+              ↷
             </button>
           </div>
         )}
@@ -403,7 +403,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
             <div className="fab-menu-section">
               <div className="fab-menu-header">Navigation</div>
               <button className="fab-menu-item" onClick={() => setIsChaptersOpen(true)}>
-                Chapters
+                Contents
               </button>
             </div>
 
@@ -524,7 +524,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
           <div className="chapters-modal">
             <div className="chapters-content">
               <div className="chapters-header">
-                <h3>Chapters</h3>
+                <h3>Contents</h3>
                 <button
                   className="chapters-close"
                   onClick={() => setIsChaptersOpen(false)}

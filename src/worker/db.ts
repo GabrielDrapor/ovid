@@ -393,3 +393,133 @@ export async function insertProcessedBook(
 
   return bookId;
 }
+
+/**
+ * Insert a processed book into V2 database tables (XPath-based)
+ */
+export async function insertProcessedBookV2(
+  db: D1Database,
+  processedBook: {
+    metadata: {
+      title: string;
+      originalTitle: string;
+      author: string;
+      languagePair: string;
+      styles: string;
+    };
+    chapters: Array<{
+      number: number;
+      title: string;
+      originalTitle: string;
+      translatedTitle: string;
+      rawHtml: string;
+      textNodes: Array<{
+        xpath: string;
+        text: string;
+        html: string;
+        orderIndex: number;
+      }>;
+      translations: Map<string, string>; // xpath -> translated text
+    }>;
+  },
+  bookUuid: string,
+  userId?: number
+): Promise<number> {
+  // Get translated title from first chapter or use original
+  const translatedBookTitle = processedBook.chapters[0]?.translatedTitle || processedBook.metadata.title;
+
+  // Insert book metadata into books_v2
+  await db.prepare(
+    `INSERT INTO books_v2 (uuid, title, original_title, author, language_pair, styles)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  )
+    .bind(
+      bookUuid,
+      translatedBookTitle,
+      processedBook.metadata.originalTitle,
+      processedBook.metadata.author,
+      processedBook.metadata.languagePair,
+      processedBook.metadata.styles
+    )
+    .run();
+
+  // Get book ID
+  const book = await db.prepare('SELECT id FROM books_v2 WHERE uuid = ?')
+    .bind(bookUuid)
+    .first();
+
+  if (!book) {
+    throw new Error('Failed to create book');
+  }
+
+  const bookId = book.id as number;
+
+  // Insert chapters and translations
+  for (const chapter of processedBook.chapters) {
+    // Insert chapter into chapters_v2
+    // Skip rawHtml if too large (D1 has statement size limits)
+    const rawHtmlSize = chapter.rawHtml ? Buffer.from(chapter.rawHtml).length : 0;
+    const shouldStoreRawHtml = rawHtmlSize < 50000; // 50KB limit
+
+    if (shouldStoreRawHtml) {
+      await db.prepare(
+        `INSERT INTO chapters_v2 (book_id, chapter_number, title, original_title, raw_html, order_index)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      )
+        .bind(
+          bookId,
+          chapter.number,
+          chapter.translatedTitle,
+          chapter.originalTitle,
+          chapter.rawHtml,
+          chapter.number
+        )
+        .run();
+    } else {
+      await db.prepare(
+        `INSERT INTO chapters_v2 (book_id, chapter_number, title, original_title, order_index)
+         VALUES (?, ?, ?, ?, ?)`
+      )
+        .bind(
+          bookId,
+          chapter.number,
+          chapter.translatedTitle,
+          chapter.originalTitle,
+          chapter.number
+        )
+        .run();
+    }
+
+    // Get chapter ID
+    const chapterRow = await db.prepare(
+      'SELECT id FROM chapters_v2 WHERE book_id = ? AND chapter_number = ?'
+    )
+      .bind(bookId, chapter.number)
+      .first();
+
+    if (!chapterRow) continue;
+
+    const chapterId = chapterRow.id as number;
+
+    // Insert translations
+    for (const node of chapter.textNodes) {
+      const translatedText = chapter.translations.get(node.xpath) || node.text;
+
+      await db.prepare(
+        `INSERT INTO translations_v2 (chapter_id, xpath, original_text, original_html, translated_text, order_index)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      )
+        .bind(
+          chapterId,
+          node.xpath,
+          node.text,
+          node.html,
+          translatedText,
+          node.orderIndex
+        )
+        .run();
+    }
+  }
+
+  return bookId;
+}

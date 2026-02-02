@@ -330,7 +330,7 @@ const BilingualReader: React.FC<BilingualReaderProps> = ({
             <div className="fab-menu-section">
               <div className="fab-menu-header">Navigation</div>
               <button className="fab-menu-item" onClick={toggleChapters}>
-                Chapters
+                Contents
               </button>
             </div>
 
@@ -411,7 +411,7 @@ const BilingualReader: React.FC<BilingualReaderProps> = ({
           <div className="chapters-modal">
             <div className="chapters-content">
               <div className="chapters-header">
-                <h3>Chapters</h3>
+                <h3>Contents</h3>
                 <button
                   className="chapters-close"
                   onClick={() => setIsChaptersOpen(false)}

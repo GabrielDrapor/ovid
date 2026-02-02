@@ -21,7 +21,6 @@
     "db:remote:file": "wrangler d1 execute ovid-db --remote --file",
     "generate-uuid": "ts-node --project scripts/tsconfig.json scripts/generate-uuid.ts",
     "import-book": "ts-node --project scripts/tsconfig.json scripts/import-book.ts",
-    "import-book-v2": "ts-node --project scripts/tsconfig.json scripts/import-book-v2.ts",
     "list-books": "ts-node --project scripts/tsconfig.json scripts/list-books.ts --mode=local",
     "list-books:local": "ts-node --project scripts/tsconfig.json scripts/list-books.ts --mode=local",
     "list-books:remote": "ts-node --project scripts/tsconfig.json scripts/list-books.ts --mode=remote",
@@ -58,7 +57,7 @@
     "prettier": "^3.6.2",
     "ts-node": "^10.9.2",
     "typescript": "^4.9.5",
-    "wrangler": "^4.33.1"
+    "wrangler": "^4.61.0"
   },
   "browserslist": {
     "production": [

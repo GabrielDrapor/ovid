@@ -229,8 +229,10 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
             </div>
 
             <div className="preview-info">
-              <h2>{selectedBook.title}</h2>
-              {selectedBook.original_title && <h3>{selectedBook.original_title}</h3>}
+              <h2>{selectedBook.original_title || selectedBook.title}</h2>
+              {selectedBook.original_title && selectedBook.title !== selectedBook.original_title && (
+                <h3 className="translated-title">{selectedBook.title}</h3>
+              )}
               <p className="author">By {selectedBook.author}</p>
 
               <button

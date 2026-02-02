@@ -42,8 +42,8 @@ class BookLister {
     console.log('');
 
     try {
-      // Query all books from database
-      const booksSql = `SELECT id, uuid, title, author, language_pair, book_cover_img_url, book_spine_img_url, created_at FROM books ORDER BY created_at DESC;`;
+      // Query all books from V2 database
+      const booksSql = `SELECT id, uuid, title, author, language_pair, book_cover_img_url, book_spine_img_url, created_at FROM books_v2 ORDER BY created_at DESC;`;
 
       let books: Book[];
       if (this.mode === 'local') {

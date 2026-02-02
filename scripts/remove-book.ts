@@ -183,8 +183,8 @@ class BookRemover {
 
   private async getLocalBookInfo(): Promise<BookInfo | null> {
     try {
-      // Get book details
-      const bookSql = `SELECT id, title, author, language_pair FROM books WHERE uuid = '${this.uuid}';`;
+      // Get book details from V2 tables
+      const bookSql = `SELECT id, title, author, language_pair FROM books_v2 WHERE uuid = '${this.uuid}';`;
       const bookResult = execSync(`npm run db:local -- "${bookSql}"`, {
         encoding: 'utf8',
         env: this.getCleanEnv(),
@@ -220,8 +220,8 @@ class BookRemover {
         return null;
       }
 
-      // Get chapter count
-      const chapterSql = `SELECT COUNT(*) as count FROM chapters WHERE book_id = ${bookId};`;
+      // Get chapter count from V2 tables
+      const chapterSql = `SELECT COUNT(*) as count FROM chapters_v2 WHERE book_id = ${bookId};`;
       const chapterResult = execSync(`npm run db:local -- "${chapterSql}"`, {
         encoding: 'utf8',
         env: this.getCleanEnv(),
@@ -229,8 +229,8 @@ class BookRemover {
       const chapterMatch = chapterResult.match(/"count":\s*(\d+)/);
       const chapterCount = chapterMatch ? parseInt(chapterMatch[1]) : 0;
 
-      // Get content count
-      const contentSql = `SELECT COUNT(*) as count FROM content_items WHERE book_id = ${bookId};`;
+      // Get translation count from V2 tables
+      const contentSql = `SELECT COUNT(*) as count FROM translations_v2 WHERE chapter_id IN (SELECT id FROM chapters_v2 WHERE book_id = ${bookId});`;
       const contentResult = execSync(`npm run db:local -- "${contentSql}"`, {
         encoding: 'utf8',
         env: this.getCleanEnv(),
@@ -253,8 +253,8 @@ class BookRemover {
 
   private async getRemoteBookInfo(): Promise<BookInfo | null> {
     try {
-      // Get book details
-      const bookSql = `SELECT id, title, author, language_pair FROM books WHERE uuid = '${this.uuid}';`;
+      // Get book details from V2 tables
+      const bookSql = `SELECT id, title, author, language_pair FROM books_v2 WHERE uuid = '${this.uuid}';`;
       const bookResults = await this.queryRemote(bookSql);
 
       if (!bookResults || bookResults.length === 0) return null;
@@ -265,13 +265,13 @@ class BookRemover {
       const author = book.author || 'Unknown Author';
       const languagePair = book.language_pair || 'unknown';
 
-      // Get chapter count
-      const chapterSql = `SELECT COUNT(*) as count FROM chapters WHERE book_id = ${bookId};`;
+      // Get chapter count from V2 tables
+      const chapterSql = `SELECT COUNT(*) as count FROM chapters_v2 WHERE book_id = ${bookId};`;
       const chapterResults = await this.queryRemote(chapterSql);
       const chapterCount = chapterResults[0]?.count || 0;
 
-      // Get content count
-      const contentSql = `SELECT COUNT(*) as count FROM content_items WHERE book_id = ${bookId};`;
+      // Get translation count from V2 tables
+      const contentSql = `SELECT COUNT(*) as count FROM translations_v2 WHERE chapter_id IN (SELECT id FROM chapters_v2 WHERE book_id = ${bookId});`;
       const contentResults = await this.queryRemote(contentSql);
       const contentCount = contentResults[0]?.count || 0;
 
@@ -327,23 +327,23 @@ class BookRemover {
 
   private async removeFromLocalDatabase(bookId: number): Promise<void> {
     try {
-      // Remove in correct order due to foreign key constraints
-      console.log('   🗑️  Removing content items...');
-      const contentSql = `DELETE FROM content_items WHERE book_id = ${bookId};`;
-      execSync(`npm run db:local -- "${contentSql}"`, {
+      // Remove in correct order due to foreign key constraints (V2 tables)
+      console.log('   🗑️  Removing translations...');
+      const translationSql = `DELETE FROM translations_v2 WHERE chapter_id IN (SELECT id FROM chapters_v2 WHERE book_id = ${bookId});`;
+      execSync(`npm run db:local -- "${translationSql}"`, {
         stdio: 'pipe',
         env: this.getCleanEnv(),
       });
 
       console.log('   🗑️  Removing chapters...');
-      const chapterSql = `DELETE FROM chapters WHERE book_id = ${bookId};`;
+      const chapterSql = `DELETE FROM chapters_v2 WHERE book_id = ${bookId};`;
       execSync(`npm run db:local -- "${chapterSql}"`, {
         stdio: 'pipe',
         env: this.getCleanEnv(),
       });
 
       console.log('   🗑️  Removing book...');
-      const bookSql = `DELETE FROM books WHERE id = ${bookId};`;
+      const bookSql = `DELETE FROM books_v2 WHERE id = ${bookId};`;
       execSync(`npm run db:local -- "${bookSql}"`, {
         stdio: 'pipe',
         env: this.getCleanEnv(),
@@ -359,17 +359,17 @@ class BookRemover {
 
   private async removeFromRemoteDatabase(bookId: number): Promise<void> {
     try {
-      // Remove in correct order due to foreign key constraints
-      console.log('   🗑️  Removing content items...');
+      // Remove in correct order due to foreign key constraints (V2 tables)
+      console.log('   🗑️  Removing translations...');
       await this.queryRemote(
-        `DELETE FROM content_items WHERE book_id = ${bookId};`
+        `DELETE FROM translations_v2 WHERE chapter_id IN (SELECT id FROM chapters_v2 WHERE book_id = ${bookId});`
       );
 
       console.log('   🗑️  Removing chapters...');
-      await this.queryRemote(`DELETE FROM chapters WHERE book_id = ${bookId};`);
+      await this.queryRemote(`DELETE FROM chapters_v2 WHERE book_id = ${bookId};`);
 
       console.log('   🗑️  Removing book...');
-      await this.queryRemote(`DELETE FROM books WHERE id = ${bookId};`);
+      await this.queryRemote(`DELETE FROM books_v2 WHERE id = ${bookId};`);
 
       console.log('   ✅ All data removed successfully');
     } catch (error) {

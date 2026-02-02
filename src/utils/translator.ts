@@ -151,7 +151,7 @@ export class Translator {
       baseURL: config.baseURL || 'https://api.openai.com/v1',
       model: config.model || 'gpt-4o-mini',
       temperature: config.temperature ?? 0.3,
-      concurrency: config.concurrency ?? 1, // Sequential translation for consistency
+      concurrency: config.concurrency ?? 10, // Parallel is safe since glossary is extracted upfront
     };
 
     this.llmClient = new LLMClient({
@@ -674,7 +674,7 @@ IMPORTANT: The translations must be CONSISTENT. If "Whymper" is "温珀", then "
 
     // Phase 2: Translate chapters
     console.log('📖 Phase 2: Translating chapters...');
-    const chapterConcurrency = options.chapterConcurrency ?? 1; // Sequential for consistency
+    const chapterConcurrency = options.chapterConcurrency ?? 3; // Parallel is safe since glossary is extracted upfront
     const results: TranslatedChapter[] = new Array(chapters.length);
 
     let totalItems = chapters.reduce((sum, ch) => sum + ch.items.length + 1, 0);

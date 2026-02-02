@@ -5,7 +5,7 @@
 import { Env } from './types';
 import { getCurrentUser } from './auth';
 import { getUserCredits, deductCredits } from './credits';
-import { insertProcessedBook } from './db';
+import { insertProcessedBookV2 } from './db';
 import { calculateBookCredits, TOKENS_PER_CREDIT } from '../utils/token-counter';
 
 /**
@@ -57,13 +57,13 @@ export async function handleBookUpload(
       model: env.OPENAI_MODEL,
     });
 
-    // Parse EPUB to calculate credits
-    const bookData = await processor.parseEPUB(buffer);
+    // Parse EPUB with V2 XPath-based extraction
+    const bookData = await processor.parseEPUBV2(buffer);
 
     const allTexts: string[] = [];
     for (const chapter of bookData.chapters) {
-      for (const item of chapter.content) {
-        allTexts.push(item.text);
+      for (const node of chapter.textNodes) {
+        allTexts.push(node.text);
       }
     }
 
@@ -86,8 +86,8 @@ export async function handleBookUpload(
       );
     }
 
-    // Translate book
-    const processedBook = await processor.translateBook(
+    // Translate book using V2 method
+    const processedBook = await processor.translateBookV2(
       bookData,
       targetLanguage,
       sourceLanguage,
@@ -96,8 +96,8 @@ export async function handleBookUpload(
 
     const bookUuid = crypto.randomUUID();
 
-    // Insert into database
-    await insertProcessedBook(env.DB, processedBook, bookUuid, user.id);
+    // Insert into V2 database tables
+    await insertProcessedBookV2(env.DB, processedBook, bookUuid, user.id);
 
     // Deduct credits
     await deductCredits(
@@ -178,14 +178,15 @@ export async function handleBookEstimate(
       model: env.OPENAI_MODEL,
     });
 
-    const bookData = await processor.parseEPUB(buffer);
+    // Use V2 XPath-based parsing
+    const bookData = await processor.parseEPUBV2(buffer);
 
     const allTexts: string[] = [];
     let chapterCount = 0;
     for (const chapter of bookData.chapters) {
       chapterCount++;
-      for (const item of chapter.content) {
-        allTexts.push(item.text);
+      for (const node of chapter.textNodes) {
+        allTexts.push(node.text);
       }
     }
 
