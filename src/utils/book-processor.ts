@@ -1,21 +1,11 @@
 /**
  * Book Processor for Worker Environment
- * Handles EPUB parsing and translation in Cloudflare Workers
+ * Handles EPUB parsing and translation in Cloudflare Workers (XPath-based V2)
  */
 
-import { Translator, ParagraphInput } from './translator';
-import { detectParagraphType } from './translation/types';
+import { Translator } from './translator';
 import JSZip from 'jszip';
 import { DOMParser } from '@xmldom/xmldom';
-
-export interface ContentItem {
-  id: string;
-  text: string;
-  type: string;
-  tagName?: string;
-  className?: string;
-  styles?: string;
-}
 
 // V2 content item with XPath support
 export interface ContentItemV2 {
@@ -58,43 +48,6 @@ export interface ProcessedBookV2 {
   chapters: TranslatedChapterV2[];
 }
 
-export interface Chapter {
-  number: number;
-  title: string;
-  originalTitle: string;
-  content: ContentItem[];
-}
-
-export interface BookData {
-  title: string;
-  originalTitle: string;
-  author: string;
-  language: string;
-  chapters: Chapter[];
-  styles?: string;
-}
-
-export interface TranslatedContentItem extends ContentItem {
-  originalText: string;
-  translatedText: string;
-}
-
-export interface TranslatedChapter extends Chapter {
-  translatedTitle: string;
-  content: TranslatedContentItem[];
-}
-
-export interface ProcessedBook {
-  metadata: {
-    title: string;
-    originalTitle: string;
-    author: string;
-    languagePair: string;
-    styles: string;
-  };
-  chapters: TranslatedChapter[];
-}
-
 export class BookProcessor {
   private translator: Translator;
 
@@ -113,403 +66,7 @@ export class BookProcessor {
   }
 
   /**
-   * Parse EPUB file from buffer
-   */
-  async parseEPUB(buffer: ArrayBuffer): Promise<BookData> {
-    const zip = new JSZip();
-    const zipContent = await zip.loadAsync(buffer);
-
-    // Find and parse OPF file for metadata
-    const opfFile = Object.keys(zipContent.files).find((name) =>
-      name.endsWith('.opf')
-    );
-
-    let title = 'Unknown Title';
-    let author = 'Unknown Author';
-    let htmlFiles: string[] = [];
-    let globalStyles = '';
-
-    if (opfFile) {
-      const opfContent = await zipContent.files[opfFile].async('text');
-      const doc = new DOMParser().parseFromString(opfContent, 'text/xml');
-
-      // Extract metadata
-      const titleElement = doc.getElementsByTagName('dc:title')[0];
-      const authorElement = doc.getElementsByTagName('dc:creator')[0];
-
-      if (titleElement?.textContent) {
-        title = titleElement.textContent.trim();
-      }
-      if (authorElement?.textContent) {
-        author = authorElement.textContent.trim();
-      }
-
-      // Extract CSS styles from manifest
-      const manifestElements = doc.getElementsByTagName('item');
-      for (let i = 0; i < manifestElements.length; i++) {
-        const item = manifestElements[i];
-        const mediaType = item.getAttribute('media-type');
-        const href = item.getAttribute('href');
-
-        if (mediaType === 'text/css' && href) {
-          try {
-            const basePath = opfFile.substring(0, opfFile.lastIndexOf('/') + 1);
-            const cssPath = basePath + href;
-            const cssFile = zipContent.files[cssPath];
-            if (cssFile) {
-              const cssContent = await cssFile.async('text');
-              globalStyles += `/* ${href} */\n${cssContent}\n`;
-            }
-          } catch (e) {
-            console.warn(`Failed to read CSS file: ${href}`);
-          }
-        }
-      }
-
-      // Build manifest map and get spine order
-      const manifestMap = new Map<string, string>();
-      for (let i = 0; i < manifestElements.length; i++) {
-        const item = manifestElements[i];
-        const id = item.getAttribute('id');
-        const href = item.getAttribute('href');
-        const mediaType = item.getAttribute('media-type');
-
-        if (id && href && mediaType === 'application/xhtml+xml') {
-          manifestMap.set(id, href);
-        }
-      }
-
-      // Get spine order
-      const spineItems = doc.getElementsByTagName('itemref');
-      for (let i = 0; i < spineItems.length; i++) {
-        const itemref = spineItems[i];
-        const idref = itemref.getAttribute('idref');
-
-        if (idref && manifestMap.has(idref)) {
-          const href = manifestMap.get(idref)!;
-          const basePath = opfFile.substring(0, opfFile.lastIndexOf('/') + 1);
-          const fullPath = href.startsWith('/')
-            ? href.substring(1)
-            : basePath + href;
-          htmlFiles.push(fullPath);
-        }
-      }
-    }
-
-    // Parse chapters from HTML files
-    const chapters: Chapter[] = [];
-    let chapterNumber = 1;
-
-    for (const htmlPath of htmlFiles) {
-      const file = zipContent.files[htmlPath];
-      if (!file) continue;
-
-      const htmlContent = await file.async('text');
-      const chapterData = this.parseHTMLChapter(htmlContent, chapterNumber);
-
-      // Extract internal styles
-      const doc = new DOMParser().parseFromString(htmlContent, 'text/html');
-      const styleTags = doc.getElementsByTagName('style');
-      for (let i = 0; i < styleTags.length; i++) {
-        const styleContent = styleTags[i].textContent;
-        if (styleContent) {
-          globalStyles += `/* Internal from ${htmlPath} */\n${styleContent}\n`;
-        }
-      }
-
-      if (chapterData && chapterData.content.length > 0) {
-        chapters.push({
-          ...chapterData,
-          number: chapterNumber++,
-        });
-      }
-    }
-
-    return {
-      title,
-      originalTitle: title,
-      author,
-      language: 'en', // Default, can be detected or passed as parameter
-      chapters,
-      styles: globalStyles,
-    };
-  }
-
-  /**
-   * Parse a single HTML chapter
-   */
-  private parseHTMLChapter(
-    html: string,
-    chapterNumber: number
-  ): { title: string; originalTitle: string; content: ContentItem[] } | null {
-    const doc = new DOMParser().parseFromString(html, 'text/html');
-    const body = doc.getElementsByTagName('body')[0];
-    if (!body) return null;
-
-    // Try to extract chapter title
-    let chapterTitle = `Chapter ${chapterNumber}`;
-    const h1 = doc.getElementsByTagName('h1')[0];
-    const h2 = doc.getElementsByTagName('h2')[0];
-    const h3 = doc.getElementsByTagName('h3')[0];
-    const titleTag = doc.getElementsByTagName('title')[0];
-
-    if (h1?.textContent?.trim()) {
-      chapterTitle = h1.textContent.trim();
-    } else if (h2?.textContent?.trim()) {
-      chapterTitle = h2.textContent.trim();
-    } else if (h3?.textContent?.trim()) {
-      chapterTitle = h3.textContent.trim();
-    } else if (titleTag?.textContent?.trim()) {
-      chapterTitle = titleTag.textContent.trim();
-    }
-
-    const content: ContentItem[] = [];
-    let itemIndex = 0;
-
-    // Add chapter title as first item
-    content.push({
-      id: `t-${chapterNumber}-${itemIndex++}`,
-      text: chapterTitle,
-      type: 'chapter',
-      tagName: 'h3',
-    });
-
-    // Extract content from meaningful tags
-    const meaningfulTags = ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote', 'li'];
-    const processedTexts = new Set<string>();
-
-    const extractContent = (element: any) => {
-      if (!element) return;
-
-      const tagName = (element.nodeName || '').toLowerCase();
-
-      // Skip script and style tags
-      if (tagName === 'script' || tagName === 'style') return;
-
-      if (meaningfulTags.includes(tagName)) {
-        const text = (element.textContent || '').trim();
-
-        if (text.length > 5 && !processedTexts.has(text)) {
-          const className = element.getAttribute ? element.getAttribute('class') : '';
-          const inlineStyle = element.getAttribute ? element.getAttribute('style') : '';
-
-          content.push({
-            id: `p-${chapterNumber}-${itemIndex++}`,
-            text,
-            type: tagName.startsWith('h') ? 'chapter' : 'paragraph',
-            tagName,
-            className: className || undefined,
-            styles: inlineStyle || undefined,
-          });
-
-          processedTexts.add(text);
-          return; // Don't recurse into processed elements
-        }
-      }
-
-      // Recurse into children
-      const children = element.childNodes;
-      if (children) {
-        for (let i = 0; i < children.length; i++) {
-          extractContent(children[i]);
-        }
-      }
-    };
-
-    extractContent(body);
-
-    return {
-      title: chapterTitle,
-      originalTitle: chapterTitle,
-      content,
-    };
-  }
-
-  /**
-   * Translate book content
-   * @param sequential - Enable sequential mode for higher quality translation
-   */
-  async translateBook(
-    bookData: BookData,
-    targetLanguage: string,
-    sourceLanguage: string = 'en',
-    chapterConcurrency: number = 2,
-    onProgress?: (current: number, total: number) => void,
-    sequential: boolean = false
-  ): Promise<ProcessedBook> {
-    if (sequential) {
-      // Sequential mode: higher quality with translated context
-      return this.translateBookSequential(
-        bookData,
-        targetLanguage,
-        sourceLanguage,
-        onProgress
-      );
-    }
-
-    // Parallel mode (default): faster
-    const chaptersToTranslate = bookData.chapters.map((chapter) => ({
-      title: chapter.title,
-      items: chapter.content.map((item) => item.text),
-    }));
-
-    const translatedChapters = await this.translator.translateChapters(
-      chaptersToTranslate,
-      {
-        sourceLanguage,
-        targetLanguage,
-        chapterConcurrency,
-        onProgress: (progress, current, total) => {
-          if (onProgress) {
-            onProgress(current, total);
-          }
-        },
-      }
-    );
-
-    const processedChapters: TranslatedChapter[] = bookData.chapters.map(
-      (chapter, idx) => {
-        const translated = translatedChapters[idx];
-        return {
-          ...chapter,
-          translatedTitle: translated.title,
-          content: chapter.content.map((item, itemIdx) => ({
-            ...item,
-            originalText: item.text,
-            translatedText: translated.items[itemIdx],
-          })),
-        };
-      }
-    );
-
-    return {
-      metadata: {
-        title: bookData.title,
-        originalTitle: bookData.title,
-        author: bookData.author,
-        languagePair: `${sourceLanguage}-${targetLanguage}`,
-        styles: bookData.styles || '',
-      },
-      chapters: processedChapters,
-    };
-  }
-
-  /**
-   * Translate book content sequentially with context.
-   * Higher quality mode that uses translated context from preceding paragraphs.
-   */
-  private async translateBookSequential(
-    bookData: BookData,
-    targetLanguage: string,
-    sourceLanguage: string,
-    onProgress?: (current: number, total: number) => void
-  ): Promise<ProcessedBook> {
-    const processedChapters: TranslatedChapter[] = [];
-    let totalItems = bookData.chapters.reduce(
-      (sum, ch) => sum + ch.content.length + 1, // +1 for title
-      0
-    );
-    let completedItems = 0;
-
-    for (const chapter of bookData.chapters) {
-      // Translate chapter title
-      const translatedTitle = await this.translator.translateText(chapter.title, {
-        sourceLanguage,
-        targetLanguage,
-      });
-      completedItems++;
-      if (onProgress) {
-        onProgress(completedItems, totalItems);
-      }
-
-      // Convert content to ParagraphInput format
-      const paragraphInputs: ParagraphInput[] = chapter.content.map((item, idx) => ({
-        id: item.id || `p_${idx}`,
-        text: item.text,
-        type: item.type,
-        tagName: item.tagName,
-        className: item.className,
-      }));
-
-      // Translate content sequentially
-      const translatedItems = await this.translator.translateSequential(
-        paragraphInputs,
-        {
-          sourceLanguage,
-          targetLanguage,
-          sequential: true,
-          contextBefore: 2,
-          contextAfter: 2,
-          delayBetweenCalls: 300, // Shorter delay for Worker
-          onProgress: (progress, current, total) => {
-            if (onProgress) {
-              onProgress(completedItems + current, totalItems);
-            }
-          },
-        }
-      );
-
-      completedItems += chapter.content.length;
-
-      processedChapters.push({
-        ...chapter,
-        translatedTitle,
-        content: chapter.content.map((item, idx) => ({
-          ...item,
-          originalText: item.text,
-          translatedText: translatedItems[idx],
-        })),
-      });
-    }
-
-    return {
-      metadata: {
-        title: bookData.title,
-        originalTitle: bookData.title,
-        author: bookData.author,
-        languagePair: `${sourceLanguage}-${targetLanguage}`,
-        styles: bookData.styles || '',
-      },
-      chapters: processedChapters,
-    };
-  }
-
-  /**
-   * Process EPUB file: parse and translate
-   */
-  async processEPUB(
-    buffer: ArrayBuffer,
-    targetLanguage: string,
-    sourceLanguage: string = 'en',
-    options?: {
-      chapterConcurrency?: number;
-      onProgress?: (current: number, total: number) => void;
-      /** Enable sequential translation for higher quality */
-      sequential?: boolean;
-    }
-  ): Promise<ProcessedBook> {
-    // Parse EPUB
-    const bookData = await this.parseEPUB(buffer);
-
-    // Translate content
-    const processedBook = await this.translateBook(
-      bookData,
-      targetLanguage,
-      sourceLanguage,
-      options?.chapterConcurrency || 2,
-      options?.onProgress,
-      options?.sequential || false
-    );
-
-    return processedBook;
-  }
-
-  // ==================
-  // V2 Methods (XPath-based)
-  // ==================
-
-  /**
-   * Parse EPUB file with XPath-based extraction (V2)
+   * Parse EPUB file with XPath-based extraction
    */
   async parseEPUBV2(buffer: ArrayBuffer): Promise<BookDataV2> {
     const zip = new JSZip();
@@ -632,7 +189,7 @@ export class BookProcessor {
   }
 
   /**
-   * Parse a single HTML chapter with XPath extraction (V2)
+   * Parse a single HTML chapter with XPath extraction
    */
   private parseHTMLChapterV2(
     html: string,
@@ -654,12 +211,11 @@ export class BookProcessor {
       }
     }
 
-    // Try to extract chapter title
-    let chapterTitle = `Chapter ${chapterNumber}`;
+    // Try to extract chapter title from heading tags
+    let chapterTitle = '';
     const h1 = doc.getElementsByTagName('h1')[0];
     const h2 = doc.getElementsByTagName('h2')[0];
     const h3 = doc.getElementsByTagName('h3')[0];
-    const titleTag = doc.getElementsByTagName('title')[0];
 
     if (h1?.textContent?.trim()) {
       chapterTitle = h1.textContent.trim();
@@ -667,8 +223,6 @@ export class BookProcessor {
       chapterTitle = h2.textContent.trim();
     } else if (h3?.textContent?.trim()) {
       chapterTitle = h3.textContent.trim();
-    } else if (titleTag?.textContent?.trim()) {
-      chapterTitle = titleTag.textContent.trim();
     }
 
     // Extract text nodes with XPath
@@ -732,8 +286,24 @@ export class BookProcessor {
       return html;
     };
 
+    // Check if a node contains any child block elements (direct or nested)
+    const hasChildBlockElements = (node: any): boolean => {
+      const children = node.childNodes;
+      if (!children) return false;
+      for (let i = 0; i < children.length; i++) {
+        const child = children[i];
+        if (child.nodeType === 1) {
+          const childTag = (child.nodeName || '').toLowerCase();
+          if (blockTags.has(childTag)) return true;
+        }
+      }
+      return false;
+    };
+
     // Recursive walk to extract from block elements
-    const walkNode = (node: any) => {
+    // pathSegments tracks the full XPath from body to build hierarchical paths
+    // matching exactly how the reader's walkAndMap builds paths
+    const walkNode = (node: any, pathSegments: string[]) => {
       if (!node) return;
 
       const nodeType = node.nodeType;
@@ -742,12 +312,33 @@ export class BookProcessor {
       const tagName = (node.nodeName || '').toLowerCase();
       if (skipTags.has(tagName)) return;
 
+      // Count element index among siblings of same tag name
+      let elementIndex = 1;
+      let sibling = node.previousSibling;
+      while (sibling) {
+        if (sibling.nodeType === 1 && (sibling.nodeName || '').toLowerCase() === tagName) {
+          elementIndex++;
+        }
+        sibling = sibling.previousSibling;
+      }
+
+      const currentPath = [...pathSegments, `${tagName}[${elementIndex}]`];
+
       if (blockTags.has(tagName)) {
+        // If this block contains child blocks, recurse into them
+        if (hasChildBlockElements(node)) {
+          const children = node.childNodes;
+          if (children) {
+            for (let i = 0; i < children.length; i++) {
+              walkNode(children[i], currentPath);
+            }
+          }
+          return;
+        }
+
         const fullText = decodeEntities(getFullTextContent(node));
         if (fullText.length >= 2) {
-          // Generate XPath
-          tagCounts[tagName] = (tagCounts[tagName] || 0) + 1;
-          const xpath = `/body[1]/${tagName}[${tagCounts[tagName]}]`;
+          const xpath = '/' + currentPath.join('/');
 
           textNodes.push({
             xpath,
@@ -756,21 +347,67 @@ export class BookProcessor {
             orderIndex: orderIndex++,
           });
         }
-        return; // Don't recurse into block elements
+        return; // Don't recurse into leaf block elements
       }
 
-      // Recurse into children
+      // Recurse into children for non-block elements
       const children = node.childNodes;
       if (children) {
         for (let i = 0; i < children.length; i++) {
-          walkNode(children[i]);
+          walkNode(children[i], currentPath);
         }
       }
     };
 
     // Walk body children
     for (let i = 0; i < bodyChildren.length; i++) {
-      walkNode(bodyChildren[i]);
+      walkNode(bodyChildren[i], ['body[1]']);
+    }
+
+    // If no heading tag found, derive title from first short block elements
+    if (!chapterTitle) {
+      const headingParts: string[] = [];
+      let stopScanning = false;
+      // Walk block elements looking for short heading-like text
+      const scanForHeadings = (parent: any) => {
+        const children = parent.childNodes;
+        if (!children) return;
+        for (let i = 0; i < children.length; i++) {
+          if (stopScanning || headingParts.length >= 3) return;
+          const child = children[i];
+          if (child.nodeType !== 1) continue;
+          const tag = (child.nodeName || '').toLowerCase();
+          if (skipTags.has(tag)) continue;
+          if (blockTags.has(tag)) {
+            // Check if this block has child blocks (container) - recurse into it
+            let hasChildBlocks = false;
+            const grandchildren = child.childNodes;
+            if (grandchildren) {
+              for (let j = 0; j < grandchildren.length; j++) {
+                if (grandchildren[j].nodeType === 1 && blockTags.has((grandchildren[j].nodeName || '').toLowerCase())) {
+                  hasChildBlocks = true;
+                  break;
+                }
+              }
+            }
+            if (hasChildBlocks) {
+              scanForHeadings(child);
+              continue;
+            }
+            const text = (child.textContent || '').replace(/\s+/g, ' ').trim();
+            if (text.length >= 1 && text.length <= 50) {
+              headingParts.push(text);
+            } else if (text.length > 50) {
+              stopScanning = true;
+              return;
+            }
+          } else {
+            scanForHeadings(child);
+          }
+        }
+      };
+      scanForHeadings(body);
+      chapterTitle = headingParts.join(' \u2013 ') || `Chapter ${chapterNumber}`;
     }
 
     return {
@@ -820,7 +457,7 @@ export class BookProcessor {
   }
 
   /**
-   * Translate book content (V2 - XPath based)
+   * Translate book content (XPath based)
    */
   async translateBookV2(
     bookData: BookDataV2,
@@ -831,9 +468,17 @@ export class BookProcessor {
   ): Promise<ProcessedBookV2> {
     const totalItems = bookData.chapters.reduce(
       (sum, ch) => sum + ch.textNodes.length + 1, // +1 for title
-      0
+      1 // +1 for book title
     );
     let completedItems = 0;
+
+    // Translate book title
+    const translatedBookTitle = await this.translator.translateText(bookData.title, {
+      sourceLanguage,
+      targetLanguage,
+    });
+    completedItems++;
+    if (onProgress) onProgress(completedItems, totalItems);
 
     const translatedChapters: TranslatedChapterV2[] = [];
 
@@ -898,7 +543,7 @@ export class BookProcessor {
 
     return {
       metadata: {
-        title: bookData.title,
+        title: translatedBookTitle,
         originalTitle: bookData.title,
         author: bookData.author,
         languagePair: `${sourceLanguage}-${targetLanguage}`,
@@ -909,7 +554,7 @@ export class BookProcessor {
   }
 
   /**
-   * Process EPUB file V2: parse and translate with XPath
+   * Process EPUB file: parse and translate with XPath
    */
   async processEPUBV2(
     buffer: ArrayBuffer,

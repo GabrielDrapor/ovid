@@ -205,8 +205,8 @@ export async function handleCreateCheckoutSession(
 
     const session = await stripeRequest(env, '/checkout/sessions', 'POST', {
       'mode': 'payment',
-      'success_url': `${env.APP_URL}?payment=success&session_id={CHECKOUT_SESSION_ID}`,
-      'cancel_url': `${env.APP_URL}?payment=cancelled`,
+      'success_url': `${new URL(request.url).origin}?payment=success&session_id={CHECKOUT_SESSION_ID}`,
+      'cancel_url': `${new URL(request.url).origin}?payment=cancelled`,
       'line_items[0][price_data][currency]': creditPackage.currency,
       'line_items[0][price_data][product_data][name]': creditPackage.name,
       'line_items[0][price_data][product_data][description]': `${creditPackage.credits} credits for book translations`,

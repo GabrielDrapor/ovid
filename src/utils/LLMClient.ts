@@ -31,6 +31,13 @@ export interface CompletionOptions {
     | { type: 'function'; function: { name: string } };
 }
 
+// Safe stdout write that works in both Node.js and Worker environments
+const safeWrite = (text: string) => {
+  if (typeof process !== 'undefined' && process.stdout?.write) {
+    process.stdout.write(text);
+  }
+};
+
 export class LLMClient {
   private config: Required<LLMConfig>;
   private hasLoggedConfig = false;
@@ -153,7 +160,7 @@ export class LLMClient {
           }
         }
         this.errorCount++;
-        process.stdout?.write?.('x');
+        safeWrite('x');
         throw lastError;
       })();
 
@@ -165,14 +172,14 @@ export class LLMClient {
         const content = message.content?.trim();
         if (!content && !message.content) {
           this.errorCount++;
-          process.stdout?.write?.('x');
+          safeWrite('x');
           throw new Error('Empty response from LLM API');
         }
         this.successCount++;
         // Print progress dot, newline every 50 for readability
-        process.stdout?.write?.('.');
+        safeWrite('.');
         if (this.successCount % 50 === 0) {
-          process.stdout?.write?.(`[${this.successCount}]\n`);
+          safeWrite(`[${this.successCount}]\n`);
         }
         return content || '';
       }
@@ -213,7 +220,7 @@ export class LLMClient {
     }
 
     this.errorCount++;
-    process.stdout?.write?.('x');
+    safeWrite('x');
     throw new Error('Max tool iteration limit reached');
   }
 

@@ -609,6 +609,28 @@
   box-shadow: 0 5px 15px rgba(255, 255, 255, 0.2);
 }
 
+.remove-book-btn {
+  background: transparent;
+  color: #666;
+  border: 1px solid #444;
+  padding: 10px 40px;
+  font-size: 0.85rem;
+  border-radius: 30px;
+  cursor: pointer;
+  margin-top: 10px;
+  width: 100%;
+  transition: border-color 0.2s, color 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.remove-book-btn:hover {
+  color: #ff6b6b;
+  border-color: #ff6b6b;
+}
+
 /* Placeholder when no book selected (though sidebar is usually hidden then) */
 .preview-placeholder {
   display: flex;

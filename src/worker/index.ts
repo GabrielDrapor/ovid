@@ -24,6 +24,7 @@ import {
   getAllBooksV2,
   getBookChaptersV2,
   getChapterContentV2,
+  deleteBookV2,
 } from './db';
 import {
   handleBookUpload,
@@ -37,6 +38,18 @@ export default {
     // Check config on startup
     checkOAuthConfig(env);
     checkStripeConfig(env);
+
+    // Ensure user_id column exists on books_v2
+    await env.DB.prepare(
+      `CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY)`
+    ).run();
+    const migrated = await env.DB.prepare(
+      `SELECT 1 FROM _migrations WHERE name = 'books_v2_user_id'`
+    ).first();
+    if (!migrated) {
+      await env.DB.prepare(`ALTER TABLE books_v2 ADD COLUMN user_id INTEGER`).run().catch(() => {});
+      await env.DB.prepare(`INSERT INTO _migrations (name) VALUES ('books_v2_user_id')`).run();
+    }
 
     // Handle API routes
     if (url.pathname.startsWith('/api/')) {
@@ -52,7 +65,7 @@ export default {
               { status: 503, headers: { 'Content-Type': 'application/json' } }
             );
           }
-          return handleGoogleAuthStart(env);
+          return handleGoogleAuthStart(request, env);
         }
 
         if (url.pathname === '/api/auth/callback/google') {
@@ -127,6 +140,21 @@ export default {
 
         if (url.pathname === '/api/books/upload' && request.method === 'POST') {
           return handleBookUpload(request, env);
+        }
+
+        // Delete book
+        const deleteMatch = url.pathname.match(/^\/api\/book\/([^\/]+)$/);
+        if (deleteMatch && request.method === 'DELETE') {
+          const user = await getCurrentUser(env.DB, request);
+          if (!user) {
+            return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+              status: 401, headers: { 'Content-Type': 'application/json' },
+            });
+          }
+          await deleteBookV2(env.DB, deleteMatch[1]);
+          return new Response(JSON.stringify({ success: true }), {
+            headers: { 'Content-Type': 'application/json' },
+          });
         }
 
         // All book listing now uses V2

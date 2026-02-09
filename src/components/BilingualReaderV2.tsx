@@ -29,6 +29,9 @@ interface BilingualReaderV2Props {
   isLoading: boolean;
   bookUuid?: string;
   onBackToShelf?: () => void;
+  // Granular progress tracking
+  initialXpath?: string;  // XPath to scroll to on initial load
+  onProgressChange?: (xpath: string) => void;  // Called when visible element changes
 }
 
 /**
@@ -50,6 +53,8 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
   isLoading,
   bookUuid,
   onBackToShelf,
+  initialXpath,
+  onProgressChange,
 }) => {
   const contentRef = useRef<HTMLDivElement>(null);
   const [showOriginal, setShowOriginal] = useState(true);
@@ -65,6 +70,17 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
   // originalHtml preserves formatting (innerHTML), translated is plain text
   // showingOriginal tracks the current state to avoid innerHTML comparison issues
   const elementsRef = useRef<Map<string, { element: HTMLElement; originalHtml: string; translated: string; showingOriginal: boolean }>>(new Map());
+
+  // Track the topmost visible element for progress saving
+  const visibleXpathRef = useRef<string | undefined>(undefined);
+  const progressCallbackRef = useRef(onProgressChange);
+  progressCallbackRef.current = onProgressChange;
+
+  // Debounce timer for progress updates
+  const progressTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Track when translations have been applied (for observer setup timing)
+  const [translationsReady, setTranslationsReady] = useState(0);
 
   /**
    * Apply translations to the rendered HTML
@@ -239,6 +255,8 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
       // Small delay to ensure DOM is ready
       const timer = setTimeout(() => {
         applyTranslations();
+        // Signal that translations are ready for observer setup
+        setTranslationsReady((c) => c + 1);
       }, 100);
       return () => clearTimeout(timer);
     }
@@ -248,6 +266,82 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
   useEffect(() => {
     updateAllElements(showOriginal);
   }, [showOriginal, updateAllElements]);
+
+  // Set up IntersectionObserver to track visible elements (after translations applied)
+  useEffect(() => {
+    if (!translationsReady || elementsRef.current.size === 0) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        // Find the topmost visible element
+        let topmostXpath: string | undefined;
+        let topmostTop = Infinity;
+
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            const rect = entry.boundingClientRect;
+            // Element is visible and closer to the top of viewport
+            if (rect.top < topmostTop && rect.top >= -rect.height / 2) {
+              topmostTop = rect.top;
+              // Find the xpath for this element
+              elementsRef.current.forEach((data, xpath) => {
+                if (data.element === entry.target) {
+                  topmostXpath = xpath;
+                }
+              });
+            }
+          }
+        });
+
+        // Update visible xpath if changed
+        if (topmostXpath && topmostXpath !== visibleXpathRef.current) {
+          visibleXpathRef.current = topmostXpath;
+
+          // Debounced callback - wait 1s of stability before reporting
+          if (progressTimerRef.current) {
+            clearTimeout(progressTimerRef.current);
+          }
+          progressTimerRef.current = setTimeout(() => {
+            if (progressCallbackRef.current && visibleXpathRef.current) {
+              progressCallbackRef.current(visibleXpathRef.current);
+            }
+          }, 1000);
+        }
+      },
+      {
+        root: null, // viewport
+        rootMargin: '0px',
+        threshold: [0, 0.25, 0.5, 0.75, 1.0],
+      }
+    );
+
+    // Observe all bilingual elements
+    elementsRef.current.forEach((data) => {
+      observer.observe(data.element);
+    });
+
+    return () => {
+      observer.disconnect();
+      if (progressTimerRef.current) {
+        clearTimeout(progressTimerRef.current);
+      }
+    };
+  }, [translationsReady]);
+
+  // Scroll to initial xpath after translations are applied
+  useEffect(() => {
+    if (!translationsReady || !initialXpath || elementsRef.current.size === 0) return;
+
+    const data = elementsRef.current.get(initialXpath);
+    if (data?.element) {
+      // Small delay to ensure layout is complete
+      setTimeout(() => {
+        data.element.scrollIntoView({ behavior: 'auto', block: 'start' });
+        // Offset a bit from the very top for better UX
+        window.scrollBy(0, -20);
+      }, 150);
+    }
+  }, [translationsReady, initialXpath]);
 
   const toggleMenu = () => setIsMenuOpen(!isMenuOpen);
 

@@ -57,8 +57,9 @@ export async function getCurrentUser(
   };
 }
 
-export async function handleGoogleAuthStart(env: Env): Promise<Response> {
-  const redirectUri = `${env.APP_URL}/api/auth/callback/google`;
+export async function handleGoogleAuthStart(request: Request, env: Env): Promise<Response> {
+  const origin = new URL(request.url).origin;
+  const redirectUri = `${origin}/api/auth/callback/google`;
   const scope = 'openid email profile';
   const state = generateSessionToken();
 
@@ -105,7 +106,7 @@ export async function handleGoogleCallback(
       client_secret: env.GOOGLE_OAUTH_CLIENT_SECRET,
       code,
       grant_type: 'authorization_code',
-      redirect_uri: `${env.APP_URL}/api/auth/callback/google`,
+      redirect_uri: `${new URL(request.url).origin}/api/auth/callback/google`,
     }),
   });
 
@@ -182,7 +183,7 @@ export async function handleGoogleCallback(
   return new Response(null, {
     status: 302,
     headers: {
-      Location: env.APP_URL,
+      Location: new URL(request.url).origin,
       'Set-Cookie': createSessionCookie(sessionToken),
     },
   });

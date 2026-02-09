@@ -527,7 +527,7 @@ IMPORTANT: The translations must be CONSISTENT. If "Whymper" is "温珀", then "
       // Prepare context from previous translations
       const contextStr =
         options.context && options.context.length > 0
-          ? `\n**Context (Previous translated paragraphs):**\n${options.context.join('\n')}\n`
+          ? `\n\n<context>\n${options.context.join('\n')}\n</context>\n`
           : '';
 
       const translation = await this.llmClient.chat({
@@ -537,15 +537,16 @@ IMPORTANT: The translations must be CONSISTENT. If "Whymper" is "温珀", then "
             content: `You are a professional literary translator. Translate the following ${sourceLanguage} text to ${targetLang}.
 
 **CRITICAL RULES:**
-1. Return ONLY the translation, nothing else.
+1. Return ONLY the translation of the text inside <translate> tags. Do NOT translate or include anything from <context> tags.
 2. Do NOT wrap the translation in quotes unless the source text has them.
 3. Maintain the original style, tone, and formatting.
 4. For proper nouns (names, places, terms), you MUST use the exact translations from the Glossary below.
-5. Do NOT invent new translations for names that are in the glossary.${glossaryStr}`,
+5. Do NOT invent new translations for names that are in the glossary.
+6. Output ONLY the translated text. No tags, no labels, no extra content.${glossaryStr}`,
           },
           {
             role: 'user',
-            content: `Translate to ${targetLang}:${contextStr}\n${text}`,
+            content: `${contextStr}\n<translate>\n${text}\n</translate>`,
           },
         ],
         max_tokens: 8192,
