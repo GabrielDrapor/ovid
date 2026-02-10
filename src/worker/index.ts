@@ -26,10 +26,12 @@ import {
   getChapterContentV2,
   deleteBookV2,
   getBookStatus,
+  getTranslationJob,
 } from './db';
 import {
   handleBookUpload,
   handleBookEstimate,
+  handleTranslateNext,
 } from './book-handlers';
 
 export default {
@@ -53,6 +55,26 @@ export default {
     };
     await runMigration('books_v2_user_id', 'ALTER TABLE books_v2 ADD COLUMN user_id INTEGER');
     await runMigration('books_v2_status', "ALTER TABLE books_v2 ADD COLUMN status TEXT DEFAULT 'ready'");
+    await runMigration('create_translation_jobs', `CREATE TABLE IF NOT EXISTS translation_jobs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      book_id INTEGER NOT NULL,
+      book_uuid TEXT NOT NULL,
+      source_language TEXT NOT NULL DEFAULT 'en',
+      target_language TEXT NOT NULL DEFAULT 'zh',
+      total_chapters INTEGER NOT NULL,
+      completed_chapters INTEGER NOT NULL DEFAULT 0,
+      current_chapter INTEGER NOT NULL DEFAULT 0,
+      current_item_offset INTEGER NOT NULL DEFAULT 0,
+      glossary_json TEXT,
+      glossary_extracted INTEGER NOT NULL DEFAULT 0,
+      title_translated INTEGER NOT NULL DEFAULT 0,
+      translated_title TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      error_message TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`);
+    await runMigration('chapters_v2_text_nodes', 'ALTER TABLE chapters_v2 ADD COLUMN text_nodes_json TEXT');
 
     // Handle API routes
     if (url.pathname.startsWith('/api/')) {
@@ -145,16 +167,37 @@ export default {
           return handleBookUpload(request, env, ctx);
         }
 
-        // Book status check
+        // Translate next chunk (frontend-driven chunked translation)
+        const translateNextMatch = url.pathname.match(/^\/api\/book\/([^\/]+)\/translate-next$/);
+        if (translateNextMatch && request.method === 'POST') {
+          return handleTranslateNext(request, env, translateNextMatch[1]);
+        }
+
+        // Book status check (with translation progress)
         const statusMatch = url.pathname.match(/^\/api\/book\/([^\/]+)\/status$/);
         if (statusMatch) {
-          const status = await getBookStatus(env.DB, statusMatch[1]);
+          const bookUuid = statusMatch[1];
+          const status = await getBookStatus(env.DB, bookUuid);
           if (!status) {
             return new Response(JSON.stringify({ error: 'Book not found' }), {
               status: 404, headers: { 'Content-Type': 'application/json' },
             });
           }
-          return new Response(JSON.stringify({ status }), {
+
+          let progress = null;
+          if (status === 'processing') {
+            const job = await getTranslationJob(env.DB, bookUuid);
+            if (job) {
+              progress = {
+                phase: job.status,
+                chaptersCompleted: job.completed_chapters,
+                chaptersTotal: job.total_chapters,
+                currentChapter: job.current_chapter,
+              };
+            }
+          }
+
+          return new Response(JSON.stringify({ status, progress }), {
             headers: { 'Content-Type': 'application/json' },
           });
         }

@@ -66,23 +66,34 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
     fetchBooks();
   }, []);
 
-  // Poll status for books that are still processing
-  const pollingRef = useRef<NodeJS.Timeout | null>(null);
+  // Drive translation for books that are still processing.
+  // Each call to /translate-next translates a chunk of ~25 paragraphs,
+  // staying within Cloudflare Workers' 50 subrequest limit.
+  const translatingRef = useRef<Set<string>>(new Set());
   const pollProcessingBooks = useCallback(async () => {
     const processingBooks = books.filter(b => b.status === 'processing');
     if (processingBooks.length === 0) return;
 
     let changed = false;
     for (const book of processingBooks) {
+      // Don't send a new request while a previous one is still in-flight
+      if (translatingRef.current.has(book.uuid)) continue;
+      translatingRef.current.add(book.uuid);
+
       try {
-        const res = await fetch(`/api/book/${book.uuid}/status`);
+        const res = await fetch(`/api/book/${book.uuid}/translate-next`, {
+          method: 'POST',
+        });
         if (res.ok) {
-          const data = await res.json() as { status: string };
-          if (data.status !== 'processing') {
+          const data = await res.json() as { done?: boolean; error?: string };
+          if (data.done) {
             changed = true;
           }
         }
-      } catch { /* ignore */ }
+      } catch { /* ignore, will retry on next poll */ }
+      finally {
+        translatingRef.current.delete(book.uuid);
+      }
     }
     if (changed) {
       await fetchBooks();
@@ -92,10 +103,10 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
   useEffect(() => {
     const hasProcessing = books.some(b => b.status === 'processing');
     if (hasProcessing) {
-      pollingRef.current = setInterval(pollProcessingBooks, 5000);
-      return () => { if (pollingRef.current) clearInterval(pollingRef.current); };
-    } else {
-      if (pollingRef.current) clearInterval(pollingRef.current);
+      // Drive translation immediately, then every 3s
+      pollProcessingBooks();
+      const interval = setInterval(pollProcessingBooks, 3000);
+      return () => clearInterval(interval);
     }
   }, [books, pollProcessingBooks]);
 
@@ -228,41 +239,51 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
         className="bookshelf-wall"
         style={{ backgroundImage: 'url(/bookcase_bg.jpeg)' }}
       >
-        {!loading && books.length === 0 ? (
-          <div className="bookshelf-empty">
-            {/* Empty State, effectively just the background with a message if needed */}
-          </div>
-        ) : (
-          <div className="books-grid" style={{ opacity: loading ? 0 : 1, transition: 'opacity 0.5s ease-in-out' }}>
-            {books.map((book) => {
-              const isProcessing = book.status === 'processing';
-              return (
-                <div
-                  key={book.uuid}
-                  className={`book-spine-wrapper ${isProcessing ? 'processing' : ''}`}
-                  onMouseEnter={() => setHoveredBook(book)}
-                  onMouseLeave={() => setHoveredBook(null)}
-                  onClick={() => { if (!isProcessing) onSelectBook(book.uuid); }}
-                >
-                  <div className="book-spine-container">
-                    {book.book_spine_img_url ? (
-                      <img
-                        src={book.book_spine_img_url}
-                        alt={`${book.title} spine`}
-                        className="book-spine-img"
-                      />
-                    ) : (
-                      <div className="book-spine-default" style={{ backgroundColor: stringToColor(book.title) }}>
-                        <span className="spine-title">{book.title}</span>
-                      </div>
-                    )}
-                  </div>
-                  {isProcessing && <div className="book-processing-overlay"><div className="processing-spinner"></div></div>}
+        {(() => {
+          const publicBooks = books.filter(b => !b.user_id);
+          const userBooks = books.filter(b => !!b.user_id);
+          const renderBook = (book: Book) => {
+            const isProcessing = book.status === 'processing';
+            return (
+              <div
+                key={book.uuid}
+                className={`book-spine-wrapper ${isProcessing ? 'processing' : ''}`}
+                onMouseEnter={() => setHoveredBook(book)}
+                onMouseLeave={() => setHoveredBook(null)}
+                onClick={() => { if (!isProcessing) onSelectBook(book.uuid); }}
+              >
+                <div className="book-spine-container">
+                  {book.book_spine_img_url ? (
+                    <img
+                      src={book.book_spine_img_url}
+                      alt={`${book.title} spine`}
+                      className="book-spine-img"
+                    />
+                  ) : (
+                    <div className="book-spine-default" style={{ backgroundColor: stringToColor(book.title) }}>
+                      <span className="spine-title">{book.title}</span>
+                    </div>
+                  )}
                 </div>
-              );
-            })}
-          </div>
-        )}
+                {isProcessing && <div className="book-processing-overlay"><div className="processing-spinner"></div></div>}
+              </div>
+            );
+          };
+          return (
+            <div style={{ opacity: loading ? 0 : 1, transition: 'opacity 0.5s ease-in-out', position: 'relative', width: '100%', height: '100%' }}>
+              {publicBooks.length > 0 && (
+                <div className="books-grid books-row-1">
+                  {publicBooks.map(renderBook)}
+                </div>
+              )}
+              {userBooks.length > 0 && (
+                <div className="books-grid books-row-2">
+                  {userBooks.map(renderBook)}
+                </div>
+              )}
+            </div>
+          );
+        })()}
       </div>
 
       <div className="book-preview-sidebar">

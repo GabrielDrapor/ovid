@@ -365,3 +365,141 @@ export async function insertProcessedBookV2(
 
   return bookId;
 }
+
+// ==================
+// Translation Job functions
+// ==================
+
+export interface TranslationJob {
+  id: number;
+  book_id: number;
+  book_uuid: string;
+  source_language: string;
+  target_language: string;
+  total_chapters: number;
+  completed_chapters: number;
+  current_chapter: number;
+  current_item_offset: number;
+  glossary_json: string | null;
+  glossary_extracted: number;
+  title_translated: number;
+  translated_title: string | null;
+  status: string;
+  error_message: string | null;
+}
+
+export async function createTranslationJob(
+  db: D1Database,
+  bookId: number,
+  bookUuid: string,
+  sourceLang: string,
+  targetLang: string,
+  totalChapters: number
+): Promise<void> {
+  await db.prepare(
+    `INSERT INTO translation_jobs (book_id, book_uuid, source_language, target_language, total_chapters, status)
+     VALUES (?, ?, ?, ?, ?, 'pending')`
+  ).bind(bookId, bookUuid, sourceLang, targetLang, totalChapters).run();
+}
+
+export async function getTranslationJob(db: D1Database, bookUuid: string): Promise<TranslationJob | null> {
+  const row = await db.prepare(
+    'SELECT * FROM translation_jobs WHERE book_uuid = ? LIMIT 1'
+  ).bind(bookUuid).first();
+  return row as TranslationJob | null;
+}
+
+export async function updateTranslationJob(
+  db: D1Database,
+  bookUuid: string,
+  updates: Partial<Pick<TranslationJob,
+    'status' | 'current_chapter' | 'current_item_offset' | 'completed_chapters' |
+    'glossary_json' | 'glossary_extracted' | 'title_translated' | 'translated_title' | 'error_message'
+  >>
+): Promise<void> {
+  const fields: string[] = [];
+  const values: any[] = [];
+
+  for (const [key, value] of Object.entries(updates)) {
+    fields.push(`${key} = ?`);
+    values.push(value);
+  }
+  fields.push('updated_at = CURRENT_TIMESTAMP');
+
+  values.push(bookUuid);
+  await db.prepare(
+    `UPDATE translation_jobs SET ${fields.join(', ')} WHERE book_uuid = ?`
+  ).bind(...values).run();
+}
+
+export async function storeChapterTextNodes(
+  db: D1Database,
+  bookId: number,
+  chapterNumber: number,
+  textNodesJson: string
+): Promise<void> {
+  await db.prepare(
+    'UPDATE chapters_v2 SET text_nodes_json = ? WHERE book_id = ? AND chapter_number = ?'
+  ).bind(textNodesJson, bookId, chapterNumber).run();
+}
+
+export async function getChapterTextNodes(
+  db: D1Database,
+  bookId: number,
+  chapterNumber: number
+): Promise<Array<{ xpath: string; text: string; html: string; orderIndex: number }> | null> {
+  const row = await db.prepare(
+    'SELECT text_nodes_json FROM chapters_v2 WHERE book_id = ? AND chapter_number = ?'
+  ).bind(bookId, chapterNumber).first();
+
+  if (!row || !row.text_nodes_json) return null;
+  return JSON.parse(row.text_nodes_json as string);
+}
+
+export async function getChapterIdByNumber(
+  db: D1Database,
+  bookId: number,
+  chapterNumber: number
+): Promise<number | null> {
+  const row = await db.prepare(
+    'SELECT id FROM chapters_v2 WHERE book_id = ? AND chapter_number = ?'
+  ).bind(bookId, chapterNumber).first();
+  return row ? (row.id as number) : null;
+}
+
+export async function insertTranslationRow(
+  db: D1Database,
+  chapterId: number,
+  xpath: string,
+  originalText: string,
+  originalHtml: string,
+  translatedText: string,
+  orderIndex: number
+): Promise<void> {
+  await db.prepare(
+    `INSERT OR REPLACE INTO translations_v2 (chapter_id, xpath, original_text, original_html, translated_text, order_index)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  ).bind(chapterId, xpath, originalText, originalHtml, translatedText, orderIndex).run();
+}
+
+export async function updateChapterTitle(
+  db: D1Database,
+  bookId: number,
+  chapterNumber: number,
+  translatedTitle: string
+): Promise<void> {
+  await db.prepare(
+    'UPDATE chapters_v2 SET title = ? WHERE book_id = ? AND chapter_number = ?'
+  ).bind(translatedTitle, bookId, chapterNumber).run();
+}
+
+export async function clearTextNodesJson(db: D1Database, bookId: number): Promise<void> {
+  await db.prepare(
+    'UPDATE chapters_v2 SET text_nodes_json = NULL WHERE book_id = ?'
+  ).bind(bookId).run();
+}
+
+export async function deleteTranslationJob(db: D1Database, bookUuid: string): Promise<void> {
+  await db.prepare('DELETE FROM translation_jobs WHERE book_uuid = ?')
+    .bind(bookUuid).run();
+}

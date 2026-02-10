@@ -398,25 +398,28 @@
    Let's assume the Bg image has ~4-5 shelves. We might just center the content and wrap.
 */
 .books-grid {
-  /* User requested adjustments */
   display: flex;
   flex-wrap: nowrap;
   gap: 0;
   width: 100%;
-  max-height: 90%;
-
   justify-content: flex-start;
   align-items: flex-end;
-
   position: absolute;
   padding-left: 40px;
-  padding-top: 90px;
-
-  /* Allow scrolling for overflow books */
   overflow-x: auto;
   overflow-y: hidden;
-  /* Hide scrollbar for clean look */
   scrollbar-width: none;
+}
+
+/* Row 1: Public/library books - top shelf */
+.books-row-1 {
+  padding-top: 95px;
+  max-height: 90%;
+}
+
+/* Row 2: User uploaded books - second shelf */
+.books-row-2 {
+  padding-top: 500px;
 }
 
 .books-grid::-webkit-scrollbar {
@@ -668,10 +671,15 @@
 
   .books-grid {
     padding-left: 20px;
-    /* Less padding on mobile */
     justify-content: center;
-    /* Center on mobile? or keep left */
+  }
+
+  .books-row-1 {
     padding-top: 100px;
+  }
+
+  .books-row-2 {
+    padding-top: 500px;
   }
 
   .book-preview-sidebar {

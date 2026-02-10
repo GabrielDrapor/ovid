@@ -1,17 +1,34 @@
 /**
- * Book upload and estimate handlers
+ * Book upload, estimate, and chunked translation handlers
  */
 
 import { Env } from './types';
 import { getCurrentUser } from './auth';
 import { getUserCredits, deductCredits } from './credits';
-import { insertBookShellV2, insertChapterTranslationsV2, updateBookStatus } from './db';
+import {
+  insertBookShellV2,
+  updateBookStatus,
+  createTranslationJob,
+  getTranslationJob,
+  updateTranslationJob,
+  storeChapterTextNodes,
+  getChapterTextNodes,
+  getChapterIdByNumber,
+  insertTranslationRow,
+  updateChapterTitle,
+  clearTextNodesJson,
+  deleteTranslationJob,
+} from './db';
 import { calculateBookCredits, TOKENS_PER_CREDIT } from '../utils/token-counter';
+import { Translator, SimpleKVStore } from '../utils/translator';
+
+/** Max paragraphs to translate per /translate-next call (well under 50 subrequest limit) */
+const BATCH_SIZE = 25;
 
 /**
- * Handle book upload with async background translation.
- * Returns immediately after parsing and inserting the book shell,
- * then translates in the background via ctx.waitUntil().
+ * Handle book upload. Parses EPUB, inserts book shell + text nodes,
+ * creates a translation job. No LLM calls — translation is driven
+ * by the frontend via /translate-next.
  */
 export async function handleBookUpload(
   request: Request,
@@ -49,8 +66,6 @@ export async function handleBookUpload(
     const buffer = await file.arrayBuffer();
 
     const { BookProcessor } = await import('../utils/book-processor');
-    // Use concurrency=1 to stay within Cloudflare Workers' 50 subrequest limit.
-    // Each translation = 1 fetch subrequest; parallel calls exhaust the budget quickly.
     const processor = new BookProcessor(1, {
       apiKey: env.OPENAI_API_KEY,
       baseURL: env.OPENAI_API_BASE_URL,
@@ -104,7 +119,7 @@ export async function handleBookUpload(
         styles: bookData.styles || '',
         chapters: bookData.chapters.map(ch => ({
           number: ch.number,
-          title: ch.originalTitle, // will be updated with translated title later
+          title: ch.originalTitle,
           originalTitle: ch.originalTitle,
           rawHtml: ch.rawHtml,
         })),
@@ -113,9 +128,24 @@ export async function handleBookUpload(
       user.id
     );
 
-    // Background translation via ctx.waitUntil
-    ctx.waitUntil(
-      translateInBackground(env, processor, bookData, bookId, bookUuid, targetLanguage, sourceLanguage)
+    // Store text nodes on each chapter for the translate-next endpoint
+    for (const chapter of bookData.chapters) {
+      await storeChapterTextNodes(
+        env.DB,
+        bookId,
+        chapter.number,
+        JSON.stringify(chapter.textNodes)
+      );
+    }
+
+    // Create translation job
+    await createTranslationJob(
+      env.DB,
+      bookId,
+      bookUuid,
+      sourceLanguage,
+      targetLanguage,
+      bookData.chapters.length
     );
 
     return new Response(
@@ -142,49 +172,300 @@ export async function handleBookUpload(
 }
 
 /**
- * Background translation task run via ctx.waitUntil()
+ * Handle a single chunk of translation work.
+ * Each call translates up to BATCH_SIZE paragraphs, staying within
+ * the Cloudflare Workers 50 subrequest limit.
  */
-async function translateInBackground(
+export async function handleTranslateNext(
+  request: Request,
   env: Env,
-  processor: any,
-  bookData: any,
-  bookId: number,
-  bookUuid: string,
-  targetLanguage: string,
-  sourceLanguage: string
-): Promise<void> {
+  bookUuid: string
+): Promise<Response> {
+  const json = (data: any, status = 200) =>
+    new Response(JSON.stringify(data), {
+      status,
+      headers: { 'Content-Type': 'application/json' },
+    });
+
   try {
-    console.log(`🔄 Starting background translation for ${bookUuid}`);
-
-    const processedBook = await processor.translateBookV2(
-      bookData,
-      targetLanguage,
-      sourceLanguage,
-      1 // Process chapters serially to stay within subrequest limits
-    );
-
-    // Update book title with translation
-    await env.DB.prepare('UPDATE books_v2 SET title = ? WHERE uuid = ?')
-      .bind(processedBook.metadata.title, bookUuid)
-      .run();
-
-    // Insert translations chapter by chapter
-    for (const chapter of processedBook.chapters) {
-      await insertChapterTranslationsV2(
-        env.DB,
-        bookId,
-        chapter.number,
-        chapter.translatedTitle,
-        chapter.textNodes,
-        chapter.translations
-      );
+    const job = await getTranslationJob(env.DB, bookUuid);
+    if (!job) {
+      return json({ done: true });
     }
 
-    await updateBookStatus(env.DB, bookUuid, 'ready');
-    console.log(`✅ Background translation complete for ${bookUuid}`);
+    if (job.status === 'completed') {
+      return json({ done: true });
+    }
+
+    if (job.status === 'error') {
+      return json({ done: true, error: job.error_message });
+    }
+
+    // Build a translator with glossary from the job
+    const kvStore = new SimpleKVStore();
+    if (job.glossary_json) {
+      const glossary = JSON.parse(job.glossary_json) as Record<string, string>;
+      for (const [key, value] of Object.entries(glossary)) {
+        kvStore.set(key, value);
+      }
+    }
+
+    const translator = new Translator({
+      apiKey: env.OPENAI_API_KEY,
+      baseURL: env.OPENAI_API_BASE_URL,
+      model: env.OPENAI_MODEL,
+      concurrency: 1,
+      kvStore,
+    });
+
+    // Phase 1: Extract glossary
+    if (job.status === 'pending' || (job.status === 'extracting_glossary' && !job.glossary_extracted)) {
+      await updateTranslationJob(env.DB, bookUuid, { status: 'extracting_glossary' });
+
+      // Gather all text for glossary extraction
+      const allTexts: string[] = [];
+      for (let ch = 1; ch <= job.total_chapters; ch++) {
+        const nodes = await getChapterTextNodes(env.DB, job.book_id, ch);
+        if (nodes) {
+          for (const node of nodes) {
+            allTexts.push(node.text);
+          }
+        }
+      }
+
+      const glossary = await translator.extractProperNouns(allTexts, {
+        sourceLanguage: job.source_language,
+        targetLanguage: job.target_language,
+      });
+
+      await updateTranslationJob(env.DB, bookUuid, {
+        glossary_json: JSON.stringify(glossary),
+        glossary_extracted: 1,
+        status: 'translating',
+        current_chapter: 1,
+        current_item_offset: 0,
+      });
+
+      return json({
+        done: false,
+        progress: {
+          phase: 'glossary',
+          chaptersCompleted: 0,
+          chaptersTotal: job.total_chapters,
+        },
+      });
+    }
+
+    // Phase 2: Translate
+    if (job.status === 'translating') {
+      // Translate book title first
+      if (!job.title_translated) {
+        const bookRow = await env.DB.prepare('SELECT original_title FROM books_v2 WHERE uuid = ?')
+          .bind(bookUuid).first();
+        const originalTitle = (bookRow?.original_title as string) || 'Untitled';
+
+        const translatedTitle = await translator.translateText(originalTitle, {
+          sourceLanguage: job.source_language,
+          targetLanguage: job.target_language,
+        });
+
+        await env.DB.prepare('UPDATE books_v2 SET title = ? WHERE uuid = ?')
+          .bind(translatedTitle, bookUuid).run();
+
+        await updateTranslationJob(env.DB, bookUuid, {
+          title_translated: 1,
+          translated_title: translatedTitle,
+        });
+
+        return json({
+          done: false,
+          progress: {
+            phase: 'translating',
+            chaptersCompleted: 0,
+            chaptersTotal: job.total_chapters,
+            detail: 'Translated book title',
+          },
+        });
+      }
+
+      // Translate chapter content
+      const chapterNum = job.current_chapter;
+      if (chapterNum > job.total_chapters) {
+        // All chapters done
+        await updateBookStatus(env.DB, bookUuid, 'ready');
+        await clearTextNodesJson(env.DB, job.book_id);
+        await updateTranslationJob(env.DB, bookUuid, { status: 'completed' });
+
+        return json({ done: true });
+      }
+
+      const textNodes = await getChapterTextNodes(env.DB, job.book_id, chapterNum);
+      if (!textNodes || textNodes.length === 0) {
+        // Empty chapter, skip to next
+        await updateTranslationJob(env.DB, bookUuid, {
+          current_chapter: chapterNum + 1,
+          current_item_offset: 0,
+          completed_chapters: job.completed_chapters + 1,
+        });
+
+        return json({
+          done: false,
+          progress: {
+            phase: 'translating',
+            chaptersCompleted: job.completed_chapters + 1,
+            chaptersTotal: job.total_chapters,
+            currentChapter: chapterNum + 1,
+          },
+        });
+      }
+
+      const chapterId = await getChapterIdByNumber(env.DB, job.book_id, chapterNum);
+      if (!chapterId) {
+        // Chapter not found, skip
+        await updateTranslationJob(env.DB, bookUuid, {
+          current_chapter: chapterNum + 1,
+          current_item_offset: 0,
+          completed_chapters: job.completed_chapters + 1,
+        });
+        return json({
+          done: false,
+          progress: {
+            phase: 'translating',
+            chaptersCompleted: job.completed_chapters + 1,
+            chaptersTotal: job.total_chapters,
+          },
+        });
+      }
+
+      const offset = job.current_item_offset;
+      const batch = textNodes.slice(offset, offset + BATCH_SIZE);
+
+      // Translate batch items
+      let translated = 0;
+      for (const node of batch) {
+        try {
+          const translatedText = await translator.translateText(node.text, {
+            sourceLanguage: job.source_language,
+            targetLanguage: job.target_language,
+          });
+
+          await insertTranslationRow(
+            env.DB,
+            chapterId,
+            node.xpath,
+            node.text,
+            node.html,
+            translatedText,
+            node.orderIndex
+          );
+          translated++;
+        } catch (err) {
+          console.warn(`Translation failed for xpath ${node.xpath}:`, err);
+          // Insert placeholder so we don't get stuck
+          await insertTranslationRow(
+            env.DB,
+            chapterId,
+            node.xpath,
+            node.text,
+            node.html,
+            `[Translation pending]`,
+            node.orderIndex
+          );
+          translated++;
+        }
+      }
+
+      const newOffset = offset + translated;
+      const chapterDone = newOffset >= textNodes.length;
+
+      if (chapterDone) {
+        // Translate chapter title
+        const chapterRow = await env.DB.prepare(
+          'SELECT original_title FROM chapters_v2 WHERE book_id = ? AND chapter_number = ?'
+        ).bind(job.book_id, chapterNum).first();
+
+        if (chapterRow?.original_title) {
+          try {
+            const translatedChTitle = await translator.translateText(
+              chapterRow.original_title as string,
+              { sourceLanguage: job.source_language, targetLanguage: job.target_language }
+            );
+            await updateChapterTitle(env.DB, job.book_id, chapterNum, translatedChTitle);
+          } catch {
+            // Keep original title on failure
+          }
+        }
+
+        const newCompleted = job.completed_chapters + 1;
+        const nextChapter = chapterNum + 1;
+
+        if (nextChapter > job.total_chapters) {
+          // Book complete
+          await updateBookStatus(env.DB, bookUuid, 'ready');
+          await clearTextNodesJson(env.DB, job.book_id);
+          await updateTranslationJob(env.DB, bookUuid, {
+            status: 'completed',
+            completed_chapters: newCompleted,
+            current_chapter: nextChapter,
+            current_item_offset: 0,
+          });
+          return json({ done: true });
+        }
+
+        await updateTranslationJob(env.DB, bookUuid, {
+          current_chapter: nextChapter,
+          current_item_offset: 0,
+          completed_chapters: newCompleted,
+        });
+
+        return json({
+          done: false,
+          progress: {
+            phase: 'translating',
+            chaptersCompleted: newCompleted,
+            chaptersTotal: job.total_chapters,
+            currentChapter: nextChapter,
+          },
+        });
+      } else {
+        // More items in current chapter
+        await updateTranslationJob(env.DB, bookUuid, {
+          current_item_offset: newOffset,
+        });
+
+        return json({
+          done: false,
+          progress: {
+            phase: 'translating',
+            chaptersCompleted: job.completed_chapters,
+            chaptersTotal: job.total_chapters,
+            currentChapter: chapterNum,
+            itemsCompleted: newOffset,
+            itemsTotal: textNodes.length,
+          },
+        });
+      }
+    }
+
+    // Unknown status
+    return json({ done: true, error: `Unknown job status: ${job.status}` });
   } catch (error) {
-    console.error(`❌ Background translation failed for ${bookUuid}:`, error);
-    await updateBookStatus(env.DB, bookUuid, 'error');
+    console.error(`translate-next error for ${bookUuid}:`, error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+
+    // Mark job as error
+    try {
+      await updateTranslationJob(env.DB, bookUuid, {
+        status: 'error',
+        error_message: errorMessage,
+      });
+      await updateBookStatus(env.DB, bookUuid, 'error');
+    } catch { /* ignore cleanup errors */ }
+
+    return new Response(
+      JSON.stringify({ error: 'Translation chunk failed', details: errorMessage }),
+      { status: 500, headers: { 'Content-Type': 'application/json' } }
+    );
   }
 }
 
