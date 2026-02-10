@@ -7,13 +7,122 @@ export async function getAllBooksV2(db: D1Database) {
     .prepare(
       `SELECT id, uuid, title, original_title, author, language_pair,
               book_cover_img_url, book_spine_img_url, user_id,
-              created_at, updated_at
+              status, created_at, updated_at
        FROM books_v2
        ORDER BY created_at DESC`
     )
     .all();
 
   return books.results;
+}
+
+export async function getBookStatus(db: D1Database, bookUuid: string): Promise<string | null> {
+  const book = await db.prepare('SELECT status FROM books_v2 WHERE uuid = ?')
+    .bind(bookUuid)
+    .first();
+  return book ? (book.status as string) : null;
+}
+
+export async function updateBookStatus(db: D1Database, bookUuid: string, status: string): Promise<void> {
+  await db.prepare('UPDATE books_v2 SET status = ? WHERE uuid = ?')
+    .bind(status, bookUuid)
+    .run();
+}
+
+/**
+ * Insert book metadata and chapters (with raw HTML) but no translations.
+ * Used for async upload: book appears on shelf immediately while translating in background.
+ */
+export async function insertBookShellV2(
+  db: D1Database,
+  bookData: {
+    title: string;
+    originalTitle: string;
+    author: string;
+    languagePair: string;
+    styles: string;
+    chapters: Array<{
+      number: number;
+      title: string;
+      originalTitle: string;
+      rawHtml: string;
+    }>;
+  },
+  bookUuid: string,
+  userId?: number
+): Promise<number> {
+  await db.prepare(
+    `INSERT INTO books_v2 (uuid, title, original_title, author, language_pair, styles, user_id, status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'processing')`
+  )
+    .bind(
+      bookUuid,
+      bookData.title,
+      bookData.originalTitle,
+      bookData.author,
+      bookData.languagePair,
+      bookData.styles,
+      userId ?? null
+    )
+    .run();
+
+  const book = await db.prepare('SELECT id FROM books_v2 WHERE uuid = ?')
+    .bind(bookUuid)
+    .first();
+
+  if (!book) throw new Error('Failed to create book');
+  const bookId = book.id as number;
+
+  for (const chapter of bookData.chapters) {
+    const rawHtmlSize = chapter.rawHtml ? new TextEncoder().encode(chapter.rawHtml).length : 0;
+    const shouldStoreRawHtml = rawHtmlSize < 50000;
+
+    if (shouldStoreRawHtml) {
+      await db.prepare(
+        `INSERT INTO chapters_v2 (book_id, chapter_number, title, original_title, raw_html, order_index)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      ).bind(bookId, chapter.number, chapter.title, chapter.originalTitle, chapter.rawHtml, chapter.number).run();
+    } else {
+      await db.prepare(
+        `INSERT INTO chapters_v2 (book_id, chapter_number, title, original_title, order_index)
+         VALUES (?, ?, ?, ?, ?)`
+      ).bind(bookId, chapter.number, chapter.title, chapter.originalTitle, chapter.number).run();
+    }
+  }
+
+  return bookId;
+}
+
+/**
+ * Insert translations for a single chapter (used during background translation)
+ */
+export async function insertChapterTranslationsV2(
+  db: D1Database,
+  bookId: number,
+  chapterNumber: number,
+  translatedTitle: string,
+  textNodes: Array<{ xpath: string; text: string; html: string; orderIndex: number }>,
+  translations: Map<string, string>
+): Promise<void> {
+  // Update chapter title with translation
+  await db.prepare(
+    `UPDATE chapters_v2 SET title = ? WHERE book_id = ? AND chapter_number = ?`
+  ).bind(translatedTitle, bookId, chapterNumber).run();
+
+  const chapterRow = await db.prepare(
+    'SELECT id FROM chapters_v2 WHERE book_id = ? AND chapter_number = ?'
+  ).bind(bookId, chapterNumber).first();
+
+  if (!chapterRow) return;
+  const chapterId = chapterRow.id as number;
+
+  for (const node of textNodes) {
+    const translatedText = translations.get(node.xpath) || node.text;
+    await db.prepare(
+      `INSERT INTO translations_v2 (chapter_id, xpath, original_text, original_html, translated_text, order_index)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    ).bind(chapterId, node.xpath, node.text, node.html, translatedText, node.orderIndex).run();
+  }
 }
 
 export async function getBookChaptersV2(db: D1Database, bookUuid: string) {

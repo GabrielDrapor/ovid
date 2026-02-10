@@ -631,6 +631,64 @@
   border-color: #ff6b6b;
 }
 
+/* Processing book state */
+.book-spine-wrapper {
+  position: relative;
+}
+
+.book-spine-wrapper.processing .book-spine-container {
+  filter: blur(2px) brightness(0.6);
+  opacity: 0.7;
+}
+
+.book-spine-wrapper.processing .book-spine-container:hover {
+  filter: blur(1.5px) brightness(0.7);
+  opacity: 0.8;
+  transform: none;
+}
+
+.book-processing-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.processing-spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+.book-status-processing {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 15px 40px;
+  color: #aaa;
+  font-size: 0.95rem;
+  border: 1px solid #333;
+  border-radius: 30px;
+  width: 100%;
+}
+
+.book-status-error {
+  padding: 15px 40px;
+  color: #ff6b6b;
+  font-size: 0.95rem;
+  text-align: center;
+  border: 1px solid #ff6b6b33;
+  border-radius: 30px;
+  width: 100%;
+}
+
 /* Placeholder when no book selected (though sidebar is usually hidden then) */
 .preview-placeholder {
   display: flex;

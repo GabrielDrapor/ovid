@@ -25,6 +25,7 @@ import {
   getBookChaptersV2,
   getChapterContentV2,
   deleteBookV2,
+  getBookStatus,
 } from './db';
 import {
   handleBookUpload,
@@ -32,24 +33,26 @@ import {
 } from './book-handlers';
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
     // Check config on startup
     checkOAuthConfig(env);
     checkStripeConfig(env);
 
-    // Ensure user_id column exists on books_v2
+    // Run migrations
     await env.DB.prepare(
       `CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY)`
     ).run();
-    const migrated = await env.DB.prepare(
-      `SELECT 1 FROM _migrations WHERE name = 'books_v2_user_id'`
-    ).first();
-    if (!migrated) {
-      await env.DB.prepare(`ALTER TABLE books_v2 ADD COLUMN user_id INTEGER`).run().catch(() => {});
-      await env.DB.prepare(`INSERT INTO _migrations (name) VALUES ('books_v2_user_id')`).run();
-    }
+    const runMigration = async (name: string, sql: string) => {
+      const done = await env.DB.prepare(`SELECT 1 FROM _migrations WHERE name = ?`).bind(name).first();
+      if (!done) {
+        await env.DB.prepare(sql).run().catch(() => {});
+        await env.DB.prepare(`INSERT INTO _migrations (name) VALUES (?)`).bind(name).run();
+      }
+    };
+    await runMigration('books_v2_user_id', 'ALTER TABLE books_v2 ADD COLUMN user_id INTEGER');
+    await runMigration('books_v2_status', "ALTER TABLE books_v2 ADD COLUMN status TEXT DEFAULT 'ready'");
 
     // Handle API routes
     if (url.pathname.startsWith('/api/')) {
@@ -139,7 +142,21 @@ export default {
         }
 
         if (url.pathname === '/api/books/upload' && request.method === 'POST') {
-          return handleBookUpload(request, env);
+          return handleBookUpload(request, env, ctx);
+        }
+
+        // Book status check
+        const statusMatch = url.pathname.match(/^\/api\/book\/([^\/]+)\/status$/);
+        if (statusMatch) {
+          const status = await getBookStatus(env.DB, statusMatch[1]);
+          if (!status) {
+            return new Response(JSON.stringify({ error: 'Book not found' }), {
+              status: 404, headers: { 'Content-Type': 'application/json' },
+            });
+          }
+          return new Response(JSON.stringify({ status }), {
+            headers: { 'Content-Type': 'application/json' },
+          });
         }
 
         // Delete book

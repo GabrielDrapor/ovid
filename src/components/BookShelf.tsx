@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useUser } from '../contexts/UserContext';
 import './BookShelf.css';
 
@@ -12,6 +12,7 @@ interface Book {
   book_cover_img_url: string | null;
   book_spine_img_url: string | null;
   user_id: number | null;
+  status: string | null; // 'ready' | 'processing' | 'error'
   created_at: string;
   updated_at: string;
 }
@@ -65,6 +66,39 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
     fetchBooks();
   }, []);
 
+  // Poll status for books that are still processing
+  const pollingRef = useRef<NodeJS.Timeout | null>(null);
+  const pollProcessingBooks = useCallback(async () => {
+    const processingBooks = books.filter(b => b.status === 'processing');
+    if (processingBooks.length === 0) return;
+
+    let changed = false;
+    for (const book of processingBooks) {
+      try {
+        const res = await fetch(`/api/book/${book.uuid}/status`);
+        if (res.ok) {
+          const data = await res.json() as { status: string };
+          if (data.status !== 'processing') {
+            changed = true;
+          }
+        }
+      } catch { /* ignore */ }
+    }
+    if (changed) {
+      await fetchBooks();
+    }
+  }, [books]);
+
+  useEffect(() => {
+    const hasProcessing = books.some(b => b.status === 'processing');
+    if (hasProcessing) {
+      pollingRef.current = setInterval(pollProcessingBooks, 5000);
+      return () => { if (pollingRef.current) clearInterval(pollingRef.current); };
+    } else {
+      if (pollingRef.current) clearInterval(pollingRef.current);
+    }
+  }, [books, pollProcessingBooks]);
+
   const handleFileSelect = async (file: File) => {
     if (!user) {
       alert('Please login to upload books');
@@ -112,7 +146,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
     if (!estimate) return;
 
     setUploading(true);
-    setUploadProgress('Translating book...');
+    setUploadProgress('Uploading...');
     setUploadError(null);
 
     try {
@@ -144,19 +178,14 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
         throw new Error(errorData.error || 'Upload failed');
       }
 
-      const result = await response.json() as { success: boolean; bookUuid: string; creditsUsed?: number };
-      setUploadProgress(`Success! Used ${result.creditsUsed?.toLocaleString() || 0} credits.`);
+      // Close modal immediately - book will appear on shelf in processing state
+      setShowUploadModal(false);
+      setUploadProgress('');
+      setUploading(false);
+      setEstimate(null);
 
       await fetchBooks();
       await refreshCredits();
-
-      setTimeout(() => {
-        setShowUploadModal(false);
-        setUploadProgress('');
-        setUploading(false);
-        setUploadError(null);
-        setEstimate(null);
-      }, 2000);
     } catch (err) {
       setUploadProgress('');
       setUploading(false);
@@ -205,25 +234,31 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
           </div>
         ) : (
           <div className="books-grid" style={{ opacity: loading ? 0 : 1, transition: 'opacity 0.5s ease-in-out' }}>
-            {books.map((book) => (
-              <div
-                key={book.uuid}
-                className={`book-spine-container ${selectedBook?.uuid === book.uuid ? 'selected' : ''}`}
-                onClick={() => setSelectedBook(book)}
-              >
-                {book.book_spine_img_url ? (
-                  <img
-                    src={book.book_spine_img_url}
-                    alt={`${book.title} spine`}
-                    className="book-spine-img"
-                  />
-                ) : (
-                  <div className="book-spine-default" style={{ backgroundColor: stringToColor(book.title) }}>
-                    <span className="spine-title">{book.title}</span>
+            {books.map((book) => {
+              const isProcessing = book.status === 'processing';
+              return (
+                <div
+                  key={book.uuid}
+                  className={`book-spine-wrapper ${isProcessing ? 'processing' : ''}`}
+                  onClick={() => setSelectedBook(book)}
+                >
+                  <div className={`book-spine-container ${selectedBook?.uuid === book.uuid ? 'selected' : ''}`}>
+                    {book.book_spine_img_url ? (
+                      <img
+                        src={book.book_spine_img_url}
+                        alt={`${book.title} spine`}
+                        className="book-spine-img"
+                      />
+                    ) : (
+                      <div className="book-spine-default" style={{ backgroundColor: stringToColor(book.title) }}>
+                        <span className="spine-title">{book.title}</span>
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
-            ))}
+                  {isProcessing && <div className="book-processing-overlay"><div className="processing-spinner"></div></div>}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
@@ -251,12 +286,23 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
               )}
               <p className="author">By {selectedBook.author}</p>
 
-              <button
-                className="enter-book-btn"
-                onClick={() => onSelectBook(selectedBook.uuid)}
-              >
-                Start Reading
-              </button>
+              {selectedBook.status === 'processing' ? (
+                <div className="book-status-processing">
+                  <div className="processing-spinner"></div>
+                  <span>Translating...</span>
+                </div>
+              ) : selectedBook.status === 'error' ? (
+                <div className="book-status-error">
+                  <span>Translation failed</span>
+                </div>
+              ) : (
+                <button
+                  className="enter-book-btn"
+                  onClick={() => onSelectBook(selectedBook.uuid)}
+                >
+                  Start Reading
+                </button>
+              )}
               {user && selectedBook.user_id && (
                 <button
                   className="remove-book-btn"
