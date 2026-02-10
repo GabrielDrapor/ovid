@@ -553,8 +553,14 @@ IMPORTANT: The translations must be CONSISTENT. If "Whymper" is "温珀", then "
         temperature: 0.3,
       });
 
-      // Post-process: enforce glossary consistency
-      const enforced = this.enforceGlossaryConsistency(translation, text);
+      // Post-process: strip any echoed XML tags from the response
+      const cleaned = translation
+        .replace(/<\/?translate>/gi, '')
+        .replace(/<\/?context>/gi, '')
+        .trim();
+
+      // Enforce glossary consistency
+      const enforced = this.enforceGlossaryConsistency(cleaned, text);
       return enforced;
     } catch (error) {
       const errorMessage =

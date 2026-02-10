@@ -671,11 +671,12 @@
 
   .books-grid {
     padding-left: 20px;
-    justify-content: center;
+    justify-content: flex-start;
   }
 
   .books-row-1 {
-    padding-top: 100px;
+    padding-top: 95px;
+    max-height: 90%;
   }
 
   .books-row-2 {
