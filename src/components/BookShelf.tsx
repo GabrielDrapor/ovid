@@ -25,7 +25,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
   const [books, setBooks] = useState<Book[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [selectedBook, setSelectedBook] = useState<Book | null>(null);
+  const [hoveredBook, setHoveredBook] = useState<Book | null>(null);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showCreditsModal, setShowCreditsModal] = useState(false);
@@ -206,7 +206,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
         const data = await response.json() as { error?: string };
         throw new Error(data.error || 'Failed to delete');
       }
-      setSelectedBook(null);
+      setHoveredBook(null);
       await fetchBooks();
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to delete book');
@@ -240,9 +240,11 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                 <div
                   key={book.uuid}
                   className={`book-spine-wrapper ${isProcessing ? 'processing' : ''}`}
-                  onClick={() => setSelectedBook(book)}
+                  onMouseEnter={() => setHoveredBook(book)}
+                  onMouseLeave={() => setHoveredBook(null)}
+                  onClick={() => { if (!isProcessing) onSelectBook(book.uuid); }}
                 >
-                  <div className={`book-spine-container ${selectedBook?.uuid === book.uuid ? 'selected' : ''}`}>
+                  <div className="book-spine-container">
                     {book.book_spine_img_url ? (
                       <img
                         src={book.book_spine_img_url}
@@ -263,50 +265,41 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
         )}
       </div>
 
-      <div className={`book-preview-sidebar ${selectedBook ? 'open' : ''}`}>
-        {selectedBook ? (
+      <div className="book-preview-sidebar">
+        {hoveredBook && (
           <div className="preview-content">
-            <button className="close-preview" onClick={() => setSelectedBook(null)}>×</button>
-
             <div className="preview-cover">
-              {selectedBook.book_cover_img_url ? (
-                <img src={selectedBook.book_cover_img_url} alt={selectedBook.title} />
+              {hoveredBook.book_cover_img_url ? (
+                <img src={hoveredBook.book_cover_img_url} alt={hoveredBook.title} />
               ) : (
                 <div className="default-preview-cover">
-                  <h3>{selectedBook.title}</h3>
-                  <p>{selectedBook.author}</p>
+                  <h3>{hoveredBook.title}</h3>
+                  <p>{hoveredBook.author}</p>
                 </div>
               )}
             </div>
 
             <div className="preview-info">
-              <h2>{selectedBook.original_title || selectedBook.title}</h2>
-              {selectedBook.original_title && selectedBook.title !== selectedBook.original_title && (
-                <h3 className="translated-title">{selectedBook.title}</h3>
+              <h2>{hoveredBook.original_title || hoveredBook.title}</h2>
+              {hoveredBook.original_title && hoveredBook.title !== hoveredBook.original_title && (
+                <h3 className="translated-title">{hoveredBook.title}</h3>
               )}
-              <p className="author">By {selectedBook.author}</p>
+              <p className="author">By {hoveredBook.author}</p>
 
-              {selectedBook.status === 'processing' ? (
+              {hoveredBook.status === 'processing' ? (
                 <div className="book-status-processing">
                   <div className="processing-spinner"></div>
                   <span>Translating...</span>
                 </div>
-              ) : selectedBook.status === 'error' ? (
+              ) : hoveredBook.status === 'error' ? (
                 <div className="book-status-error">
                   <span>Translation failed</span>
                 </div>
-              ) : (
-                <button
-                  className="enter-book-btn"
-                  onClick={() => onSelectBook(selectedBook.uuid)}
-                >
-                  Start Reading
-                </button>
-              )}
-              {user && selectedBook.user_id && (
+              ) : null}
+              {user && hoveredBook.user_id && (
                 <button
                   className="remove-book-btn"
-                  onClick={() => handleDeleteBook(selectedBook.uuid)}
+                  onClick={(e) => { e.stopPropagation(); handleDeleteBook(hoveredBook.uuid); }}
                   title="Remove Book"
                 >
                   <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -319,10 +312,6 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                 </button>
               )}
             </div>
-          </div>
-        ) : (
-          <div className="preview-placeholder">
-            <p>Select a book to view details</p>
           </div>
         )}
 

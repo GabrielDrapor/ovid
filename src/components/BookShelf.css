@@ -459,11 +459,6 @@
   /* Lifted shadow */
 }
 
-.book-spine-container.selected {
-  transform: scale(1.05) translateY(-10px);
-  z-index: 60;
-  box-shadow: 0 0 15px rgba(255, 255, 255, 0.3);
-}
 
 .book-spine-img {
   width: 100%;
@@ -502,25 +497,17 @@
 /* Sidebar Preview Panel */
 .book-preview-sidebar {
   position: relative;
-  /* Static in flex flow for desktop */
   top: auto;
   right: auto;
   height: 100%;
   width: 350px;
-  /* Fixed width */
   min-width: 350px;
   background: #111;
-  /* Solid dark background */
   border-left: 1px solid rgba(255, 255, 255, 0.1);
   display: flex;
   flex-direction: column;
   z-index: 100;
   box-shadow: -10px 0 30px rgba(0, 0, 0, 0.5);
-}
-
-.book-preview-sidebar.open {
-  width: 350px;
-  /* No change on open for desktop, it's always open */
 }
 
 .preview-content {
@@ -534,10 +521,6 @@
   overflow-y: auto;
 }
 
-.close-preview {
-  display: none;
-  /* Hide close button on desktop since it's persistent */
-}
 
 .preview-cover {
   width: 100%;
@@ -589,25 +572,6 @@
   margin-bottom: 40px;
 }
 
-.enter-book-btn {
-  background: white;
-  color: black;
-  border: none;
-  padding: 15px 40px;
-  font-size: 1.1rem;
-  border-radius: 30px;
-  cursor: pointer;
-  font-weight: 600;
-  transition: transform 0.2s, background 0.2s;
-  width: 100%;
-  letter-spacing: 0.5px;
-}
-
-.enter-book-btn:hover {
-  transform: translateY(-2px);
-  background: #f0f0f0;
-  box-shadow: 0 5px 15px rgba(255, 255, 255, 0.2);
-}
 
 .remove-book-btn {
   background: transparent;
@@ -689,15 +653,6 @@
   width: 100%;
 }
 
-/* Placeholder when no book selected (though sidebar is usually hidden then) */
-.preview-placeholder {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex: 1;
-  color: #555;
-  font-style: italic;
-}
 
 /* Responsive adjustments */
 @media (max-width: 768px) {
@@ -720,38 +675,7 @@
   }
 
   .book-preview-sidebar {
-    position: fixed;
-    /* Overlay on mobile */
-    top: 0;
-    right: 0;
-    width: 100%;
-    /* Full width */
-    height: 100%;
-    transform: translateX(100%);
-    /* Hidden by default */
-    transition: transform 0.3s ease;
-    z-index: 1000;
-    background: rgba(10, 10, 10, 0.98);
-  }
-
-  .book-preview-sidebar.open {
-    transform: translateX(0);
-    /* Slide in */
-    width: 100%;
-  }
-
-  .close-preview {
-    display: block;
-    /* Show close button on mobile */
-    position: absolute;
-    top: 20px;
-    right: 20px;
-    background: none;
-    border: none;
-    color: #888;
-    font-size: 2rem;
-    cursor: pointer;
-    z-index: 101;
+    display: none;
   }
 
   /* Mobile auth button positioning */
