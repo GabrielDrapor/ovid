@@ -11,9 +11,18 @@
         "moduleResolution": "node",
         "esModuleInterop": true,
         "skipLibCheck": true,
-        "resolveJsonModule": true
+        "resolveJsonModule": true,
+        "noImplicitAny": false,
+        "declaration": false,
+        "noEmitOnError": false
     },
     "include": [
         "./*.ts"
-    ]
+    ],
+    "ts-node": {
+        "transpileOnly": true,
+        "compilerOptions": {
+            "module": "commonjs"
+        }
+    }
 }

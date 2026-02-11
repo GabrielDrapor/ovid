@@ -6,9 +6,9 @@
       "dom.iterable",
       "es6"
     ],
-    "types": ["@cloudflare/workers-types"],
     "allowJs": true,
     "skipLibCheck": true,
+    "noImplicitAny": false,
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
     "strict": true,
@@ -23,5 +23,11 @@
   },
   "include": [
     "src"
+  ],
+  "exclude": [
+    "src/cli",
+    "src/scripts",
+    "src/worker",
+    "node_modules"
   ]
 }

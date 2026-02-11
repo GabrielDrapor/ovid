@@ -265,7 +265,7 @@ export class EPUBParser {
       const processElementsInOrder = () => {
         // Get all relevant elements in document order
         const allElements = body.getElementsByTagName('*');
-        const elementsToProcess = [];
+        const elementsToProcess: Element[] = [];
 
         for (let i = 0; i < allElements.length; i++) {
           const element = allElements[i] as Element;

@@ -5,7 +5,7 @@
   "main": "index.js",
   "proxy": "http://127.0.0.1:8787",
   "scripts": {
-    "build": "react-scripts build",
+    "build": "SKIP_PREFLIGHT_CHECK=true react-scripts build",
     "dev": "wrangler dev --ip 0.0.0.0 --port 8787 --config wrangler.toml",
     "dev:remote": "wrangler dev --remote --config wrangler.toml",
     "convert-epub": "ts-node src/cli/convert-epub.ts",
@@ -51,9 +51,9 @@
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250830.0",
     "@types/node": "^24.1.0",
-    "@types/react": "^18.2.0",
-    "@types/react-dom": "^18.2.0",
-    "dotenv": "^17.2.1",
+    "@types/react": "^18.3.28",
+    "@types/react-dom": "^18.3.7",
+    "dotenv": "^10.0.0",
     "prettier": "^3.6.2",
     "ts-node": "^10.9.2",
     "typescript": "^4.9.5",
