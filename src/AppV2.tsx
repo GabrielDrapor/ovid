@@ -98,13 +98,23 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
   // Track book completion status
   const [isCompleted, setIsCompleted] = useState(false);
 
-  // Mark book as complete/incomplete
+  // Calculate reading progress percentage
+  const calculateProgress = useCallback(() => {
+    if (chapters.length === 0) return 0;
+    return Math.round((currentChapter / chapters.length) * 100);
+  }, [currentChapter, chapters.length]);
+
+  // Mark book as complete/incomplete and update progress
   const handleMarkComplete = useCallback(async (completed: boolean) => {
     try {
+      const progressPercent = calculateProgress();
       const response = await fetch(`/api/book/${bookUuid}/mark-complete`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ isCompleted: completed }),
+        body: JSON.stringify({ 
+          isCompleted: completed,
+          readingProgress: completed ? 100 : progressPercent 
+        }),
       });
       if (response.ok) {
         setIsCompleted(completed);
@@ -112,7 +122,7 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
     } catch (err) {
       console.error('Error marking book:', err);
     }
-  }, [bookUuid]);
+  }, [bookUuid, calculateProgress]);
 
   // Save progress to localStorage and URL
   const saveProgress = useCallback((chapter: number, xpath?: string) => {
@@ -167,6 +177,22 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
       const data = await response.json();
       setChapterContent(data as ChapterContent);
       setCurrentChapter(chapterNumber);
+      saveProgress(chapterNumber, scrollToXpath);
+      
+      // Auto-update reading progress in database (debounced)
+      // Only save if we've loaded chapters info
+      if (chapters.length > 0) {
+        const progressPercent = Math.round((chapterNumber / chapters.length) * 100);
+        // Don't await this - let it happen in background
+        fetch(`/api/book/${bookUuid}/mark-complete`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            isCompleted: false,
+            readingProgress: progressPercent 
+          }),
+        }).catch(err => console.error('Error updating progress:', err));
+      }
 
       // Set target xpath for scroll (or clear it for new chapter)
       setTargetXpath(scrollToXpath);

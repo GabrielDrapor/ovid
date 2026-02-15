@@ -241,15 +241,34 @@ export default {
             });
           }
           try {
-            const body = await request.json() as { isCompleted: boolean };
+            const body = await request.json() as { isCompleted: boolean; readingProgress?: number };
             const bookUuid = markCompleteMatch[1];
-            await upsertUserBookProgress(env.DB, user.id, bookUuid, body.isCompleted);
+            
+            if (typeof body.isCompleted !== 'boolean') {
+              return new Response(JSON.stringify({ error: 'isCompleted must be boolean' }), {
+                status: 400, headers: { 'Content-Type': 'application/json' },
+              });
+            }
+            
+            // Validate reading progress if provided
+            const readingProgress = body.readingProgress;
+            if (readingProgress !== undefined && (typeof readingProgress !== 'number' || readingProgress < 0 || readingProgress > 100)) {
+              return new Response(JSON.stringify({ error: 'readingProgress must be 0-100' }), {
+                status: 400, headers: { 'Content-Type': 'application/json' },
+              });
+            }
+            
+            await upsertUserBookProgress(env.DB, user.id, bookUuid, body.isCompleted, readingProgress);
             const progress = await getUserBookProgress(env.DB, user.id, bookUuid);
             return new Response(JSON.stringify({ success: true, progress }), {
               headers: { 'Content-Type': 'application/json' },
             });
           } catch (err) {
-            return new Response(JSON.stringify({ error: 'Invalid request' }), {
+            console.error('Mark complete error:', err);
+            return new Response(JSON.stringify({ 
+              error: 'Invalid request',
+              details: err instanceof Error ? err.message : String(err)
+            }), {
               status: 400, headers: { 'Content-Type': 'application/json' },
             });
           }

@@ -100,7 +100,11 @@ function App() {
 
   // V2 Book reader
   if (bookUuid) {
-    return <AppV2 bookUuid={bookUuid} onBackToShelf={handleBackToShelf} />;
+    return (
+      <UserProvider>
+        <AppV2 bookUuid={bookUuid} onBackToShelf={handleBackToShelf} />
+      </UserProvider>
+    );
   }
 
   return null;

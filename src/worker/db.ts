@@ -532,18 +532,23 @@ export async function upsertUserBookProgress(
   db: D1Database,
   userId: number,
   bookUuid: string,
-  isCompleted: boolean
+  isCompleted: boolean,
+  readingProgress?: number
 ): Promise<void> {
+  const isCompletedInt = isCompleted ? 1 : 0;
+  const progress = readingProgress ?? null;
+  
   await db.prepare(
-    `INSERT INTO user_book_progress (user_id, book_uuid, is_completed, completed_at, last_read_at)
+    `INSERT INTO user_book_progress (user_id, book_uuid, is_completed, reading_progress, last_read_at)
      VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
      ON CONFLICT(user_id, book_uuid) DO UPDATE SET
        is_completed = ?,
-       completed_at = CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE NULL END,
+       reading_progress = CASE WHEN ? IS NOT NULL THEN ? ELSE reading_progress END,
+       completed_at = CASE WHEN ? = 1 THEN CURRENT_TIMESTAMP ELSE NULL END,
        last_read_at = CURRENT_TIMESTAMP,
        updated_at = CURRENT_TIMESTAMP`
   )
-    .bind(userId, bookUuid, isCompleted ? 1 : 0, isCompleted ? 1 : 0, isCompleted)
+    .bind(userId, bookUuid, isCompletedInt, progress, isCompletedInt, progress, progress, isCompletedInt)
     .run();
 }
 

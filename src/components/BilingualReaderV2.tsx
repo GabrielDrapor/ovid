@@ -56,6 +56,8 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
   isLoading,
   bookUuid,
   onBackToShelf,
+  onMarkComplete,
+  isCompleted,
   initialXpath,
   onProgressChange,
 }) => {
