@@ -2,84 +2,116 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Commands
+## Commands & Workflows
 
-### Development
-- **Start development server**: `npm start`
-- **Start local worker preview**: `npm run preview`
+### Development & Deployment
+- **Start dev server (React only)**: `npm start`
+- **Start worker preview (full stack)**: `npm run preview` ← use this for complete local testing
 - **Build for production**: `npm run build`
+- **Deploy to Cloudflare**: `npm run deploy`
 - **Run tests**: `npm test`
-- **Deploy to Cloudflare Workers**: `npm run deploy`
-- **Eject from create-react-app**: `npm run eject` (irreversible)
+- **Eject from CRA**: `npm run eject` (⚠️ irreversible)
 
-### Book Management
-- **Import book**: `yarn import-book -- --file="book.epub" --target="zh"`
-- **List local books**: `yarn list-books:local`
-- **List remote books**: `yarn list-books:remote`
-- **Remove local book**: `yarn remove-book:local -- --uuid="book-uuid"`
-- **Remove remote book**: `yarn remove-book:remote -- --uuid="book-uuid"`
-- **Sync to remote**: `yarn sync-remote-book -- --uuid="book-uuid"`
+### Book Management (TypeScript scripts)
+- **Import**: `yarn import-book -- --file="book.epub" --target="zh" --provider="openai"`
+- **List local**: `yarn list-books:local`
+- **List remote**: `yarn list-books:remote`
+- **Remove local**: `yarn remove-book:local -- --uuid="book-uuid"`
+- **Remove remote**: `yarn remove-book:remote -- --uuid="book-uuid"`
+- **Sync to D1**: `yarn sync-remote-book -- --uuid="book-uuid"`
 
-### Database
-- **Execute local SQL**: `npm run db:local -- "SELECT * FROM books;"`
-- **Execute remote SQL**: `npm run db:remote -- "SELECT * FROM books;"`
-- **Initialize schema**: `npm run db:init`
-- **Seed sample data**: `npm run db:seed`
+### Database Management
+- **Run SQL on local DB**: `npm run db:local -- "SELECT * FROM books;"`
+- **Run SQL on remote D1**: `npm run db:remote -- "SELECT * FROM books;"`
+- **Execute SQL file locally**: `npm run db:local -- --file database/schema.sql`
+- **Execute SQL file remotely**: `npm run db:remote -- --file database/schema.sql`
 
 ## Architecture
 
-This is a React TypeScript application built with Create React App, deployed as a Cloudflare Worker with D1 database integration. **All scripts are TypeScript** for type safety and consistency. The codebase is structured as:
+This is a **TypeScript-first** React application built with Create React App and Cloudflare Workers, using D1 SQLite for persistence. **100% TypeScript** across frontend, backend, and CLI scripts for type safety and consistency.
 
-- **Entry point**: `src/index.tsx` - React app initialization
-- **Main component**: `src/App.tsx` - Loads chapters from API and manages reading state
-- **Core feature**: `src/components/BilingualReader.tsx` - Interactive bilingual text reader with scroll navigation
-- **Worker backend**: `src/worker/index.ts` - Cloudflare Worker with API endpoints and asset serving
-- **Translation**: `src/utils/translator.ts` - Unified translation module supporting OpenAI-compatible APIs
-- **Scripts**: `scripts/*.ts` - TypeScript scripts for book import, listing, removal, and sync
-- **Database**: D1 SQLite database with books, chapters, and content_items tables
-- **Styling**: CSS modules in `src/App.css` and `src/components/BilingualReader.css`
+### Core Modules
+
+- **Entry point**: `src/index.tsx` - React initialization with error boundary
+- **Main app**: `src/App.tsx` - Book shelf, authentication state, theme management
+- **Book shelf**: `src/components/BookShelf.tsx` - Two-row layout with public/user books, hover preview, direct entry
+- **Reader**: `src/components/BilingualReader.tsx` - XPath-based bilingual text with paragraph-level toggle, scroll navigation (auto-load chapters), reading progress tracking
+- **Worker backend**: `src/worker/index.ts` - Full API server with auth, books, chapters, uploads, payments
+- **Translation engine**: `src/utils/translator.ts` - Unified interface for OpenAI-compatible APIs with sequential processing and context preservation
+- **CLI scripts**: `scripts/*.ts` - TypeScript book import, listing, removal, sync with full schema management
+- **Database**: `D1 SQLite` - users, sessions, books, chapters, content_items, credit_transactions tables
+- **Styling**: `src/App.css` + component CSS with CJK typography (Noto Sans CJK SC)
 
 ## Reading Experience
 
-The bilingual reader features:
-- **Single-chapter mode**: Only one chapter loads at a time for performance
-- **Scroll navigation**: 
-  - Scroll to bottom → automatically loads next chapter
-  - Scroll to top → automatically loads previous chapter
-- **Manual navigation**: Chapter menu for direct chapter selection
-- **Language toggle**: Click any paragraph to switch between original/translated text
-- **Reading controls**: Adjustable line height, letter spacing, and paragraph spacing
+The bilingual reader provides an optimized reading workflow:
+
+### Navigation & Performance
+- **Single-chapter mode**: Only active chapter in memory for smooth scrolling
+- **Automatic scroll-based loading**:
+  - Scroll to bottom → loads next chapter seamlessly
+  - Scroll to top → loads previous chapter
+  - No manual navigation needed for continuous reading
+- **Manual chapter menu**: Jump to any chapter via dropdown selector
+- **Reading progress**: Automatic tracking and restoration of last reading position
+
+### Text Interaction
+- **Paragraph-level toggle**: Click any paragraph to switch original ↔ translated
+- **XPath-based mapping**: Precise alignment between original and translated text
+- **Language optimization**: 
+  - CJK typography with Noto Sans CJK SC for Chinese text
+  - Optimized line height, letter spacing, paragraph spacing for comfort
+
+### Translation Quality
+- **Sequential translation with context**: Preserves character voice and narrative consistency
+- **Proper noun handling**: Maintains names, places, and technical terms accurately
+- **XML stripping**: Clean output without translation artifacts
 
 ## API Endpoints
 
-### Authentication
-- `GET /api/auth/google` - Start Google OAuth flow
-- `GET /api/auth/callback/google` - OAuth callback handler
-- `GET /api/auth/me` - Get current user info
-- `POST /api/auth/logout` - Logout user
+### Authentication (OAuth 2.0)
+- `GET /api/auth/google` - Initiate Google OAuth flow
+- `GET /api/auth/callback/google` - OAuth callback handler with session creation
+- `GET /api/auth/me` - Get current authenticated user profile
+- `POST /api/auth/logout` - Terminate user session
 
-### Books
+### Books & Reading
 - `GET /api/books` - List all books (public + user's private books)
-- `POST /api/books/upload` - Upload EPUB file (requires auth, checks credits)
-- `GET /api/book/:uuid/content` - Get full book content
-- `GET /api/book/:uuid/chapters` - Get list of all chapters
-- `GET /api/book/:uuid/chapter/:number` - Load specific chapter content
+- `POST /api/books/upload` - Upload EPUB/TXT file with async translation
+  - Requires auth + sufficient credits
+  - Returns immediately, translation happens in background
+  - Emits server-sent events for progress tracking
+- `GET /api/book/:uuid/content` - Get full book content (all chapters)
+- `GET /api/book/:uuid/chapters` - Get list of all chapters with metadata
+- `GET /api/book/:uuid/chapter/:number` - Load specific chapter content (XPath-mapped paragraphs)
+- `DELETE /api/book/:uuid` - Delete book (owner only)
 
-### Credits & Payments
-- `GET /api/credits` - Get user's credit balance and available packages
-- `GET /api/credits/transactions` - Get user's credit transaction history
+### Credits & Payments (Stripe Integration)
+- `GET /api/credits` - Get user's credit balance and available purchase packages
+- `GET /api/credits/transactions` - Get user's credit usage and purchase history
 - `POST /api/stripe/checkout` - Create Stripe checkout session for credit purchase
-- `GET /api/stripe/verify-session` - Verify checkout session and add credits (fallback for webhook)
-- `POST /api/stripe/webhook` - Stripe webhook handler (payment confirmation)
+- `GET /api/stripe/verify-session` - Verify checkout and apply credits (webhook fallback)
+- `POST /api/stripe/webhook` - Stripe webhook endpoint (payment events)
 
 ## Database Schema
 
-- **users**: User accounts via Google OAuth (google_id, email, name, picture, credits)
-- **sessions**: Auth sessions (user_id, session_token, expires_at)
-- **books**: Book metadata (title, author, styles, uuid, user_id, created_at, updated_at)
-- **chapters**: Chapter information (chapter_number, titles, order_index)
-- **content_items**: Individual paragraphs with bilingual text (original_text, translated_text)
-- **credit_transactions**: Credit purchase/usage history (amount, type, stripe_payment_intent_id, balance_after)
+### User Management
+- **users** - Google OAuth accounts with credit balance
+  - Fields: google_id, email, name, picture, credits, created_at, updated_at
+- **sessions** - Authentication sessions with expiration
+  - Fields: user_id, session_token, expires_at
+
+### Content Storage
+- **books** - Book metadata with ownership and styling
+  - Fields: title, author, language_pair, uuid, user_id, is_public, styles, created_at, updated_at
+- **chapters** - Chapter structure with ordering
+  - Fields: book_id, chapter_number, chinese_title, english_title, order_index
+- **content_items** - Paragraph-level bilingual content with XPath mapping
+  - Fields: chapter_id, paragraph_number, original_text, translated_text, xpath, order_index
+
+### Payments & Credits
+- **credit_transactions** - Credit purchase and usage history
+  - Fields: user_id, amount, type (purchase/usage), stripe_payment_intent_id, balance_after, created_at
 
 ## Environment Variables
 

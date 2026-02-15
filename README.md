@@ -4,14 +4,20 @@ A bilingual reader application that helps you read books in two languages. Built
 
 ## Features
 
-- **Book Shelf**: Browse your bilingual book collection with an elegant card-based interface
+- **Book Shelf**: Browse your bilingual book collection with elegant card-based interface
+  - **Two-row layout**: Public books and user books displayed separately
+  - **Hover-to-preview**: Hover over books to see preview information
+  - **Direct reading**: Click book spine to enter directly without additional steps
 - **Bilingual Reading**: Switch between original and translated text by clicking paragraphs
-- **Chapter Navigation**: Manual chapter navigation with curved arrow buttons
-- **Responsive Design**: Works on both desktop and mobile devices
-- **Multiple Languages**: Support for various language pairs (EN-ZH, EN-ES, EN-FR, etc.)
+  - **XPath-based architecture**: Precise paragraph-level translation tracking
+  - **Reading progress**: Automatic tracking of your reading position within chapters
+- **Chapter Navigation**: Automatic scroll-based navigation (scroll to load next/previous chapters) + manual chapter menu
+- **Responsive Design**: Works on both desktop and mobile devices with optimized typography
+- **Multiple Languages**: Support for various language pairs (EN-ZH, EN-ES, EN-FR, EN-DE, EN-JA, EN-KO, EN-RU)
 - **User Authentication**: Google OAuth login for personalized book management
-- **Web Upload**: Upload EPUB files directly through the web interface (admin only)
+- **Web Upload**: Upload EPUB/TXT files directly with automatic translation in background
 - **Book Privacy**: Public books visible to all, private books visible only to owners
+- **CJK Typography**: Native Chinese font support (Noto Sans CJK SC) for optimal reading experience
 
 ## Getting Started
 
@@ -55,7 +61,7 @@ A bilingual reader application that helps you read books in two languages. Built
    npm run db:local -- --file database/sample_data.sql
    ```
 
-### Development
+### Development & Running
 
 1. **Start the local development server:**
    ```bash
@@ -64,23 +70,44 @@ A bilingual reader application that helps you read books in two languages. Built
    
 2. **Open your browser to [http://localhost:8787](http://localhost:8787)**
 
-The main page will show your book shelf with available books. Click any book to start reading.
+#### Using the Reader
+
+**Book Shelf**
+- Browse public and your private books in separate sections
+- Hover over books to see preview information
+- Click book spine to enter directly into reading mode
+
+**Reading Interface**
+- **Paragraph Toggle**: Click any paragraph to switch between original and translated text
+- **Chapter Navigation**: 
+  - Scroll naturally to next/previous chapters
+  - Use chapter menu (top-right) to jump to specific chapters
+  - Your reading position auto-saves
+- **Reading Controls**: Adjust line height, letter spacing, and paragraph spacing for comfort
+- **Language Support**: Optimized typography for CJK text (Chinese, Japanese, Korean)
 
 ### Available Scripts
 
+**Development & Deployment**
 - `npm run preview` - Start local development server with Cloudflare Workers
 - `npm run build` - Build React application for production
 - `npm run deploy` - Deploy to Cloudflare Workers (requires authentication)
-- `npm run db:local` - Execute SQL commands on local database
-- `npm run db:remote` - Execute SQL commands on remote database
-- `yarn import-book` - Import EPUB/TXT books with translation
-- `yarn list-books:local` - List all books in local database with timestamps
-- `yarn list-books:remote` - List all books in remote database with timestamps
-- `yarn remove-book:local` - Remove books from local database by UUID (with confirmation)
-- `yarn remove-book:remote` - Remove books from remote database by UUID (with confirmation)
-- `yarn sync-remote-book` - Sync a locally imported book to the remote D1 (ensures schema first)
 - `npm start` - Start React development server (frontend only)
 - `npm test` - Run tests
+
+**Database Operations**
+- `npm run db:local -- --file <path.sql>` - Execute SQL file on local database
+- `npm run db:remote -- --file <path.sql>` - Execute SQL file on remote database
+- `npm run db:local -- "SQL command"` - Execute SQL command on local database
+- `npm run db:remote -- "SQL command"` - Execute SQL command on remote database
+
+**Book Management (TypeScript scripts with full type safety)**
+- `yarn import-book -- --file="book.epub" --target="zh" --provider="openai"` - Import EPUB/TXT with translation
+- `yarn list-books:local` - List all books in local database with timestamps
+- `yarn list-books:remote` - List all books in remote database with timestamps
+- `yarn remove-book:local -- --uuid="book-uuid"` - Remove books from local database (with confirmation)
+- `yarn remove-book:remote -- --uuid="book-uuid"` - Remove books from remote database (with confirmation)
+- `yarn sync-remote-book -- --uuid="book-uuid"` - Sync locally imported book to remote D1 (schema-aware)
 
 ### Project Structure
 
@@ -112,9 +139,17 @@ wrangler.toml                 # Your local config with real IDs (not committed)
 
 ### Adding New Books
 
-Ovid includes an automated book import system that supports EPUB and TXT files with automatic translation:
+Ovid includes an automated book import system supporting EPUB and TXT files with intelligent translation:
 
-#### Book Import CLI
+#### Web Upload (Recommended)
+
+1. Log in with Google OAuth
+2. Click "Upload Book" button
+3. Select EPUB/TXT file and choose target language
+4. Translation happens in background while you browse
+5. Book appears automatically in your shelf when ready
+
+#### Book Import CLI (Local Development & Batch Import)
 
 ```bash
 # Import EPUB with Chinese translation
@@ -122,6 +157,9 @@ yarn import-book -- --file="book.epub" --target="zh" --provider="openai"
 
 # Import TXT with Spanish translation
 yarn import-book -- --file="book.txt" --target="es" --title="Book Title" --author="Author Name"
+
+# Import with custom API endpoint (e.g., local LLM)
+yarn import-book -- --file="book.epub" --target="zh" --provider="openai" --api-base="http://localhost:8000/v1"
 
 # List all books in local database
 yarn list-books:local
@@ -139,7 +177,8 @@ yarn remove-book:remote -- --uuid="book-uuid-here"
 yarn sync-remote-book -- --uuid="book-uuid-here"
 
 # Available target languages: zh (Chinese), es (Spanish), fr (French), de (German), ja (Japanese), ko (Korean), ru (Russian)
-# Available providers: openai, google, deepl
+# Available providers: openai (recommended), google, deepl
+# Typical cost: $3-15 per average book with GPT-4o-mini
 ```
 
 #### Translation API Setup
@@ -166,15 +205,26 @@ OPENAI_MODEL=anthropic/claude-3-haiku
 - `anthropic/claude-3-haiku` - Via OpenRouter
 - `meta-llama/llama-3.1-70b-instruct` - Via Together AI
 
-#### Import Process
+#### Import & Translation Process
 
-The import system will:
-1. **Parse** the book file (EPUB/TXT) and extract chapters
-2. **Translate** all content using your chosen API provider
-3. **Import** the bilingual content into your database with a unique UUID
-4. **Display** the book automatically in your shelf
+The system intelligently processes books:
 
-**Cost Estimate:** ~$3-15 per average book using OpenAI GPT-4o-mini
+1. **Parsing**: Extract chapters and paragraphs from EPUB/TXT with XPath tracking
+2. **Sequential Translation**: Translate with context awareness for consistency
+   - Preserves character voices and narrative style
+   - Maintains proper nouns and technical terms
+   - Avoids repetitive translations of repeated phrases
+3. **Storage**: Import bilingual content with precise XPath mapping for paragraph-level accuracy
+4. **Availability**: Book appears in shelf immediately (web upload) or after local confirmation
+
+**Cost Estimates** (OpenAI GPT-4o-mini):
+- Novel (80k words): ~$8-12
+- Technical book (100k words): ~$12-18
+- Short stories (20k words): ~$2-4
+
+**Performance**: 
+- Web upload: Non-blocking, translation in background while you read
+- CLI import: Sequential processing with progress indicators
 
 #### Manual Database Import
 
