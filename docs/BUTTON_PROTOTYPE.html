@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mark as Read 按钮 - 原型演示</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Georgia', 'Times New Roman', serif;
+            background: #1a1a1a;
+            color: white;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            display: flex;
+            gap: 40px;
+            width: 100%;
+            max-width: 1200px;
+            height: 80vh;
+        }
+
+        /* 左侧书架模拟 */
+        .bookshelf {
+            flex: 1;
+            background: linear-gradient(to bottom, #2a1810 0%, #1a0f0a 100%);
+            border-radius: 8px;
+            padding: 40px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            box-shadow: inset 0 2px 10px rgba(0, 0, 0, 0.5);
+            border: 1px solid #333;
+        }
+
+        .bookshelf h2 {
+            margin-bottom: 20px;
+            font-size: 1.2em;
+            font-weight: 400;
+            color: #aaa;
+        }
+
+        .books-display {
+            display: flex;
+            gap: 15px;
+            align-items: flex-end;
+            justify-content: center;
+            width: 100%;
+        }
+
+        .book {
+            width: 50px;
+            height: 250px;
+            background: linear-gradient(135deg, #ff6b35 0%, #f7931e 100%);
+            border-radius: 3px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: transform 0.3s, box-shadow 0.3s;
+            box-shadow: 
+                inset 4px 0 8px rgba(255, 255, 255, 0.2),
+                inset -4px 0 8px rgba(0, 0, 0, 0.4),
+                5px 0 5px -2px rgba(0, 0, 0, 0.6);
+            color: white;
+            writing-mode: vertical-rl;
+            text-orientation: mixed;
+            font-size: 0.8em;
+            font-weight: 600;
+            padding: 10px;
+            text-align: center;
+        }
+
+        .book:hover {
+            transform: scale(1.08) translateY(-10px);
+            box-shadow: 
+                inset 4px 0 10px rgba(255, 255, 255, 0.3),
+                inset -4px 0 10px rgba(0, 0, 0, 0.5),
+                10px 5px 15px rgba(0, 0, 0, 0.5);
+        }
+
+        .book.selected {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+
+        /* 右侧预览卡片 */
+        .preview-panel {
+            width: 380px;
+            background: #111;
+            border-radius: 12px;
+            padding: 40px 30px;
+            display: flex;
+            flex-direction: column;
+            border: 1px solid #333;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+            overflow-y: auto;
+        }
+
+        .preview-panel::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .preview-panel::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .preview-panel::-webkit-scrollbar-thumb {
+            background: #333;
+            border-radius: 3px;
+        }
+
+        .cover {
+            width: 100%;
+            aspect-ratio: 2/3;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 8px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.9em;
+            color: rgba(255, 255, 255, 0.7);
+        }
+
+        .info h2 {
+            font-size: 1.6em;
+            margin-bottom: 10px;
+            font-weight: 400;
+        }
+
+        .info .original-title {
+            font-size: 0.95em;
+            color: #aaa;
+            margin-bottom: 15px;
+            font-style: italic;
+        }
+
+        .info .author {
+            font-size: 0.9em;
+            color: #888;
+            margin-bottom: 30px;
+        }
+
+        /* 状态徽章 */
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 16px;
+            background: rgba(74, 222, 128, 0.1);
+            border: 1px solid rgba(74, 222, 128, 0.3);
+            border-radius: 20px;
+            color: #4ade80;
+            font-size: 0.85em;
+            font-weight: 500;
+            margin-bottom: 20px;
+        }
+
+        .status-badge.hidden {
+            display: none;
+        }
+
+        .status-badge svg {
+            width: 14px;
+            height: 14px;
+        }
+
+        /* 按钮 */
+        .button-group {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .button-group button {
+            padding: 12px 24px;
+            border-radius: 30px;
+            border: 1px solid #444;
+            background: transparent;
+            color: #888;
+            font-size: 0.9em;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            width: 100%;
+            font-family: inherit;
+        }
+
+        .button-group button:hover {
+            background: rgba(74, 222, 128, 0.05);
+            border-color: #4ade80;
+            color: #4ade80;
+        }
+
+        .mark-complete-btn {
+            border-color: #444;
+            color: #888;
+        }
+
+        .mark-complete-btn.completed {
+            border-color: #4ade80;
+            color: #4ade80;
+            background: rgba(74, 222, 128, 0.1);
+        }
+
+        .mark-complete-btn.completed:hover {
+            background: rgba(74, 222, 128, 0.15);
+        }
+
+        .remove-btn {
+            border-color: #444;
+            color: #666;
+        }
+
+        .remove-btn:hover {
+            border-color: #ff6b6b;
+            color: #ff6b6b;
+            background: rgba(255, 107, 107, 0.05);
+        }
+
+        button svg {
+            width: 16px;
+            height: 16px;
+        }
+
+        /* 说明文字 */
+        .description {
+            text-align: center;
+            color: #666;
+            font-size: 0.85em;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #333;
+        }
+
+        .state-label {
+            text-align: center;
+            color: #4ade80;
+            font-size: 0.9em;
+            font-weight: 600;
+            margin-bottom: 15px;
+        }
+
+        /* 状态切换器 */
+        .state-switcher {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: #222;
+            padding: 15px 20px;
+            border-radius: 8px;
+            border: 1px solid #333;
+            z-index: 100;
+        }
+
+        .state-switcher label {
+            display: block;
+            color: #aaa;
+            font-size: 0.9em;
+            margin-bottom: 10px;
+        }
+
+        .state-switcher select {
+            background: #111;
+            border: 1px solid #444;
+            color: #4ade80;
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-family: inherit;
+            cursor: pointer;
+        }
+
+        @media (max-width: 900px) {
+            .container {
+                flex-direction: column;
+            }
+
+            .preview-panel {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="state-switcher">
+        <label>切换状态：</label>
+        <select id="stateSelector" onchange="updateState(this.value)">
+            <option value="unread">未读</option>
+            <option value="read">已读</option>
+        </select>
+    </div>
+
+    <div class="container">
+        <!-- 左侧：书架 -->
+        <div class="bookshelf">
+            <h2>📚 OVID 书架</h2>
+            <div class="books-display">
+                <div class="book selected" onclick="selectBook(this)">活着</div>
+                <div class="book" onclick="selectBook(this)">1984</div>
+                <div class="book" onclick="selectBook(this)">人生</div>
+                <div class="book" onclick="selectBook(this)">月亮</div>
+            </div>
+        </div>
+
+        <!-- 右侧：预览卡片（这是新增的交互部分） -->
+        <div class="preview-panel">
+            <div class="state-label" id="stateLabel">未读状态</div>
+
+            <div class="cover">书籍封面</div>
+
+            <div class="info">
+                <h2>活着</h2>
+                <div class="original-title">To Live</div>
+                <div class="author">作者：余华</div>
+            </div>
+
+            <!-- 新增：绿色徽章 - 仅在已读时显示 -->
+            <div class="status-badge hidden" id="statusBadge">
+                <svg viewBox="0 0 24 24" fill="currentColor">
+                    <polyline points="20 6 9 17 4 12"></polyline>
+                </svg>
+                <span>Read</span>
+            </div>
+
+            <!-- 新增：按钮组 -->
+            <div class="button-group">
+                <!-- 这是新增的按钮！ -->
+                <button class="mark-complete-btn" id="markBtn" onclick="toggleState()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="20 6 9 17 4 12"></polyline>
+                    </svg>
+                    <span id="markBtnText">Mark as read</span>
+                </button>
+
+                <button class="remove-btn" onclick="alert('Remove book functionality')">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="3 6 5 6 21 6"></polyline>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                        <line x1="10" y1="11" x2="10" y2="17"/>
+                        <line x1="14" y1="11" x2="14" y2="17"/>
+                    </svg>
+                    <span>Remove</span>
+                </button>
+            </div>
+
+            <div class="description">
+                这是新增的「标记读完」功能<br>
+                用户可以点击按钮标记这本书为已读<br>
+                系统会自动记录时间戳
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentState = 'unread';
+
+        function updateState(state) {
+            currentState = state;
+            const markBtn = document.getElementById('markBtn');
+            const statusBadge = document.getElementById('statusBadge');
+            const markBtnText = document.getElementById('markBtnText');
+            const stateLabel = document.getElementById('stateLabel');
+
+            if (state === 'read') {
+                markBtn.classList.add('completed');
+                statusBadge.classList.remove('hidden');
+                markBtnText.textContent = 'Mark unread';
+                stateLabel.textContent = '已读状态 ✓';
+            } else {
+                markBtn.classList.remove('completed');
+                statusBadge.classList.add('hidden');
+                markBtnText.textContent = 'Mark as read';
+                stateLabel.textContent = '未读状态';
+            }
+        }
+
+        function toggleState() {
+            const selector = document.getElementById('stateSelector');
+            if (currentState === 'unread') {
+                selector.value = 'read';
+                updateState('read');
+            } else {
+                selector.value = 'unread';
+                updateState('unread');
+            }
+        }
+
+        function selectBook(el) {
+            document.querySelectorAll('.book').forEach(b => b.classList.remove('selected'));
+            el.classList.add('selected');
+        }
+
+        // 页面加载时初始化
+        document.getElementById('stateSelector').value = 'unread';
+    </script>
+</body>
+</html>

@@ -1,0 +1,666 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>「标记读完」功能演示 - OVID</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Georgia', 'Times New Roman', serif;
+            background: #1a1a1a;
+            color: white;
+            padding: 40px 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 40px;
+            font-size: 2.5em;
+            font-weight: 400;
+        }
+
+        .demo-section {
+            margin-bottom: 60px;
+            background: #222;
+            border-radius: 12px;
+            padding: 30px;
+            border: 1px solid #333;
+        }
+
+        .demo-section h2 {
+            font-size: 1.5em;
+            margin-bottom: 20px;
+            color: #4ade80;
+            font-weight: 400;
+        }
+
+        .demo-description {
+            color: #aaa;
+            margin-bottom: 20px;
+            line-height: 1.6;
+        }
+
+        /* Bookshelf Simulation */
+        .bookshelf-demo {
+            display: flex;
+            gap: 0;
+            margin-bottom: 30px;
+            min-height: 350px;
+            background: #1a1a1a;
+            border-radius: 8px;
+            padding: 20px;
+            border: 1px solid #333;
+            align-items: flex-end;
+        }
+
+        .book-spine {
+            height: 300px;
+            min-width: 40px;
+            background: linear-gradient(135deg, #ff6b35, #f7931e);
+            border-radius: 2px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            writing-mode: vertical-rl;
+            text-orientation: mixed;
+            font-size: 0.8em;
+            font-weight: 500;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            box-shadow: 
+                inset 4px 0 8px rgba(255, 255, 255, 0.2),
+                inset -4px 0 8px rgba(0, 0, 0, 0.4),
+                5px 0 5px -2px rgba(0, 0, 0, 0.6);
+        }
+
+        .book-spine:hover {
+            transform: scale(1.05) translateY(-5px);
+            box-shadow: 
+                inset 4px 0 10px rgba(255, 255, 255, 0.3),
+                inset -4px 0 10px rgba(0, 0, 0, 0.5),
+                10px 5px 15px rgba(0, 0, 0, 0.5);
+        }
+
+        /* Side Panel */
+        .side-panel {
+            width: 350px;
+            background: #111;
+            border-radius: 8px;
+            padding: 30px;
+            border: 1px solid #333;
+            margin-left: 20px;
+        }
+
+        .preview-content {
+            text-align: center;
+        }
+
+        .preview-cover {
+            width: 100%;
+            aspect-ratio: 2/3;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.8em;
+            color: rgba(255, 255, 255, 0.7);
+        }
+
+        .preview-info h2 {
+            font-size: 1.4em;
+            margin-bottom: 10px;
+            font-weight: 400;
+        }
+
+        .preview-info .author {
+            color: #888;
+            font-size: 0.9em;
+            margin-bottom: 20px;
+        }
+
+        /* Status Badge */
+        .book-completed-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 16px;
+            background: rgba(74, 222, 128, 0.1);
+            border: 1px solid rgba(74, 222, 128, 0.3);
+            border-radius: 20px;
+            color: #4ade80;
+            font-size: 0.85em;
+            font-weight: 500;
+            margin-bottom: 15px;
+        }
+
+        .book-completed-badge.hidden {
+            display: none;
+        }
+
+        /* Buttons */
+        .book-actions {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        button {
+            padding: 10px 20px;
+            border-radius: 30px;
+            border: 1px solid #444;
+            background: transparent;
+            color: #888;
+            font-size: 0.85em;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            width: 100%;
+        }
+
+        .mark-complete-btn {
+            border-color: #444;
+            color: #888;
+        }
+
+        .mark-complete-btn:hover {
+            color: #4ade80;
+            border-color: #4ade80;
+            background: rgba(74, 222, 128, 0.05);
+        }
+
+        .mark-complete-btn.completed {
+            color: #4ade80;
+            border-color: #4ade80;
+            background: rgba(74, 222, 128, 0.1);
+        }
+
+        .remove-book-btn {
+            border-color: #444;
+            color: #666;
+        }
+
+        .remove-book-btn:hover {
+            color: #ff6b6b;
+            border-color: #ff6b6b;
+        }
+
+        button svg {
+            width: 16px;
+            height: 16px;
+        }
+
+        /* State Grid */
+        .state-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        .state-card {
+            background: #222;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .state-card h3 {
+            color: #4ade80;
+            margin-bottom: 15px;
+            font-size: 1em;
+            font-weight: 500;
+        }
+
+        .state-label {
+            color: #888;
+            font-size: 0.9em;
+            margin-bottom: 10px;
+        }
+
+        .state-demo {
+            background: #1a1a1a;
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 10px;
+        }
+
+        /* Code Block */
+        .code-block {
+            background: #1a1a1a;
+            border-radius: 6px;
+            padding: 15px;
+            margin-top: 20px;
+            overflow-x: auto;
+            font-size: 0.85em;
+            color: #4ade80;
+            font-family: 'Courier New', monospace;
+            border: 1px solid #333;
+        }
+
+        .flow-diagram {
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 6px;
+            padding: 20px;
+            margin-top: 20px;
+        }
+
+        .flow-step {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+
+        .flow-step:last-child {
+            margin-bottom: 0;
+        }
+
+        .step-num {
+            background: #4ade80;
+            color: #000;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            flex-shrink: 0;
+        }
+
+        .step-content {
+            flex: 1;
+        }
+
+        .step-content h4 {
+            margin-bottom: 5px;
+            font-size: 0.95em;
+            font-weight: 600;
+        }
+
+        .step-content p {
+            color: #888;
+            font-size: 0.85em;
+            margin: 0;
+        }
+
+        .arrow {
+            text-align: center;
+            color: #666;
+            font-size: 1.5em;
+            margin: -5px 0;
+        }
+
+        /* Table */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #333;
+        }
+
+        th {
+            background: #2a2a2a;
+            color: #4ade80;
+            font-weight: 600;
+        }
+
+        td {
+            color: #aaa;
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📚 「标记读完」功能演示</h1>
+
+        <!-- Demo 1: Visual States -->
+        <div class="demo-section">
+            <h2>🎨 UI 状态演示</h2>
+            <p class="demo-description">这些是用户界面中「标记读完」功能的各种状态</p>
+
+            <div class="state-grid">
+                <!-- State 1: Unread -->
+                <div class="state-card">
+                    <h3>未读状态</h3>
+                    <p class="state-label">书籍在阅读列表中，尚未标记为已读</p>
+                    <div class="state-demo">
+                        <div class="book-completed-badge hidden"></div>
+                        <div class="book-actions">
+                            <button class="mark-complete-btn">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <polyline points="20 6 9 17 4 12"></polyline>
+                                </svg>
+                                <span>Mark as read</span>
+                            </button>
+                            <button class="remove-book-btn">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <polyline points="3 6 5 6 21 6"></polyline>
+                                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                                </svg>
+                                <span>Remove</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- State 2: Read -->
+                <div class="state-card">
+                    <h3>已读状态</h3>
+                    <p class="state-label">用户已点击「Mark as read」按钮</p>
+                    <div class="state-demo">
+                        <div class="book-completed-badge">
+                            <svg viewBox="0 0 24 24" fill="currentColor">
+                                <polyline points="20 6 9 17 4 12"></polyline>
+                            </svg>
+                            <span>Read</span>
+                        </div>
+                        <div class="book-actions">
+                            <button class="mark-complete-btn completed">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <polyline points="20 6 9 17 4 12"></polyline>
+                                </svg>
+                                <span>Mark unread</span>
+                            </button>
+                            <button class="remove-book-btn">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <polyline points="3 6 5 6 21 6"></polyline>
+                                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                                </svg>
+                                <span>Remove</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- State 3: Hover -->
+                <div class="state-card">
+                    <h3>悬停状态</h3>
+                    <p class="state-label">用户悬停在「Mark as read」按钮上</p>
+                    <div class="state-demo">
+                        <div class="book-completed-badge hidden"></div>
+                        <div class="book-actions">
+                            <button class="mark-complete-btn" style="color: #4ade80; border-color: #4ade80; background: rgba(74, 222, 128, 0.05);">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <polyline points="20 6 9 17 4 12"></polyline>
+                                </svg>
+                                <span>Mark as read</span>
+                            </button>
+                            <button class="remove-book-btn">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <polyline points="3 6 5 6 21 6"></polyline>
+                                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                                </svg>
+                                <span>Remove</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Demo 2: User Flow -->
+        <div class="demo-section">
+            <h2>🔄 用户交互流程</h2>
+            <p class="demo-description">用户如何使用「标记读完」功能</p>
+
+            <div class="flow-diagram">
+                <div class="flow-step">
+                    <div class="step-num">1</div>
+                    <div class="step-content">
+                        <h4>浏览书籍</h4>
+                        <p>用户在书架上浏览书籍，预览卡片在右侧显示</p>
+                    </div>
+                </div>
+
+                <div class="arrow">↓</div>
+
+                <div class="flow-step">
+                    <div class="step-num">2</div>
+                    <div class="step-content">
+                        <h4>点击「Mark as read」</h4>
+                        <p>用户在预览卡片中点击按钮标记书籍为已读</p>
+                    </div>
+                </div>
+
+                <div class="arrow">↓</div>
+
+                <div class="flow-step">
+                    <div class="step-num">3</div>
+                    <div class="step-content">
+                        <h4>发送 API 请求</h4>
+                        <p>前端向后端发送 POST /api/book/:uuid/mark-complete</p>
+                    </div>
+                </div>
+
+                <div class="arrow">↓</div>
+
+                <div class="flow-step">
+                    <div class="step-num">4</div>
+                    <div class="step-content">
+                        <h4>数据库更新</h4>
+                        <p>后端在 user_book_progress 表中创建/更新记录</p>
+                    </div>
+                </div>
+
+                <div class="arrow">↓</div>
+
+                <div class="flow-step">
+                    <div class="step-num">5</div>
+                    <div class="step-content">
+                        <h4>UI 更新</h4>
+                        <p>前端更新本地状态，显示绿色徽章和更新按钮文本</p>
+                    </div>
+                </div>
+
+                <div class="arrow">↓</div>
+
+                <div class="flow-step">
+                    <div class="step-num">6</div>
+                    <div class="step-content">
+                        <h4>状态保留</h4>
+                        <p>刷新页面后，阅读状态仍会从数据库中恢复</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Demo 3: API Details -->
+        <div class="demo-section">
+            <h2>🔌 API 端点详情</h2>
+
+            <h3 style="font-size: 1.1em; margin-top: 20px; margin-bottom: 10px;">POST /api/book/:uuid/mark-complete</h3>
+            <p class="demo-description">标记书籍为已读或未读</p>
+
+            <div class="code-block">
+curl -X POST http://127.0.0.1:8787/api/book/book-uuid/mark-complete \
+  -H "Content-Type: application/json" \
+  -d '{"isCompleted": true}'
+            </div>
+
+            <table>
+                <tr>
+                    <th>参数</th>
+                    <th>类型</th>
+                    <th>说明</th>
+                </tr>
+                <tr>
+                    <td>isCompleted</td>
+                    <td>boolean</td>
+                    <td>true = 标记为已读，false = 标记为未读</td>
+                </tr>
+            </table>
+
+            <h4 style="margin-top: 20px; margin-bottom: 10px; color: #4ade80;">响应示例</h4>
+            <div class="code-block">
+{
+  "success": true,
+  "progress": {
+    "id": 1,
+    "user_id": 123,
+    "book_uuid": "book-uuid",
+    "is_completed": 1,
+    "reading_progress": null,
+    "completed_at": "2026-02-15T04:50:00.000Z",
+    "last_read_at": "2026-02-15T04:50:00.000Z",
+    "created_at": "2026-02-15T04:50:00.000Z",
+    "updated_at": "2026-02-15T04:50:00.000Z"
+  }
+}
+            </div>
+
+            <hr style="border: none; border-top: 1px solid #333; margin: 30px 0;">
+
+            <h3 style="font-size: 1.1em; margin-top: 20px; margin-bottom: 10px;">GET /api/book/:uuid/progress</h3>
+            <p class="demo-description">获取用户对某本书的阅读状态</p>
+
+            <div class="code-block">
+curl -X GET http://127.0.0.1:8787/api/book/book-uuid/progress
+            </div>
+
+            <h4 style="margin-top: 20px; margin-bottom: 10px; color: #4ade80;">响应示例</h4>
+            <div class="code-block">
+{
+  "progress": {
+    "id": 1,
+    "user_id": 123,
+    "book_uuid": "book-uuid",
+    "is_completed": 1,
+    "reading_progress": null,
+    "completed_at": "2026-02-15T04:50:00.000Z",
+    "last_read_at": "2026-02-15T04:50:00.000Z",
+    "created_at": "2026-02-15T04:50:00.000Z",
+    "updated_at": "2026-02-15T04:50:00.000Z"
+  }
+}
+            </div>
+        </div>
+
+        <!-- Demo 4: Data Model -->
+        <div class="demo-section">
+            <h2>💾 数据模型</h2>
+            <p class="demo-description">user_book_progress 表结构</p>
+
+            <table>
+                <tr>
+                    <th>字段</th>
+                    <th>类型</th>
+                    <th>说明</th>
+                </tr>
+                <tr>
+                    <td>id</td>
+                    <td>INTEGER</td>
+                    <td>主键</td>
+                </tr>
+                <tr>
+                    <td>user_id</td>
+                    <td>INTEGER</td>
+                    <td>用户 ID</td>
+                </tr>
+                <tr>
+                    <td>book_uuid</td>
+                    <td>TEXT</td>
+                    <td>书籍 UUID</td>
+                </tr>
+                <tr>
+                    <td>is_completed</td>
+                    <td>INTEGER</td>
+                    <td>0 = 未读，1 = 已读</td>
+                </tr>
+                <tr>
+                    <td>reading_progress</td>
+                    <td>INTEGER</td>
+                    <td>阅读进度百分比（未来扩展）</td>
+                </tr>
+                <tr>
+                    <td>completed_at</td>
+                    <td>DATETIME</td>
+                    <td>标记为已读的时间</td>
+                </tr>
+                <tr>
+                    <td>last_read_at</td>
+                    <td>DATETIME</td>
+                    <td>最后阅读时间</td>
+                </tr>
+                <tr>
+                    <td>created_at</td>
+                    <td>DATETIME</td>
+                    <td>记录创建时间</td>
+                </tr>
+                <tr>
+                    <td>updated_at</td>
+                    <td>DATETIME</td>
+                    <td>记录更新时间</td>
+                </tr>
+            </table>
+
+            <p style="color: #888; margin-top: 15px; font-size: 0.9em;">
+                <strong>关键约束：</strong> UNIQUE(user_id, book_uuid) — 同一用户对同一书只有一条记录
+            </p>
+        </div>
+
+        <!-- Demo 5: Features -->
+        <div class="demo-section">
+            <h2>✨ 功能特性</h2>
+
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin-top: 20px;">
+                <div style="background: #1a1a1a; padding: 20px; border-radius: 6px; border: 1px solid #333;">
+                    <h3 style="color: #4ade80; margin-bottom: 10px;">📖 支持全部书籍</h3>
+                    <p style="color: #888; font-size: 0.9em;">用户可以标记任何书籍为已读，包括公共书和个人上传的书</p>
+                </div>
+                <div style="background: #1a1a1a; padding: 20px; border-radius: 6px; border: 1px solid #333;">
+                    <h3 style="color: #4ade80; margin-bottom: 10px;">👥 多用户隔离</h3>
+                    <p style="color: #888; font-size: 0.9em;">同一本书不同用户的读完状态相互独立，互不影响</p>
+                </div>
+                <div style="background: #1a1a1a; padding: 20px; border-radius: 6px; border: 1px solid #333;">
+                    <h3 style="color: #4ade80; margin-bottom: 10px;">⏱️ 时间戳记录</h3>
+                    <p style="color: #888; font-size: 0.9em;">自动记录完成时间和最后阅读时间，支持后续统计分析</p>
+                </div>
+                <div style="background: #1a1a1a; padding: 20px; border-radius: 6px; border: 1px solid #333;">
+                    <h3 style="color: #4ade80; margin-bottom: 10px;">🔄 状态切换</h3>
+                    <p style="color: #888; font-size: 0.9em;">用户可以随时取消标记，将书籍回到未读状态</p>
+                </div>
+                <div style="background: #1a1a1a; padding: 20px; border-radius: 6px; border: 1px solid #333;">
+                    <h3 style="color: #4ade80; margin-bottom: 10px;">💾 数据持久化</h3>
+                    <p style="color: #888; font-size: 0.9em;">阅读状态存储在数据库中，刷新页面后仍会保留</p>
+                </div>
+                <div style="background: #1a1a1a; padding: 20px; border-radius: 6px; border: 1px solid #333;">
+                    <h3 style="color: #4ade80; margin-bottom: 10px;">🚀 易于扩展</h3>
+                    <p style="color: #888; font-size: 0.9em;">预留 reading_progress 字段，支持未来添加阅读进度等功能</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div style="text-align: center; margin-top: 60px; padding-top: 30px; border-top: 1px solid #333; color: #666;">
+            <p>OVID - Bilingual Reader</p>
+            <p style="font-size: 0.85em; margin-top: 10px;">功能演示 | 2026-02-15</p>
+        </div>
+    </div>
+</body>
+</html>

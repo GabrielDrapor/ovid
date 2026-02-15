@@ -17,12 +17,25 @@ interface Book {
   updated_at: string;
 }
 
+interface UserBookProgress {
+  id: number;
+  user_id: number;
+  book_uuid: string;
+  is_completed: number; // 0 or 1
+  reading_progress: number | null;
+  completed_at: string | null;
+  last_read_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 interface BookShelfProps {
   onSelectBook: (bookUuid: string) => void;
 }
 
 const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
   const [books, setBooks] = useState<Book[]>([]);
+  const [bookProgressMap, setBookProgressMap] = useState<Map<string, UserBookProgress>>(new Map());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [hoveredBook, setHoveredBook] = useState<Book | null>(null);
@@ -54,6 +67,25 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
       }
       const booksData = (await response.json()) as Book[];
       setBooks(booksData);
+
+      // Fetch user's reading progress for all books if logged in
+      if (user) {
+        const progressMap = new Map<string, UserBookProgress>();
+        for (const book of booksData) {
+          try {
+            const progressResponse = await fetch(`/api/book/${book.uuid}/progress`);
+            if (progressResponse.ok) {
+              const progressData = await progressResponse.json() as { progress: UserBookProgress | null };
+              if (progressData.progress) {
+                progressMap.set(book.uuid, progressData.progress);
+              }
+            }
+          } catch {
+            // Silently skip if progress fetch fails for individual book
+          }
+        }
+        setBookProgressMap(progressMap);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch books');
       console.error('Error fetching books:', err);
@@ -64,7 +96,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
 
   useEffect(() => {
     fetchBooks();
-  }, []);
+  }, [user]);
 
   // Drive translation for books that are still processing.
   // Each call to /translate-next translates a chunk of ~25 paragraphs,
@@ -224,6 +256,34 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
     }
   };
 
+  const handleToggleCompleted = async (e: React.MouseEvent, bookUuid: string, currentProgress: UserBookProgress | undefined) => {
+    e.stopPropagation();
+    try {
+      const response = await fetch(`/api/book/${bookUuid}/mark-complete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isCompleted: !currentProgress?.is_completed }),
+      });
+      if (!response.ok) {
+        const data = await response.json() as { error?: string };
+        throw new Error(data.error || 'Failed to update');
+      }
+      const result = await response.json() as { success: boolean; progress?: UserBookProgress };
+      if (result.progress) {
+        const newMap = new Map(bookProgressMap);
+        newMap.set(bookUuid, result.progress);
+        setBookProgressMap(newMap);
+        // Update hovered book to reflect new status
+        const updatedBook = books.find(b => b.uuid === bookUuid);
+        if (updatedBook) {
+          setHoveredBook(updatedBook);
+        }
+      }
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to mark book');
+    }
+  };
+
   if (error) {
     return (
       <div className="bookshelf-error">
@@ -317,21 +377,53 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                   <span>Translation failed</span>
                 </div>
               ) : null}
-              {user && hoveredBook.user_id && (
-                <button
-                  className="remove-book-btn"
-                  onClick={(e) => { e.stopPropagation(); handleDeleteBook(hoveredBook.uuid); }}
-                  title="Remove Book"
-                >
-                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="3 6 5 6 21 6"/>
-                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                    <line x1="10" y1="11" x2="10" y2="17"/>
-                    <line x1="14" y1="11" x2="14" y2="17"/>
-                  </svg>
-                  <span>Remove</span>
-                </button>
-              )}
+              {(() => {
+                const progress = bookProgressMap.get(hoveredBook.uuid);
+                return progress?.is_completed ? (
+                  <div className="book-completed-badge">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" stroke="currentColor" strokeWidth="2">
+                      <polyline points="20 6 9 17 4 12"/>
+                    </svg>
+                    <span>Read</span>
+                  </div>
+                ) : null;
+              })()}
+              <div className="book-actions">
+                {user && (
+                  <>
+                    {(() => {
+                      const progress = bookProgressMap.get(hoveredBook.uuid);
+                      return (
+                        <button
+                          className={`mark-complete-btn ${progress?.is_completed ? 'completed' : ''}`}
+                          onClick={(e) => handleToggleCompleted(e, hoveredBook.uuid, progress)}
+                          title={progress?.is_completed ? 'Mark as unread' : 'Mark as read'}
+                        >
+                          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="20 6 9 17 4 12"/>
+                          </svg>
+                          <span>{progress?.is_completed ? 'Mark unread' : 'Mark as read'}</span>
+                        </button>
+                      );
+                    })()}
+                    {hoveredBook.user_id && (
+                      <button
+                        className="remove-book-btn"
+                        onClick={(e) => { e.stopPropagation(); handleDeleteBook(hoveredBook.uuid); }}
+                        title="Remove Book"
+                      >
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="3 6 5 6 21 6"/>
+                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                          <line x1="10" y1="11" x2="10" y2="17"/>
+                          <line x1="14" y1="11" x2="14" y2="17"/>
+                        </svg>
+                        <span>Remove</span>
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
             </div>
           </div>
         )}

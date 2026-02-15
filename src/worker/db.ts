@@ -2,16 +2,22 @@
  * Database query functions (V2 - XPath-based)
  */
 
-export async function getAllBooksV2(db: D1Database) {
-  const books = await db
-    .prepare(
-      `SELECT id, uuid, title, original_title, author, language_pair,
+export async function getAllBooksV2(db: D1Database, userId?: number) {
+  let query = `SELECT id, uuid, title, original_title, author, language_pair,
               book_cover_img_url, book_spine_img_url, user_id,
               status, created_at, updated_at
-       FROM books_v2
-       ORDER BY created_at DESC`
-    )
-    .all();
+       FROM books_v2`;
+  
+  if (userId) {
+    query += ` WHERE user_id IS NULL OR user_id = ?`;
+  } else {
+    query += ` WHERE user_id IS NULL`;
+  }
+  
+  query += ` ORDER BY created_at DESC`;
+  
+  const stmt = db.prepare(query);
+  const books = userId ? await stmt.bind(userId).all() : await stmt.all();
 
   return books.results;
 }
@@ -502,4 +508,57 @@ export async function clearTextNodesJson(db: D1Database, bookId: number): Promis
 export async function deleteTranslationJob(db: D1Database, bookUuid: string): Promise<void> {
   await db.prepare('DELETE FROM translation_jobs WHERE book_uuid = ?')
     .bind(bookUuid).run();
+}
+
+/**
+ * User reading progress for a book (supports both public and user-uploaded books)
+ */
+export interface UserBookProgress {
+  id: number;
+  user_id: number;
+  book_uuid: string;
+  is_completed: number; // 0 or 1
+  reading_progress: number | null; // 0-100, for future use
+  completed_at: string | null;
+  last_read_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Upsert user's reading progress for a book
+ */
+export async function upsertUserBookProgress(
+  db: D1Database,
+  userId: number,
+  bookUuid: string,
+  isCompleted: boolean
+): Promise<void> {
+  await db.prepare(
+    `INSERT INTO user_book_progress (user_id, book_uuid, is_completed, completed_at, last_read_at)
+     VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+     ON CONFLICT(user_id, book_uuid) DO UPDATE SET
+       is_completed = ?,
+       completed_at = CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE NULL END,
+       last_read_at = CURRENT_TIMESTAMP,
+       updated_at = CURRENT_TIMESTAMP`
+  )
+    .bind(userId, bookUuid, isCompleted ? 1 : 0, isCompleted ? 1 : 0, isCompleted)
+    .run();
+}
+
+/**
+ * Get user's reading progress for a specific book
+ */
+export async function getUserBookProgress(
+  db: D1Database,
+  userId: number,
+  bookUuid: string
+): Promise<UserBookProgress | null> {
+  const row = await db.prepare(
+    `SELECT * FROM user_book_progress WHERE user_id = ? AND book_uuid = ?`
+  )
+    .bind(userId, bookUuid)
+    .first();
+  return row as UserBookProgress | null;
 }

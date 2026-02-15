@@ -27,6 +27,8 @@ import {
   deleteBookV2,
   getBookStatus,
   getTranslationJob,
+  upsertUserBookProgress,
+  getUserBookProgress,
 } from './db';
 import {
   handleBookUpload,
@@ -75,6 +77,18 @@ export default {
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
     await runMigration('chapters_v2_text_nodes', 'ALTER TABLE chapters_v2 ADD COLUMN text_nodes_json TEXT');
+    await runMigration('create_user_book_progress', `CREATE TABLE IF NOT EXISTS user_book_progress (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      book_uuid TEXT NOT NULL,
+      is_completed INTEGER NOT NULL DEFAULT 0,
+      reading_progress INTEGER,
+      completed_at DATETIME,
+      last_read_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(user_id, book_uuid)
+    )`);
 
     // Handle API routes
     if (url.pathname.startsWith('/api/')) {
@@ -217,9 +231,50 @@ export default {
           });
         }
 
+        // Mark book as completed/read (supports both public and user-owned books)
+        const markCompleteMatch = url.pathname.match(/^\/api\/book\/([^\/]+)\/mark-complete$/);
+        if (markCompleteMatch && request.method === 'POST') {
+          const user = await getCurrentUser(env.DB, request);
+          if (!user) {
+            return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+              status: 401, headers: { 'Content-Type': 'application/json' },
+            });
+          }
+          try {
+            const body = await request.json() as { isCompleted: boolean };
+            const bookUuid = markCompleteMatch[1];
+            await upsertUserBookProgress(env.DB, user.id, bookUuid, body.isCompleted);
+            const progress = await getUserBookProgress(env.DB, user.id, bookUuid);
+            return new Response(JSON.stringify({ success: true, progress }), {
+              headers: { 'Content-Type': 'application/json' },
+            });
+          } catch (err) {
+            return new Response(JSON.stringify({ error: 'Invalid request' }), {
+              status: 400, headers: { 'Content-Type': 'application/json' },
+            });
+          }
+        }
+
+        // Get user's reading progress for a book
+        const progressMatch = url.pathname.match(/^\/api\/book\/([^\/]+)\/progress$/);
+        if (progressMatch && request.method === 'GET') {
+          const user = await getCurrentUser(env.DB, request);
+          if (!user) {
+            return new Response(JSON.stringify({ progress: null }), {
+              headers: { 'Content-Type': 'application/json' },
+            });
+          }
+          const bookUuid = progressMatch[1];
+          const progress = await getUserBookProgress(env.DB, user.id, bookUuid);
+          return new Response(JSON.stringify({ progress }), {
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+
         // All book listing now uses V2
         if (url.pathname === '/api/books' || url.pathname === '/api/v2/books') {
-          const books = await getAllBooksV2(env.DB);
+          const user = await getCurrentUser(env.DB, request);
+          const books = await getAllBooksV2(env.DB, user?.id);
           return new Response(JSON.stringify(books), {
             headers: { 'Content-Type': 'application/json' },
           });

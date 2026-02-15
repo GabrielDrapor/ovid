@@ -938,9 +938,15 @@ class BookImporter {
 
     // First, initialize the v2 schema if needed
     console.log('   📋 Ensuring v2 schema exists...');
-    execSync(`npx wrangler d1 execute ovid-db --local --file=database/schema_v2.sql`, {
-      stdio: 'inherit',
-    });
+    try {
+      execSync(`node scripts/wrangler-fallback-wrapper.js d1 execute ovid-db --local --file=database/schema_v2.sql`, {
+        stdio: 'inherit',
+        cwd: process.cwd(),
+      });
+    } catch (e) {
+      console.error('❌ Schema initialization failed:', e.message);
+      throw e;
+    }
 
     // Insert book (small statement)
     console.log('   📥 Inserting book metadata...');
@@ -949,7 +955,7 @@ class BookImporter {
     const bookSqlPath = path.resolve(process.cwd(), `.temp_book_${bookUuid}.sql`);
     fs.writeFileSync(bookSqlPath, bookSql, 'utf8');
     try {
-      execSync(`npx wrangler d1 execute ovid-db --local --file="${bookSqlPath}"`, { stdio: 'inherit' });
+      execSync(`node scripts/wrangler-fallback-wrapper.js d1 execute ovid-db --local --file="${bookSqlPath}"`, { stdio: 'inherit' });
     } finally {
       if (fs.existsSync(bookSqlPath)) fs.unlinkSync(bookSqlPath);
     }
@@ -980,7 +986,7 @@ class BookImporter {
       const chapterSqlPath = path.resolve(process.cwd(), `.temp_chapter_${bookUuid}_${chapter.number}.sql`);
       fs.writeFileSync(chapterSqlPath, chapterSql, 'utf8');
       try {
-        execSync(`npx wrangler d1 execute ovid-db --local --file="${chapterSqlPath}"`, { stdio: 'inherit' });
+        execSync(`node scripts/wrangler-fallback-wrapper.js d1 execute ovid-db --local --file="${chapterSqlPath}"`, { stdio: 'inherit' });
       } finally {
         if (fs.existsSync(chapterSqlPath)) fs.unlinkSync(chapterSqlPath);
       }
@@ -999,7 +1005,7 @@ class BookImporter {
         const transSqlPath = path.resolve(process.cwd(), `.temp_trans_${bookUuid}_${chapter.number}_${i}.sql`);
         fs.writeFileSync(transSqlPath, translationsSql, 'utf8');
         try {
-          execSync(`npx wrangler d1 execute ovid-db --local --file="${transSqlPath}"`, { stdio: 'pipe' });
+          execSync(`node scripts/wrangler-fallback-wrapper.js d1 execute ovid-db --local --file="${transSqlPath}"`, { stdio: 'pipe' });
           process.stdout.write(`\r      Translations: ${Math.min(i + batchSize, totalNodes)}/${totalNodes}`);
         } finally {
           if (fs.existsSync(transSqlPath)) fs.unlinkSync(transSqlPath);

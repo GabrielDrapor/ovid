@@ -597,6 +597,62 @@
 }
 
 
+.book-completed-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  background: rgba(74, 222, 128, 0.1);
+  border: 1px solid rgba(74, 222, 128, 0.3);
+  border-radius: 20px;
+  color: #4ade80;
+  font-size: 0.85rem;
+  font-weight: 500;
+  margin-bottom: 15px;
+  width: fit-content;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.book-completed-badge svg {
+  width: 14px;
+  height: 14px;
+}
+
+.book-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mark-complete-btn {
+  background: transparent;
+  color: #888;
+  border: 1px solid #444;
+  padding: 10px 40px;
+  font-size: 0.85rem;
+  border-radius: 30px;
+  cursor: pointer;
+  width: 100%;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.mark-complete-btn:hover {
+  color: #4ade80;
+  border-color: #4ade80;
+  background: rgba(74, 222, 128, 0.05);
+}
+
+.mark-complete-btn.completed {
+  color: #4ade80;
+  border-color: #4ade80;
+  background: rgba(74, 222, 128, 0.1);
+}
+
 .remove-book-btn {
   background: transparent;
   color: #666;
@@ -605,7 +661,6 @@
   font-size: 0.85rem;
   border-radius: 30px;
   cursor: pointer;
-  margin-top: 10px;
   width: 100%;
   transition: border-color 0.2s, color 0.2s;
   display: flex;
