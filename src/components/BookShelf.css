@@ -1045,3 +1045,54 @@
   background: #22c55e;
   transform: translateY(-2px);
 }
+
+/* Progress bar styling */
+.progress-section {
+  width: 100%;
+  margin-bottom: 20px;
+}
+
+.progress-bar {
+  width: 100%;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #4ade80, #22c55e);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.progress-text {
+  font-size: 0.85em;
+  color: #4ade80;
+  font-weight: 500;
+  text-align: center;
+  display: block;
+}
+
+.remove-book-btn {
+  background: transparent;
+  color: #666;
+  border: 1px solid #444;
+  padding: 10px 40px;
+  font-size: 0.85em;
+  border-radius: 30px;
+  cursor: pointer;
+  width: 100%;
+  transition: border-color 0.2s, color 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.remove-book-btn:hover {
+  color: #ff6b6b;
+  border-color: #ff6b6b;
+}

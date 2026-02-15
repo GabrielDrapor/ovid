@@ -95,6 +95,25 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
   // Track current visible xpath for saving
   const currentXpathRef = useRef<string | undefined>(undefined);
 
+  // Track book completion status
+  const [isCompleted, setIsCompleted] = useState(false);
+
+  // Mark book as complete/incomplete
+  const handleMarkComplete = useCallback(async (completed: boolean) => {
+    try {
+      const response = await fetch(`/api/book/${bookUuid}/mark-complete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isCompleted: completed }),
+      });
+      if (response.ok) {
+        setIsCompleted(completed);
+      }
+    } catch (err) {
+      console.error('Error marking book:', err);
+    }
+  }, [bookUuid]);
+
   // Save progress to localStorage and URL
   const saveProgress = useCallback((chapter: number, xpath?: string) => {
     const progress: ReadingProgress = {
@@ -217,6 +236,8 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
         isLoading={loading}
         bookUuid={bookUuid}
         onBackToShelf={onBackToShelf}
+        onMarkComplete={handleMarkComplete}
+        isCompleted={isCompleted}
         initialXpath={targetXpath}
         onProgressChange={handleProgressChange}
       />

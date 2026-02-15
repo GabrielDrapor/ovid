@@ -256,34 +256,6 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
     }
   };
 
-  const handleToggleCompleted = async (e: React.MouseEvent, bookUuid: string, currentProgress: UserBookProgress | undefined) => {
-    e.stopPropagation();
-    try {
-      const response = await fetch(`/api/book/${bookUuid}/mark-complete`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ isCompleted: !currentProgress?.is_completed }),
-      });
-      if (!response.ok) {
-        const data = await response.json() as { error?: string };
-        throw new Error(data.error || 'Failed to update');
-      }
-      const result = await response.json() as { success: boolean; progress?: UserBookProgress };
-      if (result.progress) {
-        const newMap = new Map(bookProgressMap);
-        newMap.set(bookUuid, result.progress);
-        setBookProgressMap(newMap);
-        // Update hovered book to reflect new status
-        const updatedBook = books.find(b => b.uuid === bookUuid);
-        if (updatedBook) {
-          setHoveredBook(updatedBook);
-        }
-      }
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to mark book');
-    }
-  };
-
   if (error) {
     return (
       <div className="bookshelf-error">
@@ -379,33 +351,24 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
               ) : null}
               {(() => {
                 const progress = bookProgressMap.get(hoveredBook.uuid);
-                return progress?.is_completed ? (
-                  <div className="book-completed-badge">
-                    <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" stroke="currentColor" strokeWidth="2">
-                      <polyline points="20 6 9 17 4 12"/>
-                    </svg>
-                    <span>Read</span>
-                  </div>
-                ) : null;
-              })()}
-              <div className="book-actions">
-                {user && (
+                return (
                   <>
-                    {(() => {
-                      const progress = bookProgressMap.get(hoveredBook.uuid);
-                      return (
-                        <button
-                          className={`mark-complete-btn ${progress?.is_completed ? 'completed' : ''}`}
-                          onClick={(e) => handleToggleCompleted(e, hoveredBook.uuid, progress)}
-                          title={progress?.is_completed ? 'Mark as unread' : 'Mark as read'}
-                        >
-                          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <polyline points="20 6 9 17 4 12"/>
-                          </svg>
-                          <span>{progress?.is_completed ? 'Mark unread' : 'Mark as read'}</span>
-                        </button>
-                      );
-                    })()}
+                    {/* Progress bar */}
+                    {progress && (progress.reading_progress !== null || progress.is_completed) && (
+                      <div className="progress-section">
+                        <div className="progress-bar">
+                          <div 
+                            className="progress-fill" 
+                            style={{ width: `${progress.is_completed ? 100 : (progress.reading_progress || 0)}%` }}
+                          ></div>
+                        </div>
+                        <span className="progress-text">
+                          {progress.is_completed ? '✓ Completed' : `${progress.reading_progress || 0}% read`}
+                        </span>
+                      </div>
+                    )}
+                    
+                    {/* Remove button - only for user-owned books */}
                     {hoveredBook.user_id && (
                       <button
                         className="remove-book-btn"
@@ -422,8 +385,8 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                       </button>
                     )}
                   </>
-                )}
-              </div>
+                );
+              })()}
             </div>
           </div>
         )}

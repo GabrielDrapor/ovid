@@ -29,6 +29,9 @@ interface BilingualReaderV2Props {
   isLoading: boolean;
   bookUuid?: string;
   onBackToShelf?: () => void;
+  // Reading status
+  onMarkComplete?: (isCompleted: boolean) => Promise<void>;
+  isCompleted?: boolean;
   // Granular progress tracking
   initialXpath?: string;  // XPath to scroll to on initial load
   onProgressChange?: (xpath: string) => void;  // Called when visible element changes
@@ -490,6 +493,17 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
               <div className="fab-menu-section">
                 <button className="fab-menu-item" onClick={onBackToShelf}>
                   Back to Shelf
+                </button>
+              </div>
+            )}
+
+            {onMarkComplete && (
+              <div className="fab-menu-section">
+                <button 
+                  className={`fab-menu-item ${isCompleted ? 'completed' : ''}`}
+                  onClick={() => onMarkComplete(!isCompleted)}
+                >
+                  {isCompleted ? '✓ Completed' : 'Mark as Complete'}
                 </button>
               </div>
             )}
