@@ -522,26 +522,46 @@
   position: relative;
   box-sizing: border-box;
   overflow-y: auto;
+  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+  scrollbar-width: thin;
+}
+
+.preview-content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.preview-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.preview-content::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 3px;
+}
+
+.preview-content::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.4);
 }
 
 
 .preview-cover {
   width: 100%;
-  aspect-ratio: 2/3;
+  max-height: 280px;
   margin-bottom: 30px;
   border-radius: 8px;
   overflow: hidden;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-  background: #333;
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
 }
 
 .preview-cover img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+  max-width: 100%;
+  max-height: 280px;
+  object-fit: contain;
+  border-radius: 8px;
 }
 
 .default-preview-cover {
@@ -576,6 +596,62 @@
 }
 
 
+.book-completed-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  background: rgba(74, 222, 128, 0.1);
+  border: 1px solid rgba(74, 222, 128, 0.3);
+  border-radius: 20px;
+  color: #4ade80;
+  font-size: 0.85rem;
+  font-weight: 500;
+  margin-bottom: 15px;
+  width: fit-content;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.book-completed-badge svg {
+  width: 14px;
+  height: 14px;
+}
+
+.book-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mark-complete-btn {
+  background: transparent;
+  color: #888;
+  border: 1px solid #444;
+  padding: 10px 40px;
+  font-size: 0.85rem;
+  border-radius: 30px;
+  cursor: pointer;
+  width: 100%;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.mark-complete-btn:hover {
+  color: #4ade80;
+  border-color: #4ade80;
+  background: rgba(74, 222, 128, 0.05);
+}
+
+.mark-complete-btn.completed {
+  color: #4ade80;
+  border-color: #4ade80;
+  background: rgba(74, 222, 128, 0.1);
+}
+
 .remove-book-btn {
   background: transparent;
   color: #666;
@@ -584,7 +660,6 @@
   font-size: 0.85rem;
   border-radius: 30px;
   cursor: pointer;
-  margin-top: 10px;
   width: 100%;
   transition: border-color 0.2s, color 0.2s;
   display: flex;
@@ -968,4 +1043,55 @@
 .confirm-upload-btn:hover {
   background: #22c55e;
   transform: translateY(-2px);
+}
+
+/* Progress bar styling */
+.progress-section {
+  width: 100%;
+  margin-bottom: 20px;
+}
+
+.progress-bar {
+  width: 100%;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #4ade80, #22c55e);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.progress-text {
+  font-size: 0.85em;
+  color: #4ade80;
+  font-weight: 500;
+  text-align: center;
+  display: block;
+}
+
+.remove-book-btn {
+  background: transparent;
+  color: #666;
+  border: 1px solid #444;
+  padding: 10px 40px;
+  font-size: 0.85em;
+  border-radius: 30px;
+  cursor: pointer;
+  width: 100%;
+  transition: border-color 0.2s, color 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.remove-book-btn:hover {
+  color: #ff6b6b;
+  border-color: #ff6b6b;
 }

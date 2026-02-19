@@ -583,3 +583,9 @@ sup {
 sup:hover {
   color: #007bff;
 }
+
+/* Mark Complete button in menu */
+.fab-menu-item.completed {
+  color: #4ade80;
+  font-weight: 600;
+}

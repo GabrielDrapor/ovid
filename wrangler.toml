@@ -20,3 +20,15 @@ APP_URL = "https://lib.jrd.pub"
 # Secrets (set via `wrangler secret put`):
 # - GOOGLE_OAUTH_CLIENT_ID: 95362913342-d6hk9hgonsemdhaisgt2ie1ng5hlsmbb.apps.googleusercontent.com
 # - GOOGLE_OAUTH_CLIENT_SECRET: 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
+
+# Staging environment for testing
+[env.staging]
+name = "ovid-staging"
+
+[[env.staging.d1_databases]]
+binding = "DB"
+database_name = "ovid-db"
+database_id = "df1769fb-c23b-4151-85cc-0e00ed591f2b"
+
+[env.staging.vars]
+APP_URL = "https://staging.lib.jrd.pub"

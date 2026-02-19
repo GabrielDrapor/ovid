@@ -17,12 +17,25 @@ interface Book {
   updated_at: string;
 }
 
+interface UserBookProgress {
+  id: number;
+  user_id: number;
+  book_uuid: string;
+  is_completed: number; // 0 or 1
+  reading_progress: number | null;
+  completed_at: string | null;
+  last_read_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 interface BookShelfProps {
   onSelectBook: (bookUuid: string) => void;
 }
 
 const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
   const [books, setBooks] = useState<Book[]>([]);
+  const [bookProgressMap, setBookProgressMap] = useState<Map<string, UserBookProgress>>(new Map());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [hoveredBook, setHoveredBook] = useState<Book | null>(null);
@@ -54,17 +67,36 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
       }
       const booksData = (await response.json()) as Book[];
       setBooks(booksData);
+      setLoading(false);
+
+      // Fetch progress in background (non-blocking, parallel)
+      if (user && booksData.length > 0) {
+        const progressMap = new Map<string, UserBookProgress>();
+        await Promise.all(booksData.map(async (book) => {
+          try {
+            const progressResponse = await fetch(`/api/book/${book.uuid}/progress`);
+            if (progressResponse.ok) {
+              const progressData = await progressResponse.json() as { progress: UserBookProgress | null };
+              if (progressData.progress) {
+                progressMap.set(book.uuid, progressData.progress);
+              }
+            }
+          } catch {
+            // Silently skip
+          }
+        }));
+        setBookProgressMap(progressMap);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch books');
       console.error('Error fetching books:', err);
-    } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
     fetchBooks();
-  }, []);
+  }, [user]);
 
   // Drive translation for books that are still processing.
   // Each call to /translate-next translates a chunk of ~25 paragraphs,
@@ -317,21 +349,50 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                   <span>Translation failed</span>
                 </div>
               ) : null}
-              {user && hoveredBook.user_id && (
-                <button
-                  className="remove-book-btn"
-                  onClick={(e) => { e.stopPropagation(); handleDeleteBook(hoveredBook.uuid); }}
-                  title="Remove Book"
-                >
-                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="3 6 5 6 21 6"/>
-                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                    <line x1="10" y1="11" x2="10" y2="17"/>
-                    <line x1="14" y1="11" x2="14" y2="17"/>
-                  </svg>
-                  <span>Remove</span>
-                </button>
-              )}
+              {(() => {
+                const progress = bookProgressMap.get(hoveredBook.uuid);
+                const progressPercent = progress?.is_completed ? 100 : (progress?.reading_progress || 0);
+                const statusText = progress?.is_completed 
+                  ? '✓ Completed' 
+                  : progressPercent > 0 
+                    ? `${progressPercent}% read` 
+                    : 'Not started';
+                return (
+                  <>
+                    {/* Progress bar - always show if user is logged in */}
+                    {user && (
+                      <div className="progress-section">
+                        <div className="progress-bar">
+                          <div 
+                            className="progress-fill" 
+                            style={{ width: `${progressPercent}%` }}
+                          ></div>
+                        </div>
+                        <span className="progress-text">
+                          {statusText}
+                        </span>
+                      </div>
+                    )}
+                    
+                    {/* Remove button - only for user-owned books */}
+                    {hoveredBook.user_id && (
+                      <button
+                        className="remove-book-btn"
+                        onClick={(e) => { e.stopPropagation(); handleDeleteBook(hoveredBook.uuid); }}
+                        title="Remove Book"
+                      >
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="3 6 5 6 21 6"/>
+                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                          <line x1="10" y1="11" x2="10" y2="17"/>
+                          <line x1="14" y1="11" x2="14" y2="17"/>
+                        </svg>
+                        <span>Remove</span>
+                      </button>
+                    )}
+                  </>
+                );
+              })()}
             </div>
           </div>
         )}

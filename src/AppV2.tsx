@@ -95,6 +95,47 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
   // Track current visible xpath for saving
   const currentXpathRef = useRef<string | undefined>(undefined);
 
+  // Debounce timer for progress API updates
+  const progressTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Track book completion status
+  const [isCompleted, setIsCompleted] = useState(false);
+
+  // Calculate reading progress percentage
+  const calculateProgress = useCallback(() => {
+    if (chapters.length === 0) return 0;
+    return Math.round((currentChapter / chapters.length) * 100);
+  }, [currentChapter, chapters.length]);
+
+  // Mark book as complete/incomplete and update progress
+  const handleMarkComplete = useCallback(async (completed: boolean) => {
+    try {
+      const progressPercent = calculateProgress();
+      const response = await fetch(`/api/book/${bookUuid}/mark-complete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          isCompleted: completed,
+          readingProgress: completed ? 100 : progressPercent 
+        }),
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setIsCompleted(completed);
+        console.log('Book marked complete:', data);
+      } else {
+        const errData = await response.text();
+        console.error(`Mark complete failed: ${response.status}`, errData);
+        throw new Error(`HTTP ${response.status}: ${errData}`);
+      }
+    } catch (err) {
+      console.error('Error marking book complete:', err);
+      // Re-throw so BilingualReaderV2 can show error to user
+      throw err;
+    }
+  }, [bookUuid, calculateProgress]);
+
   // Save progress to localStorage and URL
   const saveProgress = useCallback((chapter: number, xpath?: string) => {
     const progress: ReadingProgress = {
@@ -115,9 +156,20 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
   // Called by reader when visible element changes
   const handleProgressChange = useCallback((xpath: string) => {
     currentXpathRef.current = xpath;
-    // Debounced save - only save every 2 seconds to avoid excessive writes
+    // Save to localStorage immediately
     saveProgress(currentChapter, xpath);
-  }, [currentChapter, saveProgress]);
+    
+    // Debounced API update - only save to backend every 2 seconds to avoid excessive writes
+    if (progressTimerRef.current) clearTimeout(progressTimerRef.current);
+    progressTimerRef.current = setTimeout(() => {
+      const progressPercent = calculateProgress();
+      fetch(`/api/book/${bookUuid}/progress`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ readingProgress: progressPercent }),
+      }).catch(err => console.error('Error saving progress to backend:', err));
+    }, 2000);
+  }, [currentChapter, saveProgress, bookUuid, calculateProgress]);
 
   // Load chapters list
   useEffect(() => {
@@ -134,7 +186,22 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
       }
     };
 
+    const loadCompletion = async () => {
+      try {
+        const response = await fetch(`/api/book/${bookUuid}/progress`);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.progress?.is_completed) {
+            setIsCompleted(true);
+          }
+        }
+      } catch (err) {
+        console.error('Error fetching completion status:', err);
+      }
+    };
+
     loadChapters();
+    loadCompletion();
   }, [bookUuid]);
 
   // Load chapter content
@@ -148,6 +215,22 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
       const data = await response.json();
       setChapterContent(data as ChapterContent);
       setCurrentChapter(chapterNumber);
+      saveProgress(chapterNumber, scrollToXpath);
+      
+      // Auto-update reading progress in database (debounced)
+      // Only save if we've loaded chapters info
+      if (chapters.length > 0) {
+        const progressPercent = Math.round((chapterNumber / chapters.length) * 100);
+        // Don't await this - let it happen in background
+        fetch(`/api/book/${bookUuid}/mark-complete`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            isCompleted: false,
+            readingProgress: progressPercent 
+          }),
+        }).catch(err => console.error('Error updating progress:', err));
+      }
 
       // Set target xpath for scroll (or clear it for new chapter)
       setTargetXpath(scrollToXpath);
@@ -173,6 +256,15 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
   useEffect(() => {
     loadChapter(initialProgress.current.chapter, initialProgress.current.xpath);
   }, [bookUuid]);
+
+  // Cleanup debounced progress timer on unmount
+  useEffect(() => {
+    return () => {
+      if (progressTimerRef.current) {
+        clearTimeout(progressTimerRef.current);
+      }
+    };
+  }, []);
 
   // Wrapper for manual chapter navigation (no xpath) - must be before early returns
   const handleLoadChapter = useCallback((chapterNumber: number) => {
@@ -217,6 +309,8 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
         isLoading={loading}
         bookUuid={bookUuid}
         onBackToShelf={onBackToShelf}
+        onMarkComplete={handleMarkComplete}
+        isCompleted={isCompleted}
         initialXpath={targetXpath}
         onProgressChange={handleProgressChange}
       />
