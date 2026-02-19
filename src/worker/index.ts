@@ -290,6 +290,45 @@ export default {
           });
         }
 
+        // Update reading progress for a book (PUT)
+        if (progressMatch && request.method === 'PUT') {
+          const user = await getCurrentUser(env.DB, request);
+          if (!user) {
+            return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+              status: 401, headers: { 'Content-Type': 'application/json' },
+            });
+          }
+          try {
+            const body = await request.json() as { readingProgress: number };
+            const bookUuid = progressMatch[1];
+            
+            if (typeof body.readingProgress !== 'number' || body.readingProgress < 0 || body.readingProgress > 100) {
+              return new Response(JSON.stringify({ error: 'readingProgress must be a number 0-100' }), {
+                status: 400, headers: { 'Content-Type': 'application/json' },
+              });
+            }
+            
+            // Update progress while preserving completion status
+            const currentProgress = await getUserBookProgress(env.DB, user.id, bookUuid);
+            const isCompleted = currentProgress?.is_completed ?? false;
+            
+            await upsertUserBookProgress(env.DB, user.id, bookUuid, isCompleted, body.readingProgress);
+            const updatedProgress = await getUserBookProgress(env.DB, user.id, bookUuid);
+            
+            return new Response(JSON.stringify({ success: true, progress: updatedProgress }), {
+              headers: { 'Content-Type': 'application/json' },
+            });
+          } catch (err) {
+            console.error('Update progress error:', err);
+            return new Response(JSON.stringify({ 
+              error: 'Invalid request',
+              details: err instanceof Error ? err.message : String(err)
+            }), {
+              status: 400, headers: { 'Content-Type': 'application/json' },
+            });
+          }
+        }
+
         // All book listing now uses V2
         if (url.pathname === '/api/books' || url.pathname === '/api/v2/books') {
           const user = await getCurrentUser(env.DB, request);

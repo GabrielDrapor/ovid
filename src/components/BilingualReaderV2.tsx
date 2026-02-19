@@ -70,6 +70,8 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
   const [letterSpacing, setLetterSpacing] = useState(-0.03);
   const [wordSpacing, setWordSpacing] = useState(0);
   const [fontWeight, setFontWeight] = useState(450);
+  const [isMarkingComplete, setIsMarkingComplete] = useState(false);
+  const [markCompleteError, setMarkCompleteError] = useState<string | null>(null);
 
   // Store element references for toggling
   // originalHtml preserves formatting (innerHTML), translated is plain text
@@ -503,10 +505,31 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
               <div className="fab-menu-section">
                 <button 
                   className={`fab-menu-item ${isCompleted ? 'completed' : ''}`}
-                  onClick={() => onMarkComplete(!isCompleted)}
+                  onClick={async () => {
+                    setIsMarkingComplete(true);
+                    setMarkCompleteError(null);
+                    try {
+                      await onMarkComplete(!isCompleted);
+                    } catch (err) {
+                      const errorMsg = err instanceof Error ? err.message : String(err);
+                      setMarkCompleteError(errorMsg);
+                      console.error('Error marking book complete:', err);
+                    } finally {
+                      setIsMarkingComplete(false);
+                    }
+                  }}
+                  disabled={isMarkingComplete}
+                  title={markCompleteError || undefined}
                 >
-                  {isCompleted ? '✓ Completed' : 'Mark as Complete'}
+                  {isMarkingComplete 
+                    ? '...' 
+                    : (isCompleted ? '✓ Completed' : 'Mark as Complete')}
                 </button>
+                {markCompleteError && (
+                  <div style={{ fontSize: '12px', color: '#d32f2f', marginTop: '4px' }}>
+                    {markCompleteError}
+                  </div>
+                )}
               </div>
             )}
 

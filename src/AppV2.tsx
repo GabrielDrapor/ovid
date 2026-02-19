@@ -95,6 +95,9 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
   // Track current visible xpath for saving
   const currentXpathRef = useRef<string | undefined>(undefined);
 
+  // Debounce timer for progress API updates
+  const progressTimerRef = useRef<NodeJS.Timeout | null>(null);
+
   // Track book completion status
   const [isCompleted, setIsCompleted] = useState(false);
 
@@ -116,11 +119,20 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
           readingProgress: completed ? 100 : progressPercent 
         }),
       });
+      
       if (response.ok) {
+        const data = await response.json();
         setIsCompleted(completed);
+        console.log('Book marked complete:', data);
+      } else {
+        const errData = await response.text();
+        console.error(`Mark complete failed: ${response.status}`, errData);
+        throw new Error(`HTTP ${response.status}: ${errData}`);
       }
     } catch (err) {
-      console.error('Error marking book:', err);
+      console.error('Error marking book complete:', err);
+      // Re-throw so BilingualReaderV2 can show error to user
+      throw err;
     }
   }, [bookUuid, calculateProgress]);
 
@@ -144,9 +156,20 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
   // Called by reader when visible element changes
   const handleProgressChange = useCallback((xpath: string) => {
     currentXpathRef.current = xpath;
-    // Debounced save - only save every 2 seconds to avoid excessive writes
+    // Save to localStorage immediately
     saveProgress(currentChapter, xpath);
-  }, [currentChapter, saveProgress]);
+    
+    // Debounced API update - only save to backend every 2 seconds to avoid excessive writes
+    if (progressTimerRef.current) clearTimeout(progressTimerRef.current);
+    progressTimerRef.current = setTimeout(() => {
+      const progressPercent = calculateProgress();
+      fetch(`/api/book/${bookUuid}/progress`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ readingProgress: progressPercent }),
+      }).catch(err => console.error('Error saving progress to backend:', err));
+    }, 2000);
+  }, [currentChapter, saveProgress, bookUuid, calculateProgress]);
 
   // Load chapters list
   useEffect(() => {
@@ -163,7 +186,22 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
       }
     };
 
+    const loadCompletion = async () => {
+      try {
+        const response = await fetch(`/api/book/${bookUuid}/progress`);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.progress?.is_completed) {
+            setIsCompleted(true);
+          }
+        }
+      } catch (err) {
+        console.error('Error fetching completion status:', err);
+      }
+    };
+
     loadChapters();
+    loadCompletion();
   }, [bookUuid]);
 
   // Load chapter content
@@ -218,6 +256,15 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
   useEffect(() => {
     loadChapter(initialProgress.current.chapter, initialProgress.current.xpath);
   }, [bookUuid]);
+
+  // Cleanup debounced progress timer on unmount
+  useEffect(() => {
+    return () => {
+      if (progressTimerRef.current) {
+        clearTimeout(progressTimerRef.current);
+      }
+    };
+  }, []);
 
   // Wrapper for manual chapter navigation (no xpath) - must be before early returns
   const handleLoadChapter = useCallback((chapterNumber: number) => {

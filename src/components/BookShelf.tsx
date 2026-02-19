@@ -67,11 +67,12 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
       }
       const booksData = (await response.json()) as Book[];
       setBooks(booksData);
+      setLoading(false);
 
-      // Fetch user's reading progress for all books if logged in
-      if (user) {
+      // Fetch progress in background (non-blocking, parallel)
+      if (user && booksData.length > 0) {
         const progressMap = new Map<string, UserBookProgress>();
-        for (const book of booksData) {
+        await Promise.all(booksData.map(async (book) => {
           try {
             const progressResponse = await fetch(`/api/book/${book.uuid}/progress`);
             if (progressResponse.ok) {
@@ -81,15 +82,14 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
               }
             }
           } catch {
-            // Silently skip if progress fetch fails for individual book
+            // Silently skip
           }
-        }
+        }));
         setBookProgressMap(progressMap);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch books');
       console.error('Error fetching books:', err);
-    } finally {
       setLoading(false);
     }
   };
@@ -351,19 +351,25 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
               ) : null}
               {(() => {
                 const progress = bookProgressMap.get(hoveredBook.uuid);
+                const progressPercent = progress?.is_completed ? 100 : (progress?.reading_progress || 0);
+                const statusText = progress?.is_completed 
+                  ? '✓ Completed' 
+                  : progressPercent > 0 
+                    ? `${progressPercent}% read` 
+                    : 'Not started';
                 return (
                   <>
-                    {/* Progress bar */}
-                    {progress && (progress.reading_progress !== null || progress.is_completed) && (
+                    {/* Progress bar - always show if user is logged in */}
+                    {user && (
                       <div className="progress-section">
                         <div className="progress-bar">
                           <div 
                             className="progress-fill" 
-                            style={{ width: `${progress.is_completed ? 100 : (progress.reading_progress || 0)}%` }}
+                            style={{ width: `${progressPercent}%` }}
                           ></div>
                         </div>
                         <span className="progress-text">
-                          {progress.is_completed ? '✓ Completed' : `${progress.reading_progress || 0}% read`}
+                          {statusText}
                         </span>
                       </div>
                     )}
