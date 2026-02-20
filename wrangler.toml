@@ -38,5 +38,6 @@ database_id = "df1769fb-c23b-4151-85cc-0e00ed591f2b"
 binding = "ASSETS_BUCKET"
 bucket_name = "ovid"
 
+
 [env.staging.vars]
 APP_URL = "https://staging.lib.jrd.pub"
