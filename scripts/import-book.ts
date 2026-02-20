@@ -20,6 +20,7 @@ import { execSync } from 'child_process';
 import { DOMParser, XMLSerializer } from '@xmldom/xmldom';
 import { Translator } from '../src/utils/translator';
 import { KVStore } from '../src/utils/KVStore';
+import { generateBookImages } from './generate-cover';
 
 // Ensure Wrangler writes config/logs inside the workspace
 process.env.XDG_CONFIG_HOME =
@@ -62,6 +63,10 @@ interface ImportOptions {
   delay?: string; // Delay in ms between batches to avoid rate limiting
   cover?: string;
   spine?: string;
+  'no-cover'?: boolean;
+  description?: string;
+  color?: string;
+  icon?: string;
   help?: boolean;
 }
 
@@ -86,6 +91,10 @@ class BookImporter {
   private batchDelay: number;
   private coverUrl?: string;
   private spineUrl?: string;
+  private noCover: boolean;
+  private coverDescription?: string;
+  private coverColor?: string;
+  private coverIcon?: string;
   private translator: Translator;
 
   constructor(options: ImportOptions) {
@@ -110,6 +119,10 @@ class BookImporter {
       : 200; // Default 200ms delay between batches
     this.coverUrl = options.cover;
     this.spineUrl = options.spine;
+    this.noCover = !!options['no-cover'];
+    this.coverDescription = options.description;
+    this.coverColor = options.color;
+    this.coverIcon = options.icon;
 
     // Initialize Translator with file-based KVStore for glossary persistence
     const apiKey = process.env.OPENAI_API_KEY || '';
@@ -166,6 +179,27 @@ class BookImporter {
         (sum, ch) => sum + ch.textNodes.length, 0
       );
       console.log(`   ✅ Found ${totalTextNodes} text nodes to translate`);
+
+      // Auto-generate cover and spine if not provided and not disabled
+      if (!this.coverUrl && !this.spineUrl && !this.noCover) {
+        console.log('🎨 Step 1.5: Generating cover and spine images...');
+        try {
+          const coverResult = await generateBookImages({
+            title: bookData.title,
+            author: bookData.author,
+            description: this.coverDescription,
+            color: this.coverColor,
+            icon: this.coverIcon,
+          });
+          this.coverUrl = coverResult.coverUrl;
+          this.spineUrl = coverResult.spineUrl;
+          console.log(`   ✅ Cover: ${this.coverUrl}`);
+          console.log(`   ✅ Spine: ${this.spineUrl}`);
+        } catch (coverError) {
+          console.warn(`   ⚠️ Cover generation failed: ${coverError instanceof Error ? coverError.message : coverError}`);
+          console.warn('   Continuing without cover images...');
+        }
+      }
 
       // Phase 1: Extract proper nouns for consistent translation
       console.log('📝 Step 2: Extracting proper nouns (glossary)...');
@@ -1051,6 +1085,12 @@ Options:
   --concurrency       Number of parallel paragraph translations (default: 10)
   --chapter-concurrency  Number of chapters to translate in parallel (default: 3)
   --delay             Delay in ms between batches to avoid rate limiting (default: 200)
+  --no-cover          Skip automatic cover/spine generation
+  --cover             Manual cover image URL (skips auto-generation)
+  --spine             Manual spine image URL (skips auto-generation)
+  --description       Book description (helps AI generate better cover art)
+  --color             Cover background color hint (e.g. "deep teal")
+  --icon              Cover icon hint (e.g. "sun", "paw print")
   --help              Show this help
 
 Environment Variables:

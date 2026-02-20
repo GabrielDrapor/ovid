@@ -27,7 +27,8 @@
     "remove-book": "ts-node --project scripts/tsconfig.json scripts/remove-book.ts --mode=local",
     "remove-book:local": "ts-node --project scripts/tsconfig.json scripts/remove-book.ts --mode=local",
     "remove-book:remote": "ts-node --project scripts/tsconfig.json scripts/remove-book.ts --mode=remote",
-    "sync-remote-book": "ts-node --project scripts/tsconfig.json scripts/sync-remote-book.ts"
+    "sync-remote-book": "ts-node --project scripts/tsconfig.json scripts/sync-remote-book.ts",
+    "generate-cover": "ts-node --project scripts/tsconfig.json scripts/generate-cover.ts"
   },
   "keywords": [
     "react",

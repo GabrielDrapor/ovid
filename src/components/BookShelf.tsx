@@ -67,6 +67,9 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
       }
       const booksData = (await response.json()) as Book[];
       setBooks(booksData);
+      if (booksData.length > 0 && !hoveredBook) {
+        setHoveredBook(booksData[0]);
+      }
       setLoading(false);
 
       // Fetch progress in background (non-blocking, parallel)
@@ -101,6 +104,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
   // Drive translation for books that are still processing.
   // Each call to /translate-next translates a chunk of ~25 paragraphs,
   // staying within Cloudflare Workers' 50 subrequest limit.
+  const [translationProgress, setTranslationProgress] = useState<Map<string, { phase: string; chaptersCompleted: number; chaptersTotal: number }>>(new Map());
   const translatingRef = useRef<Set<string>>(new Set());
   const pollProcessingBooks = useCallback(async () => {
     const processingBooks = books.filter(b => b.status === 'processing');
@@ -113,13 +117,29 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
       translatingRef.current.add(book.uuid);
 
       try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 55000);
         const res = await fetch(`/api/book/${book.uuid}/translate-next`, {
           method: 'POST',
+          signal: controller.signal,
         });
+        clearTimeout(timeout);
         if (res.ok) {
-          const data = await res.json() as { done?: boolean; error?: string };
+          const data = await res.json() as { done?: boolean; error?: string; progress?: { phase: string; chaptersCompleted: number; chaptersTotal: number } };
+          if (data.progress) {
+            setTranslationProgress(prev => {
+              const next = new Map(prev);
+              next.set(book.uuid, data.progress!);
+              return next;
+            });
+          }
           if (data.done) {
             changed = true;
+            setTranslationProgress(prev => {
+              const next = new Map(prev);
+              next.delete(book.uuid);
+              return next;
+            });
           }
         }
       } catch { /* ignore, will retry on next poll */ }
@@ -132,14 +152,36 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
     }
   }, [books]);
 
+  // Fetch initial translation progress for processing books on mount
+  const initialProgressFetched = useRef(false);
   useEffect(() => {
-    const hasProcessing = books.some(b => b.status === 'processing');
-    if (hasProcessing) {
-      // Drive translation immediately, then every 3s
-      pollProcessingBooks();
-      const interval = setInterval(pollProcessingBooks, 3000);
-      return () => clearInterval(interval);
+    const processingBooks = books.filter(b => b.status === 'processing');
+    if (processingBooks.length === 0) return;
+
+    // Fetch current progress from server only once per processing book
+    if (!initialProgressFetched.current) {
+      initialProgressFetched.current = true;
+      processingBooks.forEach(async (book) => {
+        try {
+          const res = await fetch(`/api/book/${book.uuid}/status`);
+          if (res.ok) {
+            const data = await res.json() as { status: string; progress?: { phase: string; chaptersCompleted: number; chaptersTotal: number } };
+            if (data.progress) {
+              setTranslationProgress(prev => {
+                const next = new Map(prev);
+                next.set(book.uuid, data.progress!);
+                return next;
+              });
+            }
+          }
+        } catch { /* ignore */ }
+      });
     }
+
+    // Drive translation immediately, then every 3s
+    pollProcessingBooks();
+    const interval = setInterval(pollProcessingBooks, 3000);
+    return () => clearInterval(interval);
   }, [books, pollProcessingBooks]);
 
   const handleFileSelect = async (file: File) => {
@@ -281,7 +323,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                 key={book.uuid}
                 className={`book-spine-wrapper ${isProcessing ? 'processing' : ''}`}
                 onMouseEnter={() => setHoveredBook(book)}
-                onMouseLeave={() => setHoveredBook(null)}
+                onMouseLeave={() => {}}
                 onClick={() => { if (!isProcessing) onSelectBook(book.uuid); }}
               >
                 <div className="book-spine-container">
@@ -342,7 +384,21 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
               {hoveredBook.status === 'processing' ? (
                 <div className="book-status-processing">
                   <div className="processing-spinner"></div>
-                  <span>Translating...</span>
+                  {(() => {
+                    const tp = translationProgress.get(hoveredBook.uuid);
+                    if (tp && tp.chaptersTotal > 0) {
+                      const pct = Math.round((tp.chaptersCompleted / tp.chaptersTotal) * 100);
+                      return (
+                        <>
+                          <span>Translating... {tp.chaptersCompleted}/{tp.chaptersTotal} chapters ({pct}%)</span>
+                          <div className="translation-progress-bar">
+                            <div className="translation-progress-fill" style={{ width: `${pct}%` }}></div>
+                          </div>
+                        </>
+                      );
+                    }
+                    return <span>{tp?.phase === 'glossary' ? 'Extracting glossary...' : 'Translating...'}</span>;
+                  })()}
                 </div>
               ) : hoveredBook.status === 'error' ? (
                 <div className="book-status-error">
@@ -359,8 +415,8 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                     : 'Not started';
                 return (
                   <>
-                    {/* Progress bar - always show if user is logged in */}
-                    {user && (
+                    {/* Progress bar - show only for ready books */}
+                    {user && hoveredBook.status !== 'processing' && (
                       <div className="progress-section">
                         <div className="progress-bar">
                           <div 
