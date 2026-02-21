@@ -5,7 +5,7 @@
 import { Env, User } from './types';
 
 // Welcome bonus credits for new users
-export const WELCOME_BONUS_CREDITS = 1000;
+export const WELCOME_BONUS_CREDITS = 5000;
 
 export function generateSessionToken(): string {
   const array = new Uint8Array(32);
