@@ -148,6 +148,29 @@ export async function handleBookUpload(
       bookData.chapters.length
     );
 
+    // Generate cover images in background (non-blocking)
+    if (env.GEMINI_API_KEY && env.ASSETS_BUCKET) {
+      ctx.waitUntil(
+        (async () => {
+          try {
+            const { generateBookCovers } = await import('./cover-generator');
+            const covers = await generateBookCovers(
+              env.GEMINI_API_KEY!,
+              env.ASSETS_BUCKET,
+              bookData.title,
+              bookData.author
+            );
+            await env.DB.prepare(
+              'UPDATE books_v2 SET book_cover_img_url = ?, book_spine_img_url = ? WHERE uuid = ?'
+            ).bind(covers.coverUrl, covers.spineUrl, bookUuid).run();
+            console.log(`Cover generated for ${bookUuid}: ${covers.coverUrl}`);
+          } catch (err) {
+            console.warn(`Cover generation failed for ${bookUuid}:`, err);
+          }
+        })()
+      );
+    }
+
     return new Response(
       JSON.stringify({
         success: true,

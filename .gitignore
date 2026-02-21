@@ -75,3 +75,6 @@ database/migration_scripts
 exports
 epubs
 .ovid_glossary*.json
+-e 
+# Cover generation temp files
+.tmp_covers/

@@ -14,6 +14,10 @@ binding = "DB"
 database_name = "ovid-db"
 database_id = "df1769fb-c23b-4151-85cc-0e00ed591f2b"
 
+[[r2_buckets]]
+binding = "ASSETS_BUCKET"
+bucket_name = "ovid"
+
 [vars]
 APP_URL = "https://lib.jrd.pub"
 
@@ -29,6 +33,11 @@ name = "ovid-staging"
 binding = "DB"
 database_name = "ovid-db"
 database_id = "df1769fb-c23b-4151-85cc-0e00ed591f2b"
+
+[[env.staging.r2_buckets]]
+binding = "ASSETS_BUCKET"
+bucket_name = "ovid"
+
 
 [env.staging.vars]
 APP_URL = "https://staging.lib.jrd.pub"
