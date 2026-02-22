@@ -778,35 +778,165 @@
     padding-top: 500px;
   }
 
+  .book-spine-container {
+    min-width: 44px;
+    touch-action: manipulation;
+  }
+
+  /* Hide desktop sidebar */
   .book-preview-sidebar {
     display: none;
   }
 
-  /* Mobile auth button positioning */
-  .user-auth-container {
-    padding: 15px 20px 20px;
+  /* Mobile floating auth button */
+  .mobile-auth-floating {
+    position: fixed;
+    bottom: 20px;
+    left: 20px;
+    z-index: 500;
+    display: flex;
+    align-items: center;
+    gap: 10px;
   }
 
-  .google-login-btn {
-    padding: 8px 16px;
+  .mobile-auth-floating .google-login-btn {
+    padding: 10px 16px;
     font-size: 13px;
+    border-radius: 50%;
+    width: 48px;
+    height: 48px;
+    justify-content: center;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
   }
 
-  .google-login-btn span {
+  .mobile-auth-floating .google-login-btn span {
     display: none;
   }
 
-  .google-login-btn .google-icon {
-    margin: 0;
+  .mobile-auth-floating .user-avatar-btn {
+    width: 48px;
+    height: 48px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
   }
 
-  .user-avatar-btn {
-    width: 38px;
-    height: 38px;
+  .mobile-auth-floating .upload-book-btn-icon {
+    width: 48px;
+    height: 48px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
   }
 
-  .user-dropdown {
-    min-width: 180px;
+  .mobile-auth-floating .user-dropdown {
+    bottom: 58px;
+    left: 0;
+    right: auto;
+  }
+
+  /* Hide desktop auth container on mobile */
+  .user-auth-container {
+    display: none;
+  }
+
+  /* Mobile bottom sheet */
+  .mobile-book-sheet-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.6);
+    z-index: 1000;
+    animation: fadeIn 0.2s ease;
+  }
+
+  .mobile-book-sheet {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: #1a1a1a;
+    border-radius: 20px 20px 0 0;
+    z-index: 1001;
+    max-height: 70vh;
+    overflow-y: auto;
+    animation: slideUp 0.3s ease;
+    padding: 20px;
+    padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .mobile-book-sheet .sheet-handle {
+    width: 40px;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.3);
+    border-radius: 2px;
+    margin: 0 auto 20px;
+  }
+
+  .mobile-book-sheet .sheet-cover {
+    width: 120px;
+    height: auto;
+    max-height: 180px;
+    border-radius: 8px;
+    margin: 0 auto 16px;
+    display: block;
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
+    object-fit: contain;
+  }
+
+  .mobile-book-sheet .sheet-title {
+    color: white;
+    font-size: 1.4rem;
+    font-weight: 400;
+    text-align: center;
+    margin: 0 0 6px 0;
+  }
+
+  .mobile-book-sheet .sheet-translated-title {
+    color: #aaa;
+    font-size: 1rem;
+    font-style: italic;
+    text-align: center;
+    margin: 0 0 8px 0;
+  }
+
+  .mobile-book-sheet .sheet-author {
+    color: #888;
+    font-size: 0.9rem;
+    text-align: center;
+    margin: 0 0 20px 0;
+  }
+
+  .mobile-book-sheet .sheet-read-btn {
+    display: block;
+    width: 100%;
+    padding: 14px;
+    background: white;
+    color: #1a1a1a;
+    border: none;
+    border-radius: 12px;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    margin-bottom: 10px;
+    touch-action: manipulation;
+  }
+
+  .mobile-book-sheet .sheet-read-btn:active {
+    opacity: 0.8;
+  }
+
+  .mobile-book-sheet .sheet-status {
+    text-align: center;
+    color: #aaa;
+    font-size: 0.9rem;
+    padding: 14px;
+  }
+
+  .mobile-book-sheet .remove-book-btn {
+    margin-top: 8px;
+  }
+
+  .mobile-book-sheet .progress-section {
+    margin-bottom: 16px;
   }
 }
 
