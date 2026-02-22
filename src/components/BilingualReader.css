@@ -221,30 +221,6 @@
   transform: scale(0.95);
 }
 
-@media (max-width: 768px) {
-  .bilingual-reader {
-    padding: 10px;
-  }
-
-  .reader-content {
-    padding: 20px;
-  }
-
-  .reader-title {
-    font-size: 2em;
-  }
-
-  .paragraph {
-    font-size: 1.1em;
-    padding: 15px;
-  }
-
-  .fab-container {
-    bottom: 15px;
-    right: 15px;
-  }
-}
-
 .chinese-text {
   font-weight: 400;
 }
@@ -502,42 +478,57 @@ h3.chapter-text {
 
 @media (max-width: 768px) {
   .bilingual-reader {
-    padding: 10px;
+    padding: 16px 20px;
+    touch-action: manipulation;
   }
 
   .reader-content {
-    padding: 20px;
+    padding: 0;
   }
 
   .reader-title {
-    font-size: 2em;
+    font-size: 1.6em;
   }
 
   .paragraph {
-    font-size: 1.1em;
-    padding: 15px;
+    font-size: 1em;
+    padding: 0;
   }
 
   .fab-container {
-    bottom: 15px;
-    right: 15px;
+    bottom: 20px;
+    right: 16px;
+  }
+
+  .fab {
+    width: 44px;
+    height: 44px;
+  }
+
+  .fab-menu {
+    min-width: unset;
+    width: calc(100vw - 32px);
+    right: -16px;
+    max-height: 60vh;
   }
 
   .chapter-navigation-top {
-    margin-bottom: 30px;
-    padding-bottom: 15px;
-    justify-content: center;
+    margin-bottom: 24px;
+    padding-bottom: 12px;
+    justify-content: flex-start;
   }
 
   .chapter-navigation-bottom {
     margin-top: 30px;
-    padding-top: 30px;
-    justify-content: center;
+    padding-top: 24px;
+    justify-content: flex-end;
   }
 
   .nav-button {
     font-size: 36px;
     padding: 12px;
+    min-width: 48px;
+    min-height: 48px;
   }
 
   .chapters-content {
@@ -551,8 +542,9 @@ h3.chapter-text {
   }
 
   .chapter-item {
-    padding: 12px;
+    padding: 14px 12px;
     gap: 12px;
+    min-height: 48px;
   }
 
   .chapter-number {

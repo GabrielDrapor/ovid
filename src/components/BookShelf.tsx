@@ -39,6 +39,8 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [hoveredBook, setHoveredBook] = useState<Book | null>(null);
+  const [mobileSelectedBook, setMobileSelectedBook] = useState<Book | null>(null);
+  const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showCreditsModal, setShowCreditsModal] = useState(false);
@@ -100,6 +102,12 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
   useEffect(() => {
     fetchBooks();
   }, [user]);
+
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth <= 768);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   // Drive translation for books that are still processing.
   // Each call to /translate-next translates a chunk of ~25 paragraphs,
@@ -322,9 +330,16 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
               <div
                 key={book.uuid}
                 className={`book-spine-wrapper ${isProcessing ? 'processing' : ''}`}
-                onMouseEnter={() => setHoveredBook(book)}
+                onMouseEnter={() => !isMobile && setHoveredBook(book)}
                 onMouseLeave={() => {}}
-                onClick={() => { if (!isProcessing) onSelectBook(book.uuid); }}
+                onClick={() => {
+                  if (isProcessing) return;
+                  if (isMobile) {
+                    setMobileSelectedBook(book);
+                  } else {
+                    onSelectBook(book.uuid);
+                  }
+                }}
               >
                 <div className="book-spine-container">
                   {book.book_spine_img_url ? (
@@ -512,6 +527,136 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
           )}
         </div>
       </div>
+
+      {/* Mobile floating auth */}
+      {isMobile && (
+        <div className="mobile-auth-floating">
+          {userLoading ? null : user ? (
+            <>
+              <button
+                className="user-avatar-btn"
+                onClick={() => setShowUserMenu(!showUserMenu)}
+              >
+                {user.picture ? (
+                  <img src={user.picture} alt={user.name} className="user-avatar" />
+                ) : (
+                  <div className="user-avatar-placeholder">
+                    {user.name?.charAt(0) || user.email.charAt(0)}
+                  </div>
+                )}
+              </button>
+              <button
+                className="upload-book-btn-icon"
+                onClick={() => setShowUploadModal(true)}
+                title="Upload Book"
+              >
+                <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                  <polyline points="17 8 12 3 7 8"/>
+                  <line x1="12" y1="3" x2="12" y2="15"/>
+                </svg>
+              </button>
+              {showUserMenu && (
+                <div className="user-dropdown">
+                  <div className="user-info">
+                    <span className="user-name">{user.name}</span>
+                    <span className="user-email">{user.email}</span>
+                  </div>
+                  <div className="user-credits">
+                    <span className="credits-label">Credits</span>
+                    <span className="credits-amount">{credits?.toLocaleString() ?? '...'}</span>
+                  </div>
+                  <button className="buy-credits-btn" onClick={() => { setShowUserMenu(false); setShowCreditsModal(true); }}>
+                    Buy Credits
+                  </button>
+                  <button className="logout-btn" onClick={logout}>
+                    Logout
+                  </button>
+                </div>
+              )}
+            </>
+          ) : (
+            <button className="google-login-btn" onClick={login}>
+              <svg className="google-icon" viewBox="0 0 24 24" width="18" height="18">
+                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+              </svg>
+              <span>Sign in</span>
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Mobile book bottom sheet */}
+      {isMobile && mobileSelectedBook && (
+        <>
+          <div className="mobile-book-sheet-overlay" onClick={() => setMobileSelectedBook(null)} />
+          <div className="mobile-book-sheet">
+            <div className="sheet-handle" />
+            {mobileSelectedBook.book_cover_img_url && (
+              <img src={mobileSelectedBook.book_cover_img_url} alt={mobileSelectedBook.title} className="sheet-cover" />
+            )}
+            <h2 className="sheet-title">{mobileSelectedBook.original_title || mobileSelectedBook.title}</h2>
+            {mobileSelectedBook.original_title && mobileSelectedBook.title !== mobileSelectedBook.original_title && (
+              <p className="sheet-translated-title">{mobileSelectedBook.title}</p>
+            )}
+            <p className="sheet-author">By {mobileSelectedBook.author}</p>
+
+            {(() => {
+              const progress = bookProgressMap.get(mobileSelectedBook.uuid);
+              const progressPercent = progress?.is_completed ? 100 : (progress?.reading_progress || 0);
+              const statusText = progress?.is_completed
+                ? '✓ Completed'
+                : progressPercent > 0
+                  ? `${progressPercent}% read`
+                  : 'Not started';
+              return user && mobileSelectedBook.status !== 'processing' ? (
+                <div className="progress-section">
+                  <div className="progress-bar">
+                    <div className="progress-fill" style={{ width: `${progressPercent}%` }}></div>
+                  </div>
+                  <span className="progress-text">{statusText}</span>
+                </div>
+              ) : null;
+            })()}
+
+            {mobileSelectedBook.status === 'processing' ? (
+              <div className="sheet-status">
+                <div className="processing-spinner" style={{ margin: '0 auto 8px' }}></div>
+                {(() => {
+                  const tp = translationProgress.get(mobileSelectedBook.uuid);
+                  if (tp && tp.chaptersTotal > 0) {
+                    const pct = Math.round((tp.chaptersCompleted / tp.chaptersTotal) * 100);
+                    return <span>Translating... {tp.chaptersCompleted}/{tp.chaptersTotal} chapters ({pct}%)</span>;
+                  }
+                  return <span>Translating...</span>;
+                })()}
+              </div>
+            ) : mobileSelectedBook.status === 'error' ? (
+              <div className="sheet-status" style={{ color: '#ff6b6b' }}>Translation failed</div>
+            ) : (
+              <button className="sheet-read-btn" onClick={() => { setMobileSelectedBook(null); onSelectBook(mobileSelectedBook.uuid); }}>
+                Read
+              </button>
+            )}
+
+            {mobileSelectedBook.user_id && (
+              <button
+                className="remove-book-btn"
+                onClick={(e) => { e.stopPropagation(); handleDeleteBook(mobileSelectedBook.uuid); setMobileSelectedBook(null); }}
+              >
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="3 6 5 6 21 6"/>
+                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                </svg>
+                <span>Remove</span>
+              </button>
+            )}
+          </div>
+        </>
+      )}
 
       {/* Upload Modal */}
       {showUploadModal && (
