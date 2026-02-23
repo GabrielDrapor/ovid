@@ -103,9 +103,9 @@ app.get('/status/:uuid', async (c) => {
 });
 
 const port = parseInt(process.env.PORT || '3000');
-console.log(`🚀 Ovid Translator Service starting on port ${port}`);
 
-export default {
-  port,
-  fetch: app.fetch,
-};
+import { serve } from '@hono/node-server';
+
+serve({ fetch: app.fetch, port }, () => {
+  console.log(`🚀 Ovid Translator Service running on port ${port}`);
+});
