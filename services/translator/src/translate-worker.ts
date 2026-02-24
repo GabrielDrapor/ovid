@@ -323,34 +323,40 @@ export async function translateBook(
       // Resume from offset if partially done
       const startOffset = (chNum === startChapter && job.current_item_offset > 0) ? job.current_item_offset : 0;
 
-      // Translate text nodes
-      for (let i = startOffset; i < textNodes.length; i++) {
-        const node = textNodes[i];
-        try {
-          const translated = await translateText(
-            llmConfig, node.text, glossary,
-            job.source_language, job.target_language
-          );
+      // Translate text nodes in parallel batches of CONCURRENCY
+      const CONCURRENCY = 5;
+      for (let i = startOffset; i < textNodes.length; i += CONCURRENCY) {
+        const batch = textNodes.slice(i, i + CONCURRENCY);
+        const results = await Promise.allSettled(
+          batch.map(async (node) => {
+            try {
+              const translated = await translateText(
+                llmConfig, node.text, glossary,
+                job.source_language, job.target_language
+              );
+              return { node, translated, ok: true as const };
+            } catch (err) {
+              console.warn(`[${bookUuid}] Node ${node.xpath} failed:`, err);
+              return { node, translated: '[Translation pending]', ok: false as const };
+            }
+          })
+        );
 
+        // Write all results to DB
+        for (const result of results) {
+          const { node, translated } = result.status === 'fulfilled' ? result.value : { node: null, translated: '[Translation pending]' };
+          if (!node) continue;
           await db.run(
             `INSERT OR REPLACE INTO translations_v2 (chapter_id, xpath, original_text, original_html, translated_text, order_index) VALUES (?, ?, ?, ?, ?, ?)`,
             [chapterRow.id, node.xpath, node.text, node.html, translated, node.orderIndex]
           );
-        } catch (err) {
-          console.warn(`[${bookUuid}] Node ${node.xpath} failed:`, err);
-          await db.run(
-            `INSERT OR REPLACE INTO translations_v2 (chapter_id, xpath, original_text, original_html, translated_text, order_index) VALUES (?, ?, ?, ?, ?, ?)`,
-            [chapterRow.id, node.xpath, node.text, node.html, '[Translation pending]', node.orderIndex]
-          );
         }
 
-        // Update offset every 10 items for resume capability
-        if (i % 10 === 0) {
-          await db.run(
-            'UPDATE translation_jobs SET current_item_offset = ?, updated_at = CURRENT_TIMESTAMP WHERE book_uuid = ?',
-            [i, bookUuid]
-          );
-        }
+        // Update offset for resume capability
+        await db.run(
+          'UPDATE translation_jobs SET current_item_offset = ?, updated_at = CURRENT_TIMESTAMP WHERE book_uuid = ?',
+          [Math.min(i + CONCURRENCY, textNodes.length), bookUuid]
+        );
       }
 
       // Translate chapter title
