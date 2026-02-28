@@ -435,6 +435,9 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
           margin: 0 0 0.8em 0;
           text-indent: 0;
         }
+        .reader-content-v2 * {
+          line-height: inherit !important;
+        }
       `}} />
 
       <main
