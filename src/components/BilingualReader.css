@@ -478,7 +478,7 @@ h3.chapter-text {
 
 @media (max-width: 768px) {
   .bilingual-reader {
-    padding: 16px 20px;
+    padding: 16px 16px 80px 16px;
     touch-action: manipulation;
   }
 
@@ -501,8 +501,15 @@ h3.chapter-text {
   }
 
   .fab {
-    width: 44px;
-    height: 44px;
+    width: 36px;
+    height: 36px;
+    opacity: 0.35;
+    transition: opacity 0.3s ease;
+  }
+
+  .fab:active,
+  .fab-container:has(.fab-menu) .fab {
+    opacity: 1;
   }
 
   .fab-menu {
