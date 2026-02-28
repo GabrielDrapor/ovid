@@ -72,6 +72,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
   const [fontWeight, setFontWeight] = useState(450);
   const [isMarkingComplete, setIsMarkingComplete] = useState(false);
   const [markCompleteError, setMarkCompleteError] = useState<string | null>(null);
+  const [isTypographyOpen, setIsTypographyOpen] = useState(false);
 
   // Store element references for toggling
   // originalHtml preserves formatting (innerHTML), translated is plain text
@@ -352,18 +353,6 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
 
   const toggleMenu = () => setIsMenuOpen(!isMenuOpen);
 
-  const showAllOriginal = () => {
-    setShowOriginal(true);
-    updateAllElements(true);
-    setIsMenuOpen(false);
-  };
-
-  const showAllTranslated = () => {
-    setShowOriginal(false);
-    updateAllElements(false);
-    setIsMenuOpen(false);
-  };
-
   const adjustParagraphSpacing = (delta: number) => {
     setParagraphSpacing((prev) => Math.max(0, Math.min(50, prev + delta)));
   };
@@ -491,23 +480,39 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
       </main>
 
       <div className="fab-container">
+        {/* Backdrop for mobile bottom sheet */}
+        {isMenuOpen && (
+          <div className="fab-backdrop" onClick={() => { setIsMenuOpen(false); setIsTypographyOpen(false); }} />
+        )}
         <button className="fab" onClick={toggleMenu} aria-label="Menu">
           <span className="fab-dots"></span>
         </button>
         {isMenuOpen && (
           <div className="fab-menu">
-            {onBackToShelf && (
-              <div className="fab-menu-section">
-                <button className="fab-menu-item" onClick={onBackToShelf}>
-                  Back to Shelf
+            {/* Quick actions row */}
+            <div className="fab-quick-actions">
+              {onBackToShelf && (
+                <button className="fab-quick-btn" onClick={onBackToShelf} title="Back to Shelf">
+                  ←
                 </button>
-              </div>
-            )}
-
-            {onMarkComplete && (
-              <div className="fab-menu-section">
-                <button 
-                  className={`fab-menu-item ${isCompleted ? 'completed' : ''}`}
+              )}
+              <button
+                className={`fab-quick-btn fab-lang-toggle ${!showOriginal ? 'active' : ''}`}
+                onClick={() => {
+                  const next = !showOriginal;
+                  setShowOriginal(next);
+                  updateAllElements(next);
+                }}
+                title={showOriginal ? 'Switch to Translation' : 'Switch to Original'}
+              >
+                {showOriginal ? '译' : 'A'}
+              </button>
+              <button className="fab-quick-btn" onClick={() => { setIsChaptersOpen(true); setIsMenuOpen(false); }} title="Contents">
+                ☰
+              </button>
+              {onMarkComplete && (
+                <button
+                  className={`fab-quick-btn ${isCompleted ? 'fab-completed' : ''}`}
                   onClick={async () => {
                     setIsMarkingComplete(true);
                     setMarkCompleteError(null);
@@ -516,141 +521,76 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
                     } catch (err) {
                       const errorMsg = err instanceof Error ? err.message : String(err);
                       setMarkCompleteError(errorMsg);
-                      console.error('Error marking book complete:', err);
                     } finally {
                       setIsMarkingComplete(false);
                     }
                   }}
                   disabled={isMarkingComplete}
-                  title={markCompleteError || undefined}
+                  title={isCompleted ? 'Completed' : 'Mark as Complete'}
                 >
-                  {isMarkingComplete 
-                    ? '...' 
-                    : (isCompleted ? '✓ Completed' : 'Mark as Complete')}
+                  {isMarkingComplete ? '…' : '✓'}
                 </button>
-                {markCompleteError && (
-                  <div style={{ fontSize: '12px', color: '#d32f2f', marginTop: '4px' }}>
-                    {markCompleteError}
-                  </div>
-                )}
-              </div>
+              )}
+            </div>
+
+            {markCompleteError && (
+              <div className="fab-error">{markCompleteError}</div>
             )}
 
+            {/* Typography section - collapsible */}
             <div className="fab-menu-section">
-              <div className="fab-menu-header">Navigation</div>
-              <button className="fab-menu-item" onClick={() => setIsChaptersOpen(true)}>
-                Contents
+              <button
+                className="fab-section-toggle"
+                onClick={() => setIsTypographyOpen(!isTypographyOpen)}
+              >
+                <span>Typography</span>
+                <span className={`fab-chevron ${isTypographyOpen ? 'open' : ''}`}>›</span>
               </button>
-            </div>
 
-            <div className="fab-menu-section">
-              <div className="fab-menu-header">Language</div>
-              <button className="fab-menu-item" onClick={showAllOriginal}>
-                Show All Original
-              </button>
-              <button className="fab-menu-item" onClick={showAllTranslated}>
-                Show All Translated
-              </button>
-            </div>
-
-            <div className="fab-menu-section">
-              <div className="fab-menu-header">
-                Paragraph Spacing: {paragraphSpacing}px
-              </div>
-              <div className="fab-menu-controls">
-                <button
-                  className="fab-control-btn"
-                  onClick={() => adjustParagraphSpacing(-5)}
-                >
-                  -
-                </button>
-                <button
-                  className="fab-control-btn"
-                  onClick={() => adjustParagraphSpacing(5)}
-                >
-                  +
-                </button>
-              </div>
-            </div>
-
-            <div className="fab-menu-section">
-              <div className="fab-menu-header">
-                Line Height: {lineHeight.toFixed(1)}
-              </div>
-              <div className="fab-menu-controls">
-                <button
-                  className="fab-control-btn"
-                  onClick={() => adjustLineHeight(-0.1)}
-                >
-                  -
-                </button>
-                <button
-                  className="fab-control-btn"
-                  onClick={() => adjustLineHeight(0.1)}
-                >
-                  +
-                </button>
-              </div>
-            </div>
-
-            <div className="fab-menu-section">
-              <div className="fab-menu-header">
-                Letter Spacing: {letterSpacing.toFixed(2)}em
-              </div>
-              <div className="fab-menu-controls">
-                <button
-                  className="fab-control-btn"
-                  onClick={() => adjustLetterSpacing(-0.01)}
-                >
-                  -
-                </button>
-                <button
-                  className="fab-control-btn"
-                  onClick={() => adjustLetterSpacing(0.01)}
-                >
-                  +
-                </button>
-              </div>
-            </div>
-
-            <div className="fab-menu-section">
-              <div className="fab-menu-header">
-                Word Spacing: {wordSpacing.toFixed(2)}em
-              </div>
-              <div className="fab-menu-controls">
-                <button
-                  className="fab-control-btn"
-                  onClick={() => adjustWordSpacing(-0.01)}
-                >
-                  -
-                </button>
-                <button
-                  className="fab-control-btn"
-                  onClick={() => adjustWordSpacing(0.01)}
-                >
-                  +
-                </button>
-              </div>
-            </div>
-
-            <div className="fab-menu-section">
-              <div className="fab-menu-header">
-                Font Weight: {fontWeight}
-              </div>
-              <div className="fab-menu-controls">
-                <button
-                  className="fab-control-btn"
-                  onClick={() => adjustFontWeight(-10)}
-                >
-                  -
-                </button>
-                <button
-                  className="fab-control-btn"
-                  onClick={() => adjustFontWeight(10)}
-                >
-                  +
-                </button>
-              </div>
+              {isTypographyOpen && (
+                <div className="fab-typography-panel">
+                  <div className="fab-typo-row">
+                    <span className="fab-typo-label">Paragraph</span>
+                    <div className="fab-menu-controls">
+                      <button className="fab-control-btn" onClick={() => adjustParagraphSpacing(-5)}>-</button>
+                      <span className="fab-typo-value">{paragraphSpacing}</span>
+                      <button className="fab-control-btn" onClick={() => adjustParagraphSpacing(5)}>+</button>
+                    </div>
+                  </div>
+                  <div className="fab-typo-row">
+                    <span className="fab-typo-label">Line Height</span>
+                    <div className="fab-menu-controls">
+                      <button className="fab-control-btn" onClick={() => adjustLineHeight(-0.1)}>-</button>
+                      <span className="fab-typo-value">{lineHeight.toFixed(1)}</span>
+                      <button className="fab-control-btn" onClick={() => adjustLineHeight(0.1)}>+</button>
+                    </div>
+                  </div>
+                  <div className="fab-typo-row">
+                    <span className="fab-typo-label">Letter</span>
+                    <div className="fab-menu-controls">
+                      <button className="fab-control-btn" onClick={() => adjustLetterSpacing(-0.01)}>-</button>
+                      <span className="fab-typo-value">{letterSpacing.toFixed(2)}</span>
+                      <button className="fab-control-btn" onClick={() => adjustLetterSpacing(0.01)}>+</button>
+                    </div>
+                  </div>
+                  <div className="fab-typo-row">
+                    <span className="fab-typo-label">Word</span>
+                    <div className="fab-menu-controls">
+                      <button className="fab-control-btn" onClick={() => adjustWordSpacing(-0.01)}>-</button>
+                      <span className="fab-typo-value">{wordSpacing.toFixed(2)}</span>
+                      <button className="fab-control-btn" onClick={() => adjustWordSpacing(0.01)}>+</button>
+                    </div>
+                  </div>
+                  <div className="fab-typo-row">
+                    <span className="fab-typo-label">Weight</span>
+                    <div className="fab-menu-controls">
+                      <button className="fab-control-btn" onClick={() => adjustFontWeight(-10)}>-</button>
+                      <span className="fab-typo-value">{fontWeight}</span>
+                      <button className="fab-control-btn" onClick={() => adjustFontWeight(10)}>+</button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}

@@ -136,89 +136,163 @@
   transform: scale(1.05);
 }
 
+.fab-backdrop {
+  display: none;
+}
+
 .fab-menu {
   position: absolute;
-  bottom: 60px;
+  bottom: 46px;
   right: 0;
   background-color: white;
   border-radius: 12px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
-  padding: 16px 0;
-  min-width: 220px;
+  padding: 12px;
+  min-width: 240px;
   max-height: 70vh;
   overflow-y: auto;
   border: 1px solid #e0e0e0;
 }
 
-.fab-menu-section {
-  margin-bottom: 16px;
-  padding: 0 16px;
+/* Quick actions: icon row */
+.fab-quick-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  padding-bottom: 10px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid #eee;
 }
 
-.fab-menu-section:last-child {
-  margin-bottom: 0;
+.fab-quick-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: #f5f5f5;
+  border: 1px solid #e0e0e0;
+  cursor: pointer;
+  font-size: 16px;
+  color: #333;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
 }
 
-.fab-menu-header {
+.fab-quick-btn:hover {
+  background: #eee;
+}
+
+.fab-quick-btn:active {
+  transform: scale(0.93);
+}
+
+.fab-lang-toggle.active {
+  background: #333;
+  color: white;
+  border-color: #333;
+}
+
+.fab-completed {
+  color: #4ade80;
+  border-color: #4ade80;
+}
+
+.fab-error {
+  font-size: 12px;
+  color: #d32f2f;
+  padding: 0 4px 8px;
+}
+
+/* Collapsible section toggle */
+.fab-section-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 6px 2px;
   font-size: 12px;
   font-weight: 600;
   color: #666;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  margin-bottom: 8px;
-  padding: 0 2px;
 }
 
-.fab-menu-item {
-  display: block;
-  width: 100%;
-  padding: 10px 12px;
-  margin: 2px 0;
-  background: none;
-  border: none;
-  text-align: left;
-  cursor: pointer;
-  font-size: 14px;
+.fab-section-toggle:hover {
   color: #333;
-  border-radius: 6px;
-  transition: all 0.2s ease;
 }
 
-.fab-menu-item:hover {
-  background-color: #f8f9fa;
-  color: #000;
+.fab-chevron {
+  transition: transform 0.2s ease;
+  font-size: 14px;
+}
+
+.fab-chevron.open {
+  transform: rotate(90deg);
+}
+
+/* Typography panel */
+.fab-typography-panel {
+  padding-top: 8px;
+}
+
+.fab-typo-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 0;
+}
+
+.fab-typo-label {
+  font-size: 13px;
+  color: #555;
+  flex-shrink: 0;
+  min-width: 70px;
+}
+
+.fab-typo-value {
+  font-size: 12px;
+  color: #888;
+  min-width: 40px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.fab-menu-section {
+  padding: 0;
 }
 
 .fab-menu-controls {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 0 2px;
+  gap: 6px;
 }
 
 .fab-control-btn {
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   border-radius: 50%;
   background-color: #f0f0f0;
   border: 1px solid #ddd;
   cursor: pointer;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: bold;
   color: #333;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.2s ease;
+  transition: all 0.15s ease;
 }
 
 .fab-control-btn:hover {
   background-color: #e0e0e0;
-  transform: scale(1.05);
 }
 
 .fab-control-btn:active {
-  transform: scale(0.95);
+  transform: scale(0.9);
 }
 
 .chinese-text {
@@ -512,11 +586,34 @@ h3.chapter-text {
     opacity: 1;
   }
 
+  /* Mobile: bottom sheet style */
+  .fab-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.3);
+    z-index: 999;
+  }
+
   .fab-menu {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    width: 100%;
     min-width: unset;
-    width: calc(100vw - 32px);
-    right: -16px;
-    max-height: 60vh;
+    max-height: 65vh;
+    border-radius: 16px 16px 0 0;
+    padding: 16px 20px calc(env(safe-area-inset-bottom, 12px) + 12px);
+    z-index: 1000;
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.15);
+  }
+
+  .fab-quick-btn {
+    width: 48px;
+    height: 48px;
+    font-size: 18px;
+    border-radius: 12px;
   }
 
   .chapter-navigation-top {
@@ -583,8 +680,4 @@ sup:hover {
   color: #007bff;
 }
 
-/* Mark Complete button in menu */
-.fab-menu-item.completed {
-  color: #4ade80;
-  font-weight: 600;
-}
+/* (removed - completed style now in .fab-completed) */
