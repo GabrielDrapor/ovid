@@ -1,11 +1,3 @@
-@font-face {
-  font-family: 'LXGW Neo ZhiSong Screen';
-  src: url('/fonts/LXGWNeoZhiSongScreen.woff2') format('woff2');
-  font-weight: normal;
-  font-style: normal;
-  font-display: swap;
-}
-
 body {
   margin: 0;
   font-family:

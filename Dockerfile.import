@@ -1,0 +1,25 @@
+FROM node:22-slim
+
+WORKDIR /app
+
+# Install yarn
+RUN corepack enable && corepack prepare yarn@1.22.22 --activate
+
+# Copy package files first for layer caching
+COPY package.json yarn.lock ./
+
+# Install dependencies
+RUN yarn install --frozen-lockfile
+
+# Copy source
+COPY . .
+
+# Wrangler config dir (writable)
+ENV XDG_CONFIG_HOME=/app/.wrangler_cfg
+
+# Default: run import then sync
+# Override CMD via Railway to run specific books
+# Example:
+#   yarn import-book --file="/books/mybook.epub" --target="zh" && \
+#   yarn sync-remote-book --uuid="<uuid>" --apply=remote
+CMD ["echo", "Specify a command via Railway service settings"]
