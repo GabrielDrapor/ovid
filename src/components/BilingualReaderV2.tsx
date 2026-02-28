@@ -412,6 +412,14 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
           text-align: justify;
           -webkit-hyphens: auto;
           hyphens: auto;
+          overflow-wrap: break-word;
+          word-break: break-word;
+        }
+        @media (max-width: 768px) {
+          .reader-content-v2 {
+            font-size: 17px;
+            text-align: left;
+          }
         }
         .reader-content-v2 [data-bilingual] {
           cursor: pointer;
@@ -423,6 +431,14 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
         .reader-content-v2 p {
           margin: 0 0 0.8em 0;
           text-indent: 0;
+        }
+        .reader-content-v2 h1,
+        .reader-content-v2 h2,
+        .reader-content-v2 h3,
+        .reader-content-v2 h4 {
+          text-indent: 0 !important;
+          margin-left: 0 !important;
+          text-align: left !important;
         }
         .reader-content-v2 * {
           line-height: inherit !important;
