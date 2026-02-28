@@ -411,7 +411,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
       <style dangerouslySetInnerHTML={{ __html: `
         .reader-content-v2,
         .reader-content-v2 * {
-          font-family: "LXGW Neo ZhiSong Screen", "Literata", "New York", ui-serif, "Times New Roman", Times, serif !important;
+          font-family: "Literata", "New York", ui-serif, "Times New Roman", Times, serif !important;
           -webkit-font-smoothing: antialiased;
           -moz-osx-font-smoothing: grayscale;
           text-rendering: optimizeLegibility;
