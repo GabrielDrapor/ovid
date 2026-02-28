@@ -225,7 +225,16 @@ export default {
               status: 401, headers: { 'Content-Type': 'application/json' },
             });
           }
-          await deleteBookV2(env.DB, deleteMatch[1]);
+          try {
+            await deleteBookV2(env.DB, deleteMatch[1], user.id);
+          } catch (e: any) {
+            if (e.message?.includes('Forbidden')) {
+              return new Response(JSON.stringify({ error: 'Forbidden' }), {
+                status: 403, headers: { 'Content-Type': 'application/json' },
+              });
+            }
+            throw e;
+          }
           return new Response(JSON.stringify({ success: true }), {
             headers: { 'Content-Type': 'application/json' },
           });

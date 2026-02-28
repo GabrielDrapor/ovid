@@ -2,6 +2,8 @@
 
 # dependencies
 /node_modules
+test-results/
+playwright-report/
 /.pnp
 .pnp.js
 
