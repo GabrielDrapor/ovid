@@ -217,13 +217,18 @@ export async function getChapterContentV2(
 /**
  * Delete a book and all its chapters/translations from V2 tables
  */
-export async function deleteBookV2(db: D1Database, bookUuid: string): Promise<void> {
-  const book = await db.prepare('SELECT id FROM books_v2 WHERE uuid = ?')
+export async function deleteBookV2(db: D1Database, bookUuid: string, userId: number): Promise<void> {
+  const book = await db.prepare('SELECT id, user_id FROM books_v2 WHERE uuid = ?')
     .bind(bookUuid)
     .first();
 
   if (!book) {
     throw new Error('Book not found');
+  }
+
+  // Only the owner can delete their book; public books (user_id IS NULL) cannot be deleted via API
+  if (book.user_id === null || book.user_id !== userId) {
+    throw new Error('Forbidden: you can only delete your own books');
   }
 
   const bookId = book.id as number;
