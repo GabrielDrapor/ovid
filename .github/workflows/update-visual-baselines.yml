@@ -3,6 +3,9 @@ name: Update Visual Baselines
 on:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   update-baselines:
     runs-on: ubuntu-latest
