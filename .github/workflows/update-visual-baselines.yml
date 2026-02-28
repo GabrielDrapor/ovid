@@ -1,0 +1,31 @@
+name: Update Visual Baselines
+
+on:
+  workflow_dispatch:
+
+jobs:
+  update-baselines:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+      - run: yarn install --frozen-lockfile
+      - run: npx playwright install --with-deps chromium
+      - run: yarn build
+        env:
+          CI: true
+      - run: yarn test:visual:update
+      - name: Commit updated baselines
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add tests/visual/__snapshots__/
+          if git diff --cached --quiet; then
+            echo "No baseline changes"
+          else
+            git commit -m "chore: update visual regression baselines"
+            git push
+          fi

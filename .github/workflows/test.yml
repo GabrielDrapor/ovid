@@ -17,3 +17,26 @@ jobs:
           cache: yarn
       - run: yarn install --frozen-lockfile
       - run: yarn test
+
+  visual-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+      - run: yarn install --frozen-lockfile
+      - run: npx playwright install --with-deps chromium
+      - run: yarn build
+        env:
+          CI: true
+      - run: yarn test:visual
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: visual-test-results
+          path: |
+            test-results/
+            playwright-report/
+          retention-days: 7
