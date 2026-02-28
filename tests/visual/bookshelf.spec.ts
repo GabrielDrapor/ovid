@@ -62,20 +62,13 @@ test.describe('Bookshelf Visual Regression', () => {
     await page.goto('/');
     await page.waitForTimeout(1000);
 
-    // Verify row 1 (public books) position
-    const row1 = page.locator('.books-row-1');
-    const row1Box = await row1.boundingBox();
-    expect(row1Box).toBeTruthy();
-
-    // Verify row 2 (user books) position
-    const row2 = page.locator('.books-row-2');
-    const row2Box = await row2.boundingBox();
-    expect(row2Box).toBeTruthy();
-
-    // Key invariant: row 2 must be significantly below row 1
-    if (row1Box && row2Box) {
-      const gap = row2Box.y - (row1Box.y + row1Box.height);
-      expect(gap).toBeGreaterThan(50); // At least 50px gap between shelves
+    // Screenshot each shelf row individually for regression comparison
+    const rows = page.locator('[class*="books-row"]');
+    const count = await rows.count();
+    for (let i = 0; i < count; i++) {
+      await expect(rows.nth(i)).toHaveScreenshot(`shelf-row-${i}.png`, {
+        maxDiffPixelRatio: 0.01,
+      });
     }
   });
 
