@@ -147,87 +147,67 @@
   background-color: white;
   border-radius: 12px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
-  padding: 12px;
-  min-width: 240px;
+  padding: 8px 0;
+  min-width: 200px;
   max-height: 70vh;
   overflow-y: auto;
   border: 1px solid #e0e0e0;
 }
 
-/* Quick actions: icon row */
-.fab-quick-actions {
-  display: flex;
-  gap: 8px;
-  justify-content: center;
-  padding-bottom: 10px;
-  margin-bottom: 10px;
-  border-bottom: 1px solid #eee;
-}
-
-.fab-quick-btn {
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
-  background: #f5f5f5;
-  border: 1px solid #e0e0e0;
-  cursor: pointer;
-  font-size: 16px;
-  color: #333;
+.fab-menu-item {
   display: flex;
   align-items: center;
-  justify-content: center;
-  transition: all 0.15s ease;
+  justify-content: space-between;
+  width: 100%;
+  padding: 10px 16px;
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  font-size: 14px;
+  color: #333;
+  transition: background-color 0.15s ease;
 }
 
-.fab-quick-btn:hover {
-  background: #eee;
+.fab-menu-item:hover {
+  background-color: #f5f5f5;
 }
 
-.fab-quick-btn:active {
-  transform: scale(0.93);
+.fab-menu-item:active {
+  background-color: #eee;
 }
 
-.fab-lang-toggle.active {
-  background: #333;
-  color: white;
-  border-color: #333;
-}
-
-.fab-completed {
+.fab-menu-item-completed {
   color: #4ade80;
-  border-color: #4ade80;
+}
+
+.fab-menu-item:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.fab-divider {
+  height: 1px;
+  background: #eee;
+  margin: 4px 0;
 }
 
 .fab-error {
   font-size: 12px;
   color: #d32f2f;
-  padding: 0 4px 8px;
+  padding: 4px 16px;
 }
 
 /* Collapsible section toggle */
 .fab-section-toggle {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: 6px 2px;
-  font-size: 12px;
-  font-weight: 600;
+  font-size: 14px;
   color: #666;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.fab-section-toggle:hover {
-  color: #333;
 }
 
 .fab-chevron {
   transition: transform 0.2s ease;
   font-size: 14px;
+  color: #999;
 }
 
 .fab-chevron.open {
@@ -236,14 +216,14 @@
 
 /* Typography panel */
 .fab-typography-panel {
-  padding-top: 8px;
+  padding: 4px 16px 8px;
 }
 
 .fab-typo-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 5px 0;
+  padding: 6px 0;
 }
 
 .fab-typo-label {
@@ -259,10 +239,6 @@
   min-width: 40px;
   text-align: center;
   font-variant-numeric: tabular-nums;
-}
-
-.fab-menu-section {
-  padding: 0;
 }
 
 .fab-menu-controls {
@@ -604,16 +580,15 @@ h3.chapter-text {
     min-width: unset;
     max-height: 65vh;
     border-radius: 16px 16px 0 0;
-    padding: 16px 20px calc(env(safe-area-inset-bottom, 12px) + 12px);
+    padding: 8px 0 calc(env(safe-area-inset-bottom, 12px) + 8px);
     z-index: 1000;
     box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.15);
   }
 
-  .fab-quick-btn {
-    width: 48px;
-    height: 48px;
-    font-size: 18px;
-    border-radius: 12px;
+  .fab-menu-item {
+    padding: 14px 20px;
+    font-size: 16px;
+    min-height: 48px;
   }
 
   .chapter-navigation-top {

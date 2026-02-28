@@ -95,11 +95,33 @@ function runWithFallback() {
     const db = new Database(dbPath);
     db.pragma('journal_mode = WAL');
 
-    // Split and execute statements
-    const statements = sqlToExecute
-      .split(';')
-      .map(s => s.trim())
-      .filter(s => s.length > 0);
+    // Split SQL statements respecting quoted strings
+    const statements = [];
+    let current = '';
+    let inSingleQuote = false;
+    for (let i = 0; i < sqlToExecute.length; i++) {
+      const ch = sqlToExecute[i];
+      if (ch === "'" && !inSingleQuote) {
+        inSingleQuote = true;
+        current += ch;
+      } else if (ch === "'" && inSingleQuote) {
+        // Check for escaped quote ''
+        if (i + 1 < sqlToExecute.length && sqlToExecute[i + 1] === "'") {
+          current += "''";
+          i++;
+        } else {
+          inSingleQuote = false;
+          current += ch;
+        }
+      } else if (ch === ';' && !inSingleQuote) {
+        const trimmed = current.trim();
+        if (trimmed.length > 0) statements.push(trimmed);
+        current = '';
+      } else {
+        current += ch;
+      }
+    }
+    if (current.trim().length > 0) statements.push(current.trim());
 
     console.log(`⚙️  Executing ${statements.length} SQL statement(s)...`);
 
