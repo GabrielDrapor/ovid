@@ -139,7 +139,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
       });
 
       // Set initial state and return early
-      updateAllElements(showOriginal);
+      updateAllElements(true);
       return;
     }
 
@@ -217,9 +217,9 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
       }
     }
 
-    // Set initial state
-    updateAllElements(showOriginal);
-  }, [translations, showOriginal]);
+    // Always initialize showing original; the separate showOriginal useEffect handles state sync
+    updateAllElements(true);
+  }, [translations]);
 
   /**
    * Toggle text in a specific element by xpath
