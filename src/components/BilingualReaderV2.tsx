@@ -522,7 +522,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
               {showOriginal ? 'Show Translation' : 'Show Original'}
             </button>
             <button className="fab-menu-item" onClick={() => { setIsChaptersOpen(true); setIsMenuOpen(false); }}>
-              Contents
+              Chapters
             </button>
             {onMarkComplete && (
               <button
