@@ -508,7 +508,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
             {/* Primary actions */}
             {onBackToShelf && (
               <button className="fab-menu-item" onClick={onBackToShelf}>
-                ← Back to Shelf
+                Back to Shelf
               </button>
             )}
             <button
@@ -519,7 +519,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
                 updateAllElements(next);
               }}
             >
-              {showOriginal ? '切换为译文' : '切换为原文'}
+              {showOriginal ? 'Show Translation' : 'Show Original'}
             </button>
             <button className="fab-menu-item" onClick={() => { setIsChaptersOpen(true); setIsMenuOpen(false); }}>
               Contents
