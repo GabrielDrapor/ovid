@@ -77,6 +77,7 @@ export default {
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
     await runMigration('chapters_v2_text_nodes', 'ALTER TABLE chapters_v2 ADD COLUMN text_nodes_json TEXT');
+    await runMigration('books_v2_display_order', 'ALTER TABLE books_v2 ADD COLUMN display_order INTEGER DEFAULT 0');
     await runMigration('create_user_book_progress', `CREATE TABLE IF NOT EXISTS user_book_progress (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id INTEGER NOT NULL,
