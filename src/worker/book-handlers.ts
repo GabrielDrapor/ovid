@@ -108,6 +108,56 @@ export async function handleBookUpload(
       `Translation: ${bookData.title || 'Book'}`
     );
 
+    // Upload EPUB images to R2 and build rewrite map
+    const R2_PUBLIC_BASE = 'https://assets.ovid.jrd.pub';
+    const imgRewriteMap = new Map<string, string>(); // original relative path → R2 URL
+
+    if (bookData.images && bookData.images.length > 0 && env.ASSETS_BUCKET) {
+      for (const img of bookData.images) {
+        const r2Key = `books/${bookUuid}/images/${img.filename}`;
+        try {
+          await env.ASSETS_BUCKET.put(r2Key, img.data, {
+            httpMetadata: { contentType: img.mediaType },
+          });
+          const publicUrl = `${R2_PUBLIC_BASE}/${r2Key}`;
+          // Map all possible relative references to this image
+          // e.g. "../images/fig1.jpg", "images/fig1.jpg", "fig1.jpg"
+          imgRewriteMap.set(img.filename, publicUrl);
+          // Also map the full zip path segments
+          const parts = img.zipPath.split('/');
+          for (let i = 0; i < parts.length; i++) {
+            imgRewriteMap.set(parts.slice(i).join('/'), publicUrl);
+            imgRewriteMap.set('../' + parts.slice(i).join('/'), publicUrl);
+          }
+        } catch (e) {
+          console.warn(`Failed to upload image ${img.filename} to R2:`, e);
+        }
+      }
+    }
+
+    // Rewrite <img src="..."> in rawHtml to point to R2 URLs
+    const rewriteImgSrc = (html: string): string => {
+      if (imgRewriteMap.size === 0) return html;
+      return html.replace(/<img([^>]*)\ssrc="([^"]*)"([^>]*)\/?\s*>/gi, (match, before, src, after) => {
+        // Try exact match first, then filename-only
+        let newSrc = imgRewriteMap.get(src);
+        if (!newSrc) {
+          // Try without leading ../
+          const cleaned = src.replace(/^(\.\.\/)+/, '');
+          newSrc = imgRewriteMap.get(cleaned);
+        }
+        if (!newSrc) {
+          // Try just the filename
+          const fname = src.split('/').pop() || src;
+          newSrc = imgRewriteMap.get(fname);
+        }
+        if (newSrc) {
+          return `<img${before} src="${newSrc}"${after}/>`;
+        }
+        return match;
+      });
+    };
+
     // Insert book shell (metadata + chapters with raw HTML, no translations)
     const bookId = await insertBookShellV2(
       env.DB,
@@ -121,7 +171,7 @@ export async function handleBookUpload(
           number: ch.number,
           title: ch.originalTitle,
           originalTitle: ch.originalTitle,
-          rawHtml: ch.rawHtml,
+          rawHtml: rewriteImgSrc(ch.rawHtml),
         })),
       },
       bookUuid,
