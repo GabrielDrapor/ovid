@@ -148,6 +148,21 @@ export async function handleBookUpload(
       bookData.chapters.length
     );
 
+    // Notify Railway translator service (non-blocking)
+    if (env.TRANSLATOR_SERVICE_URL && env.TRANSLATOR_SECRET) {
+      const translatorUrl = env.TRANSLATOR_SERVICE_URL;
+      const translatorSecret = env.TRANSLATOR_SECRET;
+      ctx.waitUntil(
+        fetch(`${translatorUrl}/translate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ bookUuid, secret: translatorSecret }),
+        }).catch((err) => {
+          console.warn(`Failed to notify translator service for ${bookUuid}:`, err);
+        })
+      );
+    }
+
     // Generate cover images in background (non-blocking)
     if (env.GEMINI_API_KEY && env.ASSETS_BUCKET) {
       ctx.waitUntil(
@@ -222,6 +237,20 @@ export async function handleTranslateNext(
 
     if (job.status === 'error') {
       return json({ done: true, error: job.error_message });
+    }
+
+    // If Railway translator service is configured, just return progress instead of translating here
+    if (env.TRANSLATOR_SERVICE_URL) {
+      return json({
+        done: false,
+        progress: {
+          phase: job.status === 'extracting_glossary' ? 'glossary' : 'translating',
+          chaptersCompleted: job.completed_chapters,
+          chaptersTotal: job.total_chapters,
+          currentChapter: job.current_chapter,
+          railway: true,
+        },
+      });
     }
 
     // Build a translator with glossary from the job
