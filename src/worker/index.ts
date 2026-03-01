@@ -35,6 +35,7 @@ import {
   handleBookEstimate,
   handleTranslateNext,
 } from './book-handlers';
+import { serveAdminCoversPage, handleCoverPreview } from './admin-covers';
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -90,6 +91,11 @@ export default {
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       UNIQUE(user_id, book_uuid)
     )`);
+
+    // Admin pages (outside /api/ to serve HTML)
+    if (url.pathname === '/admin/covers') {
+      return serveAdminCoversPage();
+    }
 
     // Handle API routes
     if (url.pathname.startsWith('/api/')) {
@@ -176,6 +182,11 @@ export default {
         // ==================
         if (url.pathname === '/api/books/estimate' && request.method === 'POST') {
           return handleBookEstimate(request, env);
+        }
+
+        // Admin: cover preview (generate without saving)
+        if (url.pathname === '/api/admin/cover-preview' && request.method === 'POST') {
+          return handleCoverPreview(request, env);
         }
 
         if (url.pathname === '/api/books/upload' && request.method === 'POST') {
