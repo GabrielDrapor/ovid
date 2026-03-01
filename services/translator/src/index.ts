@@ -7,6 +7,7 @@ import { Hono } from 'hono';
 import { D1Client } from './d1-client.js';
 import { translateBook, activeJobs } from './translate-worker.js';
 import { processSpine, processCover } from './image-processor.js';
+import { generatePreview, PREVIEW_HTML } from './cover-preview.js';
 
 const app = new Hono();
 
@@ -100,6 +101,33 @@ app.get('/status/:uuid', async (c) => {
     });
   } catch (err) {
     return c.json({ status: 'unknown', error: (err as Error).message }, 500);
+  }
+});
+
+// --- Cover Preview (debug UI) ---
+
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
+
+app.get('/preview', (c) => {
+  return c.html(PREVIEW_HTML);
+});
+
+app.post('/preview', async (c) => {
+  const { title, author } = await c.req.json<{ title: string; author: string }>();
+
+  if (!title || !author) {
+    return c.json({ error: 'Missing title or author' }, 400);
+  }
+
+  if (!GEMINI_API_KEY) {
+    return c.json({ error: 'GEMINI_API_KEY not configured' }, 500);
+  }
+
+  try {
+    const result = await generatePreview(GEMINI_API_KEY, title, author);
+    return c.json(result);
+  } catch (err) {
+    return c.json({ error: (err as Error).message }, 500);
   }
 });
 
