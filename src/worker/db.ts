@@ -5,7 +5,7 @@
 export async function getAllBooksV2(db: D1Database, userId?: number) {
   let query = `SELECT id, uuid, title, original_title, author, language_pair,
               book_cover_img_url, book_spine_img_url, user_id,
-              status, created_at, updated_at
+              status, display_order, created_at, updated_at
        FROM books_v2`;
   
   if (userId) {
@@ -14,7 +14,7 @@ export async function getAllBooksV2(db: D1Database, userId?: number) {
     query += ` WHERE user_id IS NULL`;
   }
   
-  query += ` ORDER BY created_at DESC`;
+  query += ` ORDER BY display_order ASC, created_at ASC`;
   
   const stmt = db.prepare(query);
   const books = userId ? await stmt.bind(userId).all() : await stmt.all();
