@@ -128,8 +128,8 @@ export async function generateBookCovers(
   title: string,
   author: string,
   bookUuid: string,
-  processorUrl: string,
-  processorSecret: string,
+  translatorUrl: string,
+  translatorSecret: string,
 ): Promise<CoverResult> {
   const slug = slugify(title);
   const uniqueId = crypto.randomUUID().slice(0, 8);
@@ -183,22 +183,27 @@ Design for "${title}" by ${author}:
   const rawCoverUrl = `${R2_PUBLIC_BASE}/${rawCoverKey}`;
   const rawSpineUrl = `${R2_PUBLIC_BASE}/${rawSpineKey}`;
 
-  // --- Step 5: Webhook Railway for post-processing ---
-  const webhookResp = await fetch(`${processorUrl}/process`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      secret: processorSecret,
-      bookUuid,
-      rawCoverUrl,
-      rawSpineUrl,
-      keyPrefix,
-    }),
-  });
+  // --- Step 5: Webhook translator service for post-processing ---
+  if (translatorUrl) {
+    const webhookResp = await fetch(`${translatorUrl}/process-cover`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        secret: translatorSecret,
+        bookUuid,
+        rawCoverUrl,
+        rawSpineUrl,
+        keyPrefix,
+      }),
+    });
 
-  if (!webhookResp.ok) {
-    console.error('Cover processor webhook failed:', await webhookResp.text());
-    // Fallback: use raw images directly
+    if (!webhookResp.ok) {
+      console.error('Cover processing webhook failed:', await webhookResp.text());
+      // Fallback: use raw images directly
+      return { coverUrl: rawCoverUrl, spineUrl: rawSpineUrl };
+    }
+  } else {
+    // No translator service — use raw images
     return { coverUrl: rawCoverUrl, spineUrl: rawSpineUrl };
   }
 

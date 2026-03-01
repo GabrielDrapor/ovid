@@ -6,6 +6,7 @@
 import { Hono } from 'hono';
 import { D1Client } from './d1-client.js';
 import { translateBook, activeJobs } from './translate-worker.js';
+import { processSpine, processCover } from './image-processor.js';
 
 const app = new Hono();
 
@@ -101,6 +102,94 @@ app.get('/status/:uuid', async (c) => {
     return c.json({ status: 'unknown', error: (err as Error).message }, 500);
   }
 });
+
+// --- Cover Processing ---
+
+const R2_PUBLIC_BASE = process.env.R2_PUBLIC_BASE || 'https://assets.ovid.jrd.pub';
+const R2_BUCKET_NAME = process.env.R2_BUCKET_NAME || 'ovid';
+
+async function r2Upload(key: string, data: Buffer, contentType: string): Promise<string> {
+  const url = `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/r2/buckets/${R2_BUCKET_NAME}/objects/${encodeURIComponent(key)}`;
+  const resp = await fetch(url, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${env.CF_API_TOKEN}`,
+      'Content-Type': contentType,
+    },
+    body: data,
+  });
+  if (!resp.ok) {
+    const text = await resp.text();
+    throw new Error(`R2 upload error ${resp.status}: ${text.slice(0, 300)}`);
+  }
+  return `${R2_PUBLIC_BASE}/${key}`;
+}
+
+async function downloadImage(url: string): Promise<Buffer> {
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`Failed to download ${url}: ${resp.status}`);
+  return Buffer.from(await resp.arrayBuffer());
+}
+
+interface CoverProcessRequest {
+  secret: string;
+  bookUuid: string;
+  rawCoverUrl: string;
+  rawSpineUrl: string;
+  keyPrefix: string;
+}
+
+app.post('/process-cover', async (c) => {
+  const body = await c.req.json<CoverProcessRequest>();
+
+  if (body.secret !== env.TRANSLATOR_SECRET) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  if (!body.bookUuid || !body.rawCoverUrl || !body.rawSpineUrl || !body.keyPrefix) {
+    return c.json({ error: 'Missing required fields' }, 400);
+  }
+
+  console.log(`[cover] Starting: ${body.bookUuid}`);
+
+  // Process in background
+  processCoverImages(body).catch((err) => {
+    console.error(`[cover] Failed for ${body.bookUuid}:`, err);
+  });
+
+  return c.json({ ok: true, message: 'Processing started' });
+});
+
+async function processCoverImages(req: CoverProcessRequest) {
+  const db = getDb();
+
+  const [rawCover, rawSpine] = await Promise.all([
+    downloadImage(req.rawCoverUrl),
+    downloadImage(req.rawSpineUrl),
+  ]);
+
+  console.log(`[cover] Processing cover (${rawCover.length} bytes) + spine (${rawSpine.length} bytes)`);
+
+  const [finalCover, finalSpine] = await Promise.all([
+    processCover(rawCover),
+    processSpine(rawSpine),
+  ]);
+
+  const coverKey = `${req.keyPrefix}_cover.png`;
+  const spineKey = `${req.keyPrefix}_spine.png`;
+
+  const [coverUrl, spineUrl] = await Promise.all([
+    r2Upload(coverKey, finalCover, 'image/png'),
+    r2Upload(spineKey, finalSpine, 'image/png'),
+  ]);
+
+  await db.execute(
+    'UPDATE books_v2 SET book_cover_img_url = ?, book_spine_img_url = ?, updated_at = datetime(\'now\') WHERE uuid = ?',
+    [coverUrl, spineUrl, req.bookUuid],
+  );
+
+  console.log(`[cover] Done: ${req.bookUuid} → ${coverUrl}, ${spineUrl}`);
+}
 
 const port = parseInt(process.env.PORT || '3000');
 

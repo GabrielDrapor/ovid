@@ -12,7 +12,8 @@
   },
   "dependencies": {
     "@hono/node-server": "^1.19.9",
-    "hono": "^4.4.0"
+    "hono": "^4.4.0",
+    "sharp": "^0.33.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
