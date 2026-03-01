@@ -58,13 +58,13 @@ export async function addCredits(
   description: string,
   stripePaymentIntentId?: string
 ): Promise<number> {
-  const currentCredits = await getUserCredits(db, userId);
-  const newBalance = currentCredits + amount;
-
+  // Atomic increment to avoid read-then-write race conditions
   await db
-    .prepare('UPDATE users SET credits = ?, updated_at = datetime(\'now\') WHERE id = ?')
-    .bind(newBalance, userId)
+    .prepare('UPDATE users SET credits = credits + ?, updated_at = datetime(\'now\') WHERE id = ?')
+    .bind(amount, userId)
     .run();
+
+  const newBalance = await getUserCredits(db, userId);
 
   await db
     .prepare(
@@ -255,23 +255,43 @@ export async function handleStripeWebhook(
     return new Response('Invalid signature', { status: 400 });
   }
 
-  try {
-    const event = JSON.parse(payload) as {
-      type: string;
-      data: {
-        object: {
-          id: string;
-          payment_intent: string;
-          metadata: { user_id: string; package_id: string; credits: string };
-        };
+  let event: {
+    type: string;
+    data: {
+      object: {
+        id: string;
+        payment_intent: string;
+        metadata: { user_id: string; package_id: string; credits: string };
       };
     };
+  };
 
+  try {
+    event = JSON.parse(payload);
+  } catch (parseError) {
+    // Non-recoverable: bad payload, return 200 so Stripe doesn't retry
+    console.error('Webhook JSON parse error:', parseError);
+    return new Response(JSON.stringify({ received: true, error: 'Invalid JSON' }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  try {
     if (event.type === 'checkout.session.completed') {
       const session = event.data.object;
       const userId = parseInt(session.metadata.user_id);
       const credits = parseInt(session.metadata.credits);
       const packageId = session.metadata.package_id;
+
+      if (!userId || !credits) {
+        // Non-recoverable: bad metadata, return 200
+        console.error('Webhook missing metadata:', session.metadata);
+        return new Response(JSON.stringify({ received: true, error: 'Invalid metadata' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
 
       const existing = await env.DB
         .prepare('SELECT id FROM credit_transactions WHERE stripe_payment_intent_id = ?')
@@ -296,6 +316,7 @@ export async function handleStripeWebhook(
       headers: { 'Content-Type': 'application/json' },
     });
   } catch (error) {
+    // Recoverable (likely DB error): return 500 so Stripe retries
     console.error('Webhook processing error:', error);
     return new Response('Webhook processing failed', { status: 500 });
   }
