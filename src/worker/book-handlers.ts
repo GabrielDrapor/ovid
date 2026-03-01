@@ -173,11 +173,18 @@ export async function handleBookUpload(
               env.GEMINI_API_KEY!,
               env.ASSETS_BUCKET,
               bookData.title,
-              bookData.author
+              bookData.author,
+              bookUuid,
+              env.COVER_PROCESSOR_URL || '',
+              env.COVER_PROCESSOR_SECRET || '',
             );
-            await env.DB.prepare(
-              'UPDATE books_v2 SET book_cover_img_url = ?, book_spine_img_url = ? WHERE uuid = ?'
-            ).bind(covers.coverUrl, covers.spineUrl, bookUuid).run();
+            // If processor is configured, it updates DB itself.
+            // Otherwise fall back to raw images.
+            if (!env.COVER_PROCESSOR_URL) {
+              await env.DB.prepare(
+                'UPDATE books_v2 SET book_cover_img_url = ?, book_spine_img_url = ? WHERE uuid = ?'
+              ).bind(covers.coverUrl, covers.spineUrl, bookUuid).run();
+            }
             console.log(`Cover generated for ${bookUuid}: ${covers.coverUrl}`);
           } catch (err) {
             console.warn(`Cover generation failed for ${bookUuid}:`, err);

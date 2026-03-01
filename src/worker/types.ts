@@ -18,6 +18,8 @@ export interface Env {
   STRIPE_PUBLISHABLE_KEY: string;
   TRANSLATOR_SERVICE_URL?: string;
   TRANSLATOR_SECRET?: string;
+  COVER_PROCESSOR_URL?: string;
+  COVER_PROCESSOR_SECRET?: string;
 }
 
 export interface User {

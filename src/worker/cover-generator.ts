@@ -3,7 +3,8 @@
  * Designed to run inside a Cloudflare Worker (uses fetch, R2).
  *
  * v2: No reference images — each book gets a unique style.
- * Spine uses flat 2D prompt with large text for thumbnail legibility.
+ * Spine uses green-screen (#00FF00) background; post-processing
+ * (crop + despill + resize) is done by the Railway cover-processor service.
  */
 
 const GEMINI_MODEL = 'gemini-2.5-flash-image';
@@ -17,7 +18,7 @@ interface CoverResult {
 }
 
 /**
- * Call Gemini API to generate an image (text-only prompt, no reference images).
+ * Call Gemini API to generate an image (text-only prompt).
  */
 async function generateImage(apiKey: string, prompt: string): Promise<ArrayBuffer> {
   const body = {
@@ -54,7 +55,6 @@ async function generateImage(apiKey: string, prompt: string): Promise<ArrayBuffe
 
 /**
  * Ask Gemini to describe the cover's visual style (text-only response).
- * Used to make the spine visually consistent with the cover.
  */
 async function describeCoverStyle(
   apiKey: string,
@@ -70,7 +70,7 @@ async function describeCoverStyle(
           {
             text: `Describe this book cover in exactly 3 lines:
 Line 1: The primary background color (e.g. "deep midnight blue", "burnt orange")
-Line 2: The overall design style in a few words (e.g. "Art Deco geometric", "gothic ornamental", "minimalist")
+Line 2: The overall design style in a few words (e.g. "Art Deco geometric", "gothic ornamental")
 Line 3: The accent/text color (e.g. "gold", "cream", "silver")
 Respond with ONLY these 3 lines, nothing else.`,
           },
@@ -94,9 +94,6 @@ Respond with ONLY these 3 lines, nothing else.`,
   };
 }
 
-/**
- * Convert ArrayBuffer to base64 string.
- */
 function arrayBufferToBase64(buf: ArrayBuffer): string {
   const bytes = new Uint8Array(buf);
   let binary = '';
@@ -106,9 +103,6 @@ function arrayBufferToBase64(buf: ArrayBuffer): string {
   return btoa(binary);
 }
 
-/**
- * Create a filename-safe slug.
- */
 function slugify(text: string): string {
   return text
     .toLowerCase()
@@ -118,22 +112,28 @@ function slugify(text: string): string {
 }
 
 /**
- * Generate cover and spine, upload to R2, return public URLs.
+ * Generate cover and spine, upload raw images to R2,
+ * then webhook Railway service for post-processing.
  *
  * Flow:
- * 1. Generate cover (no reference image — unique style per book)
- * 2. Describe cover style via Gemini text-only call
- * 3. Generate spine as flat 2D graphic matching cover style
- * 4. Upload both to R2
+ * 1. Generate cover (unique style per book)
+ * 2. Describe cover style via Gemini
+ * 3. Generate spine on green-screen background
+ * 4. Upload raw images to R2
+ * 5. Webhook Railway cover-processor for crop + despill + resize + DB update
  */
 export async function generateBookCovers(
   apiKey: string,
   bucket: R2Bucket,
   title: string,
   author: string,
+  bookUuid: string,
+  processorUrl: string,
+  processorSecret: string,
 ): Promise<CoverResult> {
   const slug = slugify(title);
   const uniqueId = crypto.randomUUID().slice(0, 8);
+  const keyPrefix = `${slug}_${uniqueId}`;
 
   // --- Step 1: Generate cover ---
   const coverPrompt = `Book cover for "${title}" by ${author}. Portrait orientation, approximately 3:4 ratio.
@@ -152,38 +152,59 @@ Requirements:
   // --- Step 2: Describe cover for spine consistency ---
   const { color, style, accent } = await describeCoverStyle(apiKey, coverB64);
 
-  // --- Step 3: Generate spine ---
-  const spinePrompt = `A FLAT 2D book spine graphic on a pure white (#FFFFFF) background. NOT a photograph — a completely flat digital design with zero shadows, zero 3D effects.
-
-The spine is a narrow vertical RECTANGLE with sharp edges, centered in the image. The white background surrounds it on all sides.
+  // --- Step 3: Generate spine on green screen ---
+  const spinePrompt = `A flat front-facing book spine on bright solid lime green (#00FF00) background. The spine is a narrow vertical dark rectangle, centered, with green space on all sides.
 
 Design for "${title}" by ${author}:
-- Rectangle fill: solid ${color} (matching the book's cover)
+- Background color: ${color} (matching the book's cover)
 - Style: ${style}
 - LARGE, BOLD ${accent} text filling most of the spine width — must be readable at thumbnail size
 - Title "${title.toUpperCase()}" running vertically in LARGE BOLD capitals
 - Author "${author.toUpperCase()}" at the bottom, also reasonably large
-- A small decorative motif at the top
+- A small decorative motif at the top matching the cover's aesthetic
 - Simple border lines on left and right edges
-- Keep decoration MINIMAL — prioritize text legibility over ornament
+- Keep decoration MINIMAL — prioritize text legibility
 - The rectangle should be about 1/6 the width of the total image
-- NO shadows, NO rounded edges, NO page edges`;
+- Sharp edges, no shadows, no 3D effects, no page edges visible`;
 
   const spineBuf = await generateImage(apiKey, spinePrompt);
 
-  // --- Step 4: Upload to R2 ---
-  const coverKey = `${slug}_${uniqueId}_cover.png`;
-  const spineKey = `${slug}_${uniqueId}_spine.png`;
+  // --- Step 4: Upload raw images to R2 ---
+  const rawCoverKey = `raw/${keyPrefix}_cover.png`;
+  const rawSpineKey = `raw/${keyPrefix}_spine.png`;
 
-  await bucket.put(coverKey, coverBuf, {
+  await bucket.put(rawCoverKey, coverBuf, {
     httpMetadata: { contentType: 'image/png' },
   });
-  await bucket.put(spineKey, spineBuf, {
+  await bucket.put(rawSpineKey, spineBuf, {
     httpMetadata: { contentType: 'image/png' },
   });
 
+  const rawCoverUrl = `${R2_PUBLIC_BASE}/${rawCoverKey}`;
+  const rawSpineUrl = `${R2_PUBLIC_BASE}/${rawSpineKey}`;
+
+  // --- Step 5: Webhook Railway for post-processing ---
+  const webhookResp = await fetch(`${processorUrl}/process`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      secret: processorSecret,
+      bookUuid,
+      rawCoverUrl,
+      rawSpineUrl,
+      keyPrefix,
+    }),
+  });
+
+  if (!webhookResp.ok) {
+    console.error('Cover processor webhook failed:', await webhookResp.text());
+    // Fallback: use raw images directly
+    return { coverUrl: rawCoverUrl, spineUrl: rawSpineUrl };
+  }
+
+  // Return the final URLs (processor will upload to these keys)
   return {
-    coverUrl: `${R2_PUBLIC_BASE}/${coverKey}`,
-    spineUrl: `${R2_PUBLIC_BASE}/${spineKey}`,
+    coverUrl: `${R2_PUBLIC_BASE}/${keyPrefix}_cover.png`,
+    spineUrl: `${R2_PUBLIC_BASE}/${keyPrefix}_spine.png`,
   };
 }
