@@ -37,6 +37,28 @@ import {
 } from './book-handlers';
 // admin-covers moved to Railway translator service
 
+// Rate limiting state (per-worker instance, resets on cold start)
+const apiRequestCounts = new Map<string, number[]>();
+const uploadRequestCounts = new Map<string, number[]>();
+const API_RATE_LIMIT = 60; // requests per minute
+const UPLOAD_RATE_LIMIT = 5; // uploads per hour
+const MAX_UPLOAD_SIZE = 50 * 1024 * 1024; // 50MB
+
+function isRateLimited(countsMap: Map<string, number[]>, ip: string, windowMs: number, maxRequests: number): boolean {
+  const now = Date.now();
+  const timestamps = countsMap.get(ip) || [];
+  const filtered = timestamps.filter(t => now - t < windowMs);
+  if (filtered.length >= maxRequests) {
+    countsMap.set(ip, filtered);
+    return true;
+  }
+  filtered.push(now);
+  countsMap.set(ip, filtered);
+  return false;
+}
+
+let migrationsRan = false;
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
@@ -45,55 +67,84 @@ export default {
     checkOAuthConfig(env);
     checkStripeConfig(env);
 
-    // Run migrations
-    await env.DB.prepare(
-      `CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY)`
-    ).run();
-    const runMigration = async (name: string, sql: string) => {
-      const done = await env.DB.prepare(`SELECT 1 FROM _migrations WHERE name = ?`).bind(name).first();
-      if (!done) {
-        await env.DB.prepare(sql).run().catch(() => {});
-        await env.DB.prepare(`INSERT INTO _migrations (name) VALUES (?)`).bind(name).run();
-      }
-    };
-    await runMigration('books_v2_user_id', 'ALTER TABLE books_v2 ADD COLUMN user_id INTEGER');
-    await runMigration('books_v2_status', "ALTER TABLE books_v2 ADD COLUMN status TEXT DEFAULT 'ready'");
-    await runMigration('create_translation_jobs', `CREATE TABLE IF NOT EXISTS translation_jobs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      book_id INTEGER NOT NULL,
-      book_uuid TEXT NOT NULL,
-      source_language TEXT NOT NULL DEFAULT 'en',
-      target_language TEXT NOT NULL DEFAULT 'zh',
-      total_chapters INTEGER NOT NULL,
-      completed_chapters INTEGER NOT NULL DEFAULT 0,
-      current_chapter INTEGER NOT NULL DEFAULT 0,
-      current_item_offset INTEGER NOT NULL DEFAULT 0,
-      glossary_json TEXT,
-      glossary_extracted INTEGER NOT NULL DEFAULT 0,
-      title_translated INTEGER NOT NULL DEFAULT 0,
-      translated_title TEXT,
-      status TEXT NOT NULL DEFAULT 'pending',
-      error_message TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )`);
-    await runMigration('chapters_v2_text_nodes', 'ALTER TABLE chapters_v2 ADD COLUMN text_nodes_json TEXT');
-    await runMigration('books_v2_display_order', 'ALTER TABLE books_v2 ADD COLUMN display_order INTEGER DEFAULT 0');
-    await runMigration('create_user_book_progress', `CREATE TABLE IF NOT EXISTS user_book_progress (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL,
-      book_uuid TEXT NOT NULL,
-      is_completed INTEGER NOT NULL DEFAULT 0,
-      reading_progress INTEGER,
-      completed_at DATETIME,
-      last_read_at DATETIME,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE(user_id, book_uuid)
-    )`);
+    // Run migrations only once per worker instance lifetime
+    if (!migrationsRan) {
+      await env.DB.prepare(
+        `CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY)`
+      ).run();
+      const runMigration = async (name: string, sql: string) => {
+        const done = await env.DB.prepare(`SELECT 1 FROM _migrations WHERE name = ?`).bind(name).first();
+        if (!done) {
+          await env.DB.prepare(sql).run().catch(() => {});
+          await env.DB.prepare(`INSERT INTO _migrations (name) VALUES (?)`).bind(name).run();
+        }
+      };
+      await runMigration('books_v2_user_id', 'ALTER TABLE books_v2 ADD COLUMN user_id INTEGER');
+      await runMigration('books_v2_status', "ALTER TABLE books_v2 ADD COLUMN status TEXT DEFAULT 'ready'");
+      await runMigration('create_translation_jobs', `CREATE TABLE IF NOT EXISTS translation_jobs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        book_id INTEGER NOT NULL,
+        book_uuid TEXT NOT NULL,
+        source_language TEXT NOT NULL DEFAULT 'en',
+        target_language TEXT NOT NULL DEFAULT 'zh',
+        total_chapters INTEGER NOT NULL,
+        completed_chapters INTEGER NOT NULL DEFAULT 0,
+        current_chapter INTEGER NOT NULL DEFAULT 0,
+        current_item_offset INTEGER NOT NULL DEFAULT 0,
+        glossary_json TEXT,
+        glossary_extracted INTEGER NOT NULL DEFAULT 0,
+        title_translated INTEGER NOT NULL DEFAULT 0,
+        translated_title TEXT,
+        status TEXT NOT NULL DEFAULT 'pending',
+        error_message TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`);
+      await runMigration('chapters_v2_text_nodes', 'ALTER TABLE chapters_v2 ADD COLUMN text_nodes_json TEXT');
+      await runMigration('books_v2_display_order', 'ALTER TABLE books_v2 ADD COLUMN display_order INTEGER DEFAULT 0');
+      await runMigration('create_user_book_progress', `CREATE TABLE IF NOT EXISTS user_book_progress (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        book_uuid TEXT NOT NULL,
+        is_completed INTEGER NOT NULL DEFAULT 0,
+        reading_progress INTEGER,
+        completed_at DATETIME,
+        last_read_at DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(user_id, book_uuid)
+      )`);
+      migrationsRan = true;
+    }
 
     // Handle API routes
     if (url.pathname.startsWith('/api/')) {
+      const clientIp = request.headers.get('cf-connecting-ip') || request.headers.get('x-forwarded-for') || 'unknown';
+
+      // Rate limit: 60 API requests per minute per IP
+      if (isRateLimited(apiRequestCounts, clientIp, 60_000, API_RATE_LIMIT)) {
+        return new Response(JSON.stringify({ error: 'Too many requests' }), {
+          status: 429, headers: { 'Content-Type': 'application/json', 'Retry-After': '60' },
+        });
+      }
+
+      // Upload-specific checks
+      if (url.pathname === '/api/books/upload' && request.method === 'POST') {
+        // Size check: reject uploads > 50MB
+        const contentLength = parseInt(request.headers.get('content-length') || '0');
+        if (contentLength > MAX_UPLOAD_SIZE) {
+          return new Response(JSON.stringify({ error: 'Upload too large. Maximum size is 50MB.' }), {
+            status: 413, headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        // Rate limit: 5 uploads per hour per IP
+        if (isRateLimited(uploadRequestCounts, clientIp, 3_600_000, UPLOAD_RATE_LIMIT)) {
+          return new Response(JSON.stringify({ error: 'Upload rate limit exceeded. Max 5 uploads per hour.' }), {
+            status: 429, headers: { 'Content-Type': 'application/json', 'Retry-After': '3600' },
+          });
+        }
+      }
+
       try {
         // ==================
         // Auth endpoints
