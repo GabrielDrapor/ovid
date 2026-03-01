@@ -23,6 +23,17 @@ export interface ChapterV2 {
   textNodes: ContentItemV2[];
 }
 
+export interface EpubImage {
+  /** Path inside the EPUB zip (e.g. "OEBPS/images/fig1.jpg") */
+  zipPath: string;
+  /** Just the filename (e.g. "fig1.jpg") */
+  filename: string;
+  /** MIME type (e.g. "image/jpeg") */
+  mediaType: string;
+  /** Raw binary data */
+  data: Uint8Array;
+}
+
 export interface BookDataV2 {
   title: string;
   originalTitle: string;
@@ -30,6 +41,8 @@ export interface BookDataV2 {
   language: string;
   chapters: ChapterV2[];
   styles?: string;
+  /** Images extracted from the EPUB, ready for upload */
+  images?: EpubImage[];
 }
 
 export interface TranslatedChapterV2 extends ChapterV2 {
@@ -81,6 +94,7 @@ export class BookProcessor {
     let author = 'Unknown Author';
     let htmlFiles: string[] = [];
     let globalStyles = '';
+    let imageManifestEntries: { href: string; mediaType: string }[] = [];
 
     if (opfFile) {
       const opfContent = await zipContent.files[opfFile].async('text');
@@ -119,8 +133,9 @@ export class BookProcessor {
         }
       }
 
-      // Build manifest map and get spine order
+      // Build manifest map and get spine order; also collect image entries
       const manifestMap = new Map<string, string>();
+      imageManifestEntries = [];
       for (let i = 0; i < manifestElements.length; i++) {
         const item = manifestElements[i];
         const id = item.getAttribute('id');
@@ -129,6 +144,10 @@ export class BookProcessor {
 
         if (id && href && mediaType === 'application/xhtml+xml') {
           manifestMap.set(id, href);
+        }
+        // Collect image entries
+        if (href && mediaType && mediaType.startsWith('image/')) {
+          imageManifestEntries.push({ href, mediaType });
         }
       }
 
@@ -178,6 +197,30 @@ export class BookProcessor {
       }
     }
 
+    // Extract images from EPUB
+    const images: EpubImage[] = [];
+    const basePath = opfFile ? opfFile.substring(0, opfFile.lastIndexOf('/') + 1) : '';
+    for (const entry of imageManifestEntries) {
+      const imgPath = entry.href.startsWith('/')
+        ? entry.href.substring(1)
+        : basePath + entry.href;
+      const imgFile = zipContent.files[imgPath];
+      if (imgFile) {
+        try {
+          const data = await imgFile.async('uint8array');
+          const filename = entry.href.split('/').pop() || entry.href;
+          images.push({
+            zipPath: imgPath,
+            filename,
+            mediaType: entry.mediaType,
+            data,
+          });
+        } catch (e) {
+          console.warn(`Failed to extract image: ${imgPath}`);
+        }
+      }
+    }
+
     return {
       title,
       originalTitle: title,
@@ -185,6 +228,7 @@ export class BookProcessor {
       language: 'en',
       chapters,
       styles: globalStyles,
+      images: images.length > 0 ? images : undefined,
     };
   }
 
@@ -428,6 +472,26 @@ export class BookProcessor {
     if (node.nodeType !== 1) return ''; // Only serialize ELEMENT_NODE
 
     const tagName = (node.nodeName || 'div').toLowerCase();
+
+    // Get inner content first (needed for <a> unwrapping)
+    let inner = '';
+    const children = node.childNodes;
+    if (children) {
+      for (let i = 0; i < children.length; i++) {
+        inner += this.serializeNode(children[i]);
+      }
+    }
+
+    // Strip internal <a> links — keep only inner content
+    // Internal links point to other EPUB files (.xhtml, .html) or use # anchors
+    if (tagName === 'a') {
+      const href = node.getAttribute?.('href');
+      if (!href || !href.startsWith('http')) {
+        // Internal link — unwrap, keep content
+        return inner;
+      }
+    }
+
     let attrs = '';
 
     // Serialize attributes
@@ -435,15 +499,6 @@ export class BookProcessor {
       for (let i = 0; i < node.attributes.length; i++) {
         const attr = node.attributes[i];
         attrs += ` ${attr.name}="${attr.value}"`;
-      }
-    }
-
-    // Get inner content
-    let inner = '';
-    const children = node.childNodes;
-    if (children) {
-      for (let i = 0; i < children.length; i++) {
-        inner += this.serializeNode(children[i]);
       }
     }
 
