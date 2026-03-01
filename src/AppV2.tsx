@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import BilingualReaderV2 from './components/BilingualReaderV2';
+import { fetchWithRetry } from './utils/fetchWithRetry';
 import './App.css';
 
 interface Chapter {
@@ -175,7 +176,7 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
   useEffect(() => {
     const loadChapters = async () => {
       try {
-        const response = await fetch(`/api/v2/book/${bookUuid}/chapters`);
+        const response = await fetchWithRetry(`/api/v2/book/${bookUuid}/chapters`);
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`);
         }
@@ -208,7 +209,7 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
   const loadChapter = async (chapterNumber: number, scrollToXpath?: string) => {
     setLoading(true);
     try {
-      const response = await fetch(`/api/v2/book/${bookUuid}/chapter/${chapterNumber}`);
+      const response = await fetchWithRetry(`/api/v2/book/${bookUuid}/chapter/${chapterNumber}`);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
