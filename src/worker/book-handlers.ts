@@ -173,11 +173,18 @@ export async function handleBookUpload(
               env.GEMINI_API_KEY!,
               env.ASSETS_BUCKET,
               bookData.title,
-              bookData.author
+              bookData.author,
+              bookUuid,
+              env.TRANSLATOR_SERVICE_URL || '',
+              env.TRANSLATOR_SECRET || '',
             );
-            await env.DB.prepare(
-              'UPDATE books_v2 SET book_cover_img_url = ?, book_spine_img_url = ? WHERE uuid = ?'
-            ).bind(covers.coverUrl, covers.spineUrl, bookUuid).run();
+            // If translator service is configured, it handles DB update.
+            // Otherwise fall back to raw images.
+            if (!env.TRANSLATOR_SERVICE_URL) {
+              await env.DB.prepare(
+                'UPDATE books_v2 SET book_cover_img_url = ?, book_spine_img_url = ? WHERE uuid = ?'
+              ).bind(covers.coverUrl, covers.spineUrl, bookUuid).run();
+            }
             console.log(`Cover generated for ${bookUuid}: ${covers.coverUrl}`);
           } catch (err) {
             console.warn(`Cover generation failed for ${bookUuid}:`, err);

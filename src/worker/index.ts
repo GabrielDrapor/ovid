@@ -35,6 +35,7 @@ import {
   handleBookEstimate,
   handleTranslateNext,
 } from './book-handlers';
+// admin-covers moved to Railway translator service
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -177,6 +178,8 @@ export default {
         if (url.pathname === '/api/books/estimate' && request.method === 'POST') {
           return handleBookEstimate(request, env);
         }
+
+        // Cover preview moved to Railway translator service
 
         if (url.pathname === '/api/books/upload' && request.method === 'POST') {
           return handleBookUpload(request, env, ctx);

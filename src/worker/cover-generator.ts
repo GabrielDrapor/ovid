@@ -1,14 +1,14 @@
 /**
  * Generate book cover and spine images using Gemini 2.5 Flash Image.
  * Designed to run inside a Cloudflare Worker (uses fetch, R2).
+ *
+ * v2: No reference images — each book gets a unique style.
+ * Spine uses green-screen (#00FF00) background; post-processing
+ * (crop + despill + resize) is done by the Railway cover-processor service.
  */
 
 const GEMINI_MODEL = 'gemini-2.5-flash-image';
 const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
-
-// Reference images (cached as base64 after first download)
-const REFERENCE_COVER_URL = 'https://assets.ovid.jrd.pub/stud_01.png';
-const REFERENCE_SPINE_URL = 'https://assets.ovid.jrd.pub/stud_02.png';
 
 const R2_PUBLIC_BASE = 'https://assets.ovid.jrd.pub';
 
@@ -18,44 +18,12 @@ interface CoverResult {
 }
 
 /**
- * Download image and return as base64
+ * Call Gemini API to generate an image (text-only prompt).
  */
-async function fetchImageAsBase64(url: string): Promise<string> {
-  const resp = await fetch(url);
-  if (!resp.ok) throw new Error(`Failed to fetch ${url}: ${resp.status}`);
-  const buf = await resp.arrayBuffer();
-  // Convert to base64
-  const bytes = new Uint8Array(buf);
-  let binary = '';
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return btoa(binary);
-}
-
-/**
- * Call Gemini API to generate an image
- */
-async function generateImage(
-  apiKey: string,
-  prompt: string,
-  ...referenceImages: string[]
-): Promise<ArrayBuffer> {
-  const parts: any[] = [];
-  for (const refB64 of referenceImages) {
-    if (refB64) {
-      parts.push({ inlineData: { mimeType: 'image/png', data: refB64 } });
-    }
-  }
-  parts.push({ text: prompt });
-
+async function generateImage(apiKey: string, prompt: string): Promise<ArrayBuffer> {
   const body = {
-    contents: [{
-      parts,
-    }],
-    generationConfig: {
-      responseModalities: ['TEXT', 'IMAGE'],
-    },
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
   };
 
   const resp = await fetch(`${GEMINI_API_URL}?key=${apiKey}`, {
@@ -69,11 +37,10 @@ async function generateImage(
     throw new Error(`Gemini API error ${resp.status}: ${errText.slice(0, 300)}`);
   }
 
-  const data = await resp.json() as any;
+  const data = (await resp.json()) as any;
   for (const candidate of data.candidates || []) {
     for (const part of candidate.content?.parts || []) {
       if (part.inlineData?.data) {
-        // Decode base64 to ArrayBuffer
         const binary = atob(part.inlineData.data);
         const bytes = new Uint8Array(binary.length);
         for (let i = 0; i < binary.length; i++) {
@@ -87,8 +54,55 @@ async function generateImage(
 }
 
 /**
- * Create a filename-safe slug
+ * Ask Gemini to describe the cover's visual style (text-only response).
  */
+async function describeCoverStyle(
+  apiKey: string,
+  coverB64: string,
+): Promise<{ color: string; style: string; accent: string }> {
+  const resp = await fetch(`${GEMINI_API_URL}?key=${apiKey}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{
+        parts: [
+          { inlineData: { mimeType: 'image/png', data: coverB64 } },
+          {
+            text: `Describe this book cover in exactly 3 lines:
+Line 1: The primary background color (e.g. "deep midnight blue", "burnt orange")
+Line 2: The overall design style in a few words (e.g. "Art Deco geometric", "gothic ornamental")
+Line 3: The accent/text color (e.g. "gold", "cream", "silver")
+Respond with ONLY these 3 lines, nothing else.`,
+          },
+        ],
+      }],
+      generationConfig: { responseModalities: ['TEXT'] },
+    }),
+  });
+
+  const defaults = { color: 'a distinctive thematic color', style: 'elegant', accent: 'gold' };
+  if (!resp.ok) return defaults;
+
+  const data = (await resp.json()) as any;
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  const lines = text.trim().split('\n').filter((l: string) => l.trim());
+
+  return {
+    color: lines[0]?.trim() || defaults.color,
+    style: lines[1]?.trim() || defaults.style,
+    accent: lines[2]?.trim() || defaults.accent,
+  };
+}
+
+function arrayBufferToBase64(buf: ArrayBuffer): string {
+  const bytes = new Uint8Array(buf);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+
 function slugify(text: string): string {
   return text
     .toLowerCase()
@@ -98,101 +112,104 @@ function slugify(text: string): string {
 }
 
 /**
- * Generate cover and spine, upload to R2, return public URLs.
+ * Generate cover and spine, upload raw images to R2,
+ * then webhook Railway service for post-processing.
+ *
+ * Flow:
+ * 1. Generate cover (unique style per book)
+ * 2. Describe cover style via Gemini
+ * 3. Generate spine on green-screen background
+ * 4. Upload raw images to R2
+ * 5. Webhook Railway cover-processor for crop + despill + resize + DB update
  */
 export async function generateBookCovers(
   apiKey: string,
   bucket: R2Bucket,
   title: string,
-  author: string
+  author: string,
+  bookUuid: string,
+  translatorUrl: string,
+  translatorSecret: string,
 ): Promise<CoverResult> {
   const slug = slugify(title);
   const uniqueId = crypto.randomUUID().slice(0, 8);
+  const keyPrefix = `${slug}_${uniqueId}`;
 
-  // Download reference images
-  const [refCoverB64, refSpineB64] = await Promise.all([
-    fetchImageAsBase64(REFERENCE_COVER_URL),
-    fetchImageAsBase64(REFERENCE_SPINE_URL),
-  ]);
+  // --- Step 1: Generate cover ---
+  const coverPrompt = `Book cover for "${title}" by ${author}. Portrait orientation, approximately 3:4 ratio.
 
-  const coverPrompt = `Look at how this reference image works: the book cover graphic fills the ENTIRE image with zero margin. The background color goes all the way to every edge of the image. There is absolutely no white space, no border, no gap between the design and the image boundary.
-
-Now generate a new cover in the same format for the book "${title}" by ${author}.
+Design a visually striking, elegant book cover with a style that fits the book's themes and era. Be creative — Art Deco, gothic, minimalist, impressionist, or any style that suits the book.
 
 Requirements:
-- The background color must touch ALL FOUR edges of the image. No white pixels anywhere on the borders.
-- Background color: a distinctive color that is NOT white (solid, matte). Choose a color relevant to the book's themes.
-- Central icon: a simple, iconic symbol relevant to the book's content, rendered as a flat cream/off-white silhouette
-- Title "${title.toUpperCase()}" in cream/off-white elegant serif font, centered
-- Author "${author.toUpperCase()}" in smaller cream serif text at bottom, centered
-- Minimalist, two-tone only (background color + cream). No illustrations, no decorative borders.
-- Same clean, modern aesthetic as the reference.`;
+- Title "${title.toUpperCase()}" prominently displayed in elegant typography
+- Author "${author.toUpperCase()}" at the bottom in smaller text
+- The design must fill the ENTIRE image edge to edge with NO white borders
+- Rich, atmospheric, visually compelling`;
 
-  // Generate cover first
-  const coverBuf = await generateImage(apiKey, coverPrompt, refCoverB64);
+  const coverBuf = await generateImage(apiKey, coverPrompt);
+  const coverB64 = arrayBufferToBase64(coverBuf);
 
-  // Convert cover to base64 so we can feed it as reference for the spine
-  const coverBytes = new Uint8Array(coverBuf);
-  let coverBinary = '';
-  for (let i = 0; i < coverBytes.length; i++) {
-    coverBinary += String.fromCharCode(coverBytes[i]);
-  }
-  const coverB64 = btoa(coverBinary);
+  // --- Step 2: Describe cover for spine consistency ---
+  const { color, style, accent } = await describeCoverStyle(apiKey, coverB64);
 
-  // Step 2: Ask model to describe the cover's color and icon (text-only)
-  const describeResp = await fetch(`${GEMINI_API_URL}?key=${apiKey}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{
-        parts: [
-          { inlineData: { mimeType: 'image/png', data: coverB64 } },
-          { text: 'Describe this book cover in exactly 2 lines:\nLine 1: The exact background color (e.g. "deep navy blue", "burnt orange", "forest green")\nLine 2: The central icon/symbol (e.g. "a sun starburst", "a magnifying glass", "a paw print")\nRespond with ONLY these 2 lines, nothing else.' },
-        ],
-      }],
-      generationConfig: { responseModalities: ['TEXT'] },
-    }),
+  // --- Step 3: Generate spine on green screen ---
+  const spinePrompt = `A flat front-facing book spine on bright solid lime green (#00FF00) background. The spine is a narrow vertical dark rectangle, centered, with green space on all sides.
+
+Design for "${title}" by ${author}:
+- Background color: ${color} (matching the book's cover)
+- Style: ${style}
+- LARGE, BOLD ${accent} text filling most of the spine width — must be readable at thumbnail size
+- Title "${title.toUpperCase()}" running vertically in LARGE BOLD capitals
+- Author "${author.toUpperCase()}" at the bottom, also reasonably large
+- A small decorative motif at the top matching the cover's aesthetic
+- Simple border lines on left and right edges
+- Keep decoration MINIMAL — prioritize text legibility
+- The rectangle should be about 1/6 the width of the total image
+- Sharp edges, no shadows, no 3D effects, no page edges visible`;
+
+  const spineBuf = await generateImage(apiKey, spinePrompt);
+
+  // --- Step 4: Upload raw images to R2 ---
+  const rawCoverKey = `raw/${keyPrefix}_cover.png`;
+  const rawSpineKey = `raw/${keyPrefix}_spine.png`;
+
+  await bucket.put(rawCoverKey, coverBuf, {
+    httpMetadata: { contentType: 'image/png' },
   });
-  
-  let coverColor = 'a distinctive color matching the book\'s theme';
-  let coverIcon = 'a simple thematic icon';
-  
-  if (describeResp.ok) {
-    const descData = await describeResp.json() as any;
-    const descText = descData.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    const lines = descText.trim().split('\n').filter((l: string) => l.trim());
-    if (lines.length >= 2) {
-      coverColor = lines[0].trim();
-      coverIcon = lines[1].trim();
+  await bucket.put(rawSpineKey, spineBuf, {
+    httpMetadata: { contentType: 'image/png' },
+  });
+
+  const rawCoverUrl = `${R2_PUBLIC_BASE}/${rawCoverKey}`;
+  const rawSpineUrl = `${R2_PUBLIC_BASE}/${rawSpineKey}`;
+
+  // --- Step 5: Webhook translator service for post-processing ---
+  if (translatorUrl) {
+    const webhookResp = await fetch(`${translatorUrl}/process-cover`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        secret: translatorSecret,
+        bookUuid,
+        rawCoverUrl,
+        rawSpineUrl,
+        keyPrefix,
+      }),
+    });
+
+    if (!webhookResp.ok) {
+      console.error('Cover processing webhook failed:', await webhookResp.text());
+      // Fallback: use raw images directly
+      return { coverUrl: rawCoverUrl, spineUrl: rawSpineUrl };
     }
+  } else {
+    // No translator service — use raw images
+    return { coverUrl: rawCoverUrl, spineUrl: rawSpineUrl };
   }
 
-  // Step 3: Generate spine with only reference spine image + cover description in text
-  const spinePrompt = `This is a reference book spine image. Generate a new book spine matching this EXACT format and aspect ratio — a very THIN, NARROW vertical strip (approximately 1:8 width-to-height ratio, like the reference).
-
-New spine for "${title}" by ${author}:
-- Background color: ${coverColor} (MUST match exactly — this is the same color as the book's front cover)
-- Small icon at the very top: ${coverIcon} (same as the front cover, but tiny)
-- Title "${title.toUpperCase()}" running vertically in cream/off-white serif font
-- Author "${author.toUpperCase()}" at the bottom in smaller cream text
-- SAME minimalist two-tone style as the reference
-- The spine must be as THIN and NARROW as the reference image — do NOT make it wider`;
-
-  const spineBuf = await generateImage(apiKey, spinePrompt, refSpineB64);
-
-  // Upload to R2
-  const coverKey = `${slug}_${uniqueId}_cover.png`;
-  const spineKey = `${slug}_${uniqueId}_spine.png`;
-
-  await bucket.put(coverKey, coverBuf, {
-    httpMetadata: { contentType: 'image/png' },
-  });
-  await bucket.put(spineKey, spineBuf, {
-    httpMetadata: { contentType: 'image/png' },
-  });
-
+  // Return the final URLs (processor will upload to these keys)
   return {
-    coverUrl: `${R2_PUBLIC_BASE}/${coverKey}`,
-    spineUrl: `${R2_PUBLIC_BASE}/${spineKey}`,
+    coverUrl: `${R2_PUBLIC_BASE}/${keyPrefix}_cover.png`,
+    spineUrl: `${R2_PUBLIC_BASE}/${keyPrefix}_spine.png`,
   };
 }
