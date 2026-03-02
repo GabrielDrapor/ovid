@@ -180,11 +180,40 @@ export async function processSpine(imageBuffer: Buffer): Promise<Buffer> {
   // Despill green fringe
   const despilled = despillGreen(cropped, channels);
 
-  // Reconstruct and resize to target
-  return sharp(despilled, {
+  // Reconstruct image from raw pixels
+  let spineImage = sharp(despilled, {
     raw: { width: contentW, height: contentH, channels: channels as 3 | 4 },
-  })
-    .resize(SPINE_WIDTH, SPINE_HEIGHT, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 255 } })
+  });
+
+  // Crop to target aspect ratio (114:607 ≈ 0.188) before resizing
+  // This avoids distortion from 'fill' and clipping from 'cover'
+  const targetRatio = SPINE_WIDTH / SPINE_HEIGHT; // ~0.188
+  const currentRatio = contentW / contentH;
+
+  if (currentRatio > targetRatio * 1.2) {
+    // Too wide: crop sides to match target ratio
+    const newW = Math.round(contentH * targetRatio);
+    const cropX = Math.round((contentW - newW) / 2);
+    spineImage = spineImage.extract({
+      left: cropX,
+      top: 0,
+      width: newW,
+      height: contentH,
+    });
+  } else if (currentRatio < targetRatio * 0.8) {
+    // Too tall: crop top/bottom to match target ratio
+    const newH = Math.round(contentW / targetRatio);
+    const cropY = Math.round((contentH - newH) / 2);
+    spineImage = spineImage.extract({
+      left: 0,
+      top: cropY,
+      width: contentW,
+      height: newH,
+    });
+  }
+
+  return spineImage
+    .resize(SPINE_WIDTH, SPINE_HEIGHT, { fit: 'fill' })
     .png()
     .toBuffer();
 }
