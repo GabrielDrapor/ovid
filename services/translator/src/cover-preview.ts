@@ -173,7 +173,7 @@ async function login() {
 </body>
 </html>`;
 
-export const PREVIEW_HTML = \`<!DOCTYPE html>
+export const PREVIEW_HTML = `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
