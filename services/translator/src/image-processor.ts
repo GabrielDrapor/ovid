@@ -29,15 +29,6 @@ function isGreenBg(r: number, g: number, b: number): boolean {
 }
 
 /**
- * Check if a pixel is "dark" (likely part of spine content).
- * Most spine designs have dark backgrounds with light text/decoration.
- * This also catches medium-toned content that's clearly not background.
- */
-function isDark(r: number, g: number, b: number): boolean {
-  return (r + g + b) < 400; // below ~133 average per channel
-}
-
-/**
  * Find content bounds using a two-pass approach:
  * Pass 1: Use green detection to find left/right bounds (columns)
  * Pass 2: Use darkness detection to find top/bottom bounds (rows)
@@ -73,23 +64,56 @@ function findContentBounds(
 
   if (left >= right) { left = 0; right = width - 1; }
 
-  // --- Pass 2: find top/bottom using dark pixel detection ---
-  // A row is "content" if a significant portion within left..right has dark pixels
-  function rowHasContent(y: number): boolean {
-    let darkCount = 0, total = 0;
+  // --- Pass 2: find top/bottom ---
+  // Use green detection for rows too, same as columns.
+  // Then fall back: if no green rows found at edges, check if row
+  // differs significantly from the very first/last row (edge row = background).
+  function rowIsGreenBg(y: number): boolean {
+    let bgCount = 0, total = 0;
     for (let x = left; x <= right; x += 2) {
       const { r, g, b } = px(x, y);
       total++;
-      if (isDark(r, g, b)) darkCount++;
+      if (isGreenBg(r, g, b)) bgCount++;
     }
-    return darkCount / total > 0.2;
+    return bgCount / total > 0.3;
   }
 
-  let top = 0;
-  while (top < height && !rowHasContent(top)) top++;
+  // Get average color of the top-left corner (background reference)
+  function getEdgeAvg(rows: number[]): { r: number; g: number; b: number } {
+    let tr = 0, tg = 0, tb = 0, count = 0;
+    for (const y of rows) {
+      for (let x = 0; x < width; x += 4) {
+        const p = px(x, y);
+        tr += p.r; tg += p.g; tb += p.b; count++;
+      }
+    }
+    return { r: tr / count, g: tg / count, b: tb / count };
+  }
 
+  function rowDiffersFromBg(y: number, bg: { r: number; g: number; b: number }): boolean {
+    let diffCount = 0, total = 0;
+    for (let x = left; x <= right; x += 2) {
+      const { r, g, b } = px(x, y);
+      total++;
+      const dist = Math.abs(r - bg.r) + Math.abs(g - bg.g) + Math.abs(b - bg.b);
+      if (dist > 80) diffCount++;
+    }
+    return diffCount / total > 0.15;
+  }
+
+  // Try green detection first
+  let top = 0;
+  while (top < height && rowIsGreenBg(top)) top++;
   let bottom = height - 1;
-  while (bottom > top && !rowHasContent(bottom)) bottom--;
+  while (bottom > top && rowIsGreenBg(bottom)) bottom--;
+
+  // If green detection didn't trim anything, use edge-color comparison
+  if (top === 0 && bottom === height - 1) {
+    const bgTop = getEdgeAvg([0, 1, 2]);
+    const bgBottom = getEdgeAvg([height - 1, height - 2, height - 3]);
+    while (top < height && !rowDiffersFromBg(top, bgTop)) top++;
+    while (bottom > top && !rowDiffersFromBg(bottom, bgBottom)) bottom--;
+  }
 
   // Small inward padding to avoid fringe
   if (left > 0) left += 2;
