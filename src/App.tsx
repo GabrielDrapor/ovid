@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import BookShelf from './components/BookShelf';
 import AppV2 from './AppV2';
+import ErrorBoundary from './components/ErrorBoundary';
 import { UserProvider } from './contexts/UserContext';
 import './App.css';
 
@@ -88,39 +89,45 @@ function App() {
   // Show book shelf on root path
   if (showBookShelf) {
     return (
-      <UserProvider>
-        <div className="App">
-          <BookShelf onSelectBook={handleSelectBook} />
-        </div>
-      </UserProvider>
+      <ErrorBoundary>
+        <UserProvider>
+          <div className="App">
+            <BookShelf onSelectBook={handleSelectBook} />
+          </div>
+        </UserProvider>
+      </ErrorBoundary>
     );
   }
 
   // Error state
   if (error) {
     return (
-      <div className="App">
-        <div style={{ textAlign: 'center', padding: '50px' }}>
-          <div>Error: {error}</div>
-          <button
-            onClick={() => {
-              window.history.pushState({}, '', '/');
-              syncFromUrl();
-            }}
-          >
-            Go Home
-          </button>
+      <ErrorBoundary>
+        <div className="App">
+          <div style={{ textAlign: 'center', padding: '50px' }}>
+            <div>Error: {error}</div>
+            <button
+              onClick={() => {
+                window.history.pushState({}, '', '/');
+                syncFromUrl();
+              }}
+            >
+              Go Home
+            </button>
+          </div>
         </div>
-      </div>
+      </ErrorBoundary>
     );
   }
 
   // V2 Book reader
   if (bookUuid) {
     return (
-      <UserProvider>
-        <AppV2 bookUuid={bookUuid} onBackToShelf={handleBackToShelf} />
-      </UserProvider>
+      <ErrorBoundary>
+        <UserProvider>
+          <AppV2 bookUuid={bookUuid} onBackToShelf={handleBackToShelf} />
+        </UserProvider>
+      </ErrorBoundary>
     );
   }
 
