@@ -115,11 +115,12 @@ function findContentBounds(
     while (bottom > top && !rowDiffersFromBg(bottom, bgBottom)) bottom--;
   }
 
-  // Small inward padding to avoid fringe
-  if (left > 0) left += 2;
-  if (right < width - 1) right -= 2;
-  if (top > 0) top += 2;
-  if (bottom < height - 1) bottom -= 2;
+  // Outward padding to avoid clipping content
+  // (the boundary detection may land right on the edge of content)
+  left = Math.max(0, left - 3);
+  right = Math.min(width - 1, right + 3);
+  top = Math.max(0, top - 3);
+  bottom = Math.min(height - 1, bottom + 3);
 
   return { left, right, top, bottom };
 }
