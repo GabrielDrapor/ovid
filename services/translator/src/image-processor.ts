@@ -68,25 +68,31 @@ function findContentBounds(
     return bgCount / total > 0.15;
   }
 
-  // Find left/right from center
-  const cx = Math.floor(width / 2);
+  // Scan from edges INWARD to find where content starts
+  let left = 0;
+  while (left < width && colIsBg(left)) left++;
 
-  let left = cx;
-  while (left > 0 && !colIsBg(left)) left--;
-  left += 2;
+  let right = width - 1;
+  while (right > left && colIsBg(right)) right--;
 
-  let right = cx;
-  while (right < width - 1 && !colIsBg(right)) right++;
-  right -= 2;
+  // Safety: if no background found on sides, use full width
+  if (left >= right) {
+    left = 0;
+    right = width - 1;
+  }
 
-  // Find top/bottom
+  // Find top/bottom (scan inward from edges)
   let top = 0;
   while (top < height && rowIsBg(top, left, right)) top++;
-  top += 2;
 
   let bottom = height - 1;
-  while (bottom > 0 && rowIsBg(bottom, left, right)) bottom--;
-  bottom -= 2;
+  while (bottom > top && rowIsBg(bottom, left, right)) bottom--;
+
+  // Small inward padding to avoid fringe
+  if (left > 0) left += 2;
+  if (right < width - 1) right -= 2;
+  if (top > 0) top += 2;
+  if (bottom < height - 1) bottom -= 2;
 
   return { left, right, top, bottom };
 }
