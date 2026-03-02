@@ -212,8 +212,18 @@ export async function processSpine(imageBuffer: Buffer): Promise<Buffer> {
     });
   }
 
-  return spineImage
-    .resize(SPINE_WIDTH, SPINE_HEIGHT, { fit: 'fill' })
+  // Resize to target with padding to prevent text clipping.
+  // Use 'contain' to fit the content, then extend with the dominant
+  // background color to fill the exact target dimensions.
+  const resizedBuf = await spineImage.toBuffer();
+  const { dominant } = await sharp(resizedBuf).stats();
+  const bgColor = { r: dominant.r, g: dominant.g, b: dominant.b };
+
+  return sharp(resizedBuf)
+    .resize(SPINE_WIDTH, SPINE_HEIGHT, {
+      fit: 'contain',
+      background: bgColor,
+    })
     .png()
     .toBuffer();
 }

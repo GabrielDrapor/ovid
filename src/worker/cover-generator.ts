@@ -158,14 +158,15 @@ Requirements:
 Design for "${title}" by ${author}:
 - Background color: ${color} (matching the book's cover)
 - Style: ${style}
-- LARGE, BOLD ${accent} text filling most of the spine width — must be readable at thumbnail size
+- LARGE, BOLD ${accent} text — must be readable at thumbnail size
 - Title "${title.toUpperCase()}" running vertically in LARGE BOLD capitals
 - Author "${author.toUpperCase()}" at the bottom, also reasonably large
 - A small decorative motif at the top matching the cover's aesthetic
 - Simple border lines on left and right edges
 - Keep decoration MINIMAL — prioritize text legibility
 - The rectangle should be about 1/6 the width of the total image
-- Sharp edges, no shadows, no 3D effects, no page edges visible`;
+- Sharp edges, no shadows, no 3D effects, no page edges visible
+- CRITICAL: All text must be FULLY CONTAINED within the spine rectangle with generous margins on ALL sides. No text should touch or extend near the edges of the rectangle. Leave at least 10% padding on left and right sides.`;
 
   const spineBuf = await generateImage(apiKey, spinePrompt);
 
