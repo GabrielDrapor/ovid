@@ -184,7 +184,7 @@ export async function processSpine(imageBuffer: Buffer): Promise<Buffer> {
   return sharp(despilled, {
     raw: { width: contentW, height: contentH, channels: channels as 3 | 4 },
   })
-    .resize(SPINE_WIDTH, SPINE_HEIGHT, { fit: 'cover', position: 'centre' })
+    .resize(SPINE_WIDTH, SPINE_HEIGHT, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 255 } })
     .png()
     .toBuffer();
 }
