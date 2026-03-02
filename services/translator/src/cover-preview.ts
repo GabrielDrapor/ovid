@@ -118,7 +118,62 @@ Design for "${title}" by ${author}:
   };
 }
 
-export const PREVIEW_HTML = `<!DOCTYPE html>
+export const LOGIN_HTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ovid — Cover Preview</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #1a1a2e; color: #e0e0e0;
+    min-height: 100vh; display: flex; align-items: center; justify-content: center;
+  }
+  .login {
+    background: #16213e; padding: 2rem; border-radius: 12px;
+    display: flex; flex-direction: column; gap: 1rem; width: 320px;
+  }
+  h1 { font-size: 1.2rem; color: #fff; text-align: center; }
+  input {
+    padding: 0.6rem 1rem; border-radius: 8px; border: 1px solid #333;
+    background: #0f3460; color: #fff; font-size: 1rem;
+  }
+  button {
+    padding: 0.6rem; border-radius: 8px; border: none;
+    background: #e94560; color: #fff; font-size: 1rem; cursor: pointer; font-weight: 600;
+  }
+  .err { color: #e94560; font-size: 0.85rem; text-align: center; display: none; }
+</style>
+</head>
+<body>
+<div class="login">
+  <h1>🔒 Cover Preview</h1>
+  <input id="pw" type="password" placeholder="Password" autofocus
+    onkeydown="if(event.key==='Enter')login()">
+  <button onclick="login()">Enter</button>
+  <div id="err" class="err">Wrong password</div>
+</div>
+<script>
+async function login() {
+  const pw = document.getElementById('pw').value;
+  const resp = await fetch('/preview/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password: pw }),
+  });
+  if (resp.ok) {
+    window.location.reload();
+  } else {
+    document.getElementById('err').style.display = 'block';
+  }
+}
+</script>
+</body>
+</html>`;
+
+export const PREVIEW_HTML = \`<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">

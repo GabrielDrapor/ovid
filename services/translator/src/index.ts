@@ -7,7 +7,7 @@ import { Hono } from 'hono';
 import { D1Client } from './d1-client.js';
 import { translateBook, activeJobs } from './translate-worker.js';
 import { processSpine, processCover } from './image-processor.js';
-import { generatePreview, PREVIEW_HTML } from './cover-preview.js';
+import { generatePreview, PREVIEW_HTML, LOGIN_HTML } from './cover-preview.js';
 
 const app = new Hono();
 
@@ -108,11 +108,41 @@ app.get('/status/:uuid', async (c) => {
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 
+// Simple auth for preview pages — uses TRANSLATOR_SECRET as password
+function checkPreviewAuth(c: any): Response | null {
+  const cookie = c.req.header('cookie') || '';
+  if (cookie.includes('preview_auth=1')) return null; // authenticated
+  return null; // check happens in GET handler
+}
+
 app.get('/preview', (c) => {
+  // Check auth cookie
+  const cookie = c.req.header('cookie') || '';
+  if (!cookie.includes(`preview_auth=${env.TRANSLATOR_SECRET}`)) {
+    return c.html(LOGIN_HTML);
+  }
   return c.html(PREVIEW_HTML);
 });
 
+app.post('/preview/login', async (c) => {
+  const { password } = await c.req.json<{ password: string }>();
+  if (password === env.TRANSLATOR_SECRET) {
+    return c.json({ ok: true }, {
+      headers: {
+        'Set-Cookie': `preview_auth=${env.TRANSLATOR_SECRET}; Path=/; HttpOnly; SameSite=Strict; Max-Age=86400`,
+      },
+    });
+  }
+  return c.json({ error: 'Wrong password' }, 401);
+});
+
 app.post('/preview', async (c) => {
+  // Verify auth
+  const cookie = c.req.header('cookie') || '';
+  if (!cookie.includes(`preview_auth=${env.TRANSLATOR_SECRET}`)) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
   const { title, author } = await c.req.json<{ title: string; author: string }>();
 
   if (!title || !author) {
