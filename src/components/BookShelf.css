@@ -431,6 +431,7 @@
   height: 300px;
   min-width: 30px;
   max-width: 80px;
+  flex-shrink: 0;
   position: relative;
   cursor: pointer;
   transition: transform 0.2s ease, filter 0.2s ease;
@@ -466,6 +467,7 @@
   width: 100%;
   height: 100%;
   object-fit: fill;
+  display: block;
   border-radius: 2px;
 }
 
@@ -675,6 +677,7 @@
 /* Processing book state */
 .book-spine-wrapper {
   position: relative;
+  flex-shrink: 0;
 }
 
 .book-spine-wrapper.processing .book-spine-container {
