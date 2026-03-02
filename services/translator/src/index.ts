@@ -144,7 +144,7 @@ async function r2Upload(key: string, data: Buffer, contentType: string): Promise
       Authorization: `Bearer ${env.CF_API_TOKEN}`,
       'Content-Type': contentType,
     },
-    body: data,
+    body: new Uint8Array(data),
   });
   if (!resp.ok) {
     const text = await resp.text();
@@ -211,7 +211,7 @@ async function processCoverImages(req: CoverProcessRequest) {
     r2Upload(spineKey, finalSpine, 'image/png'),
   ]);
 
-  await db.execute(
+  await db.run(
     'UPDATE books_v2 SET book_cover_img_url = ?, book_spine_img_url = ?, updated_at = datetime(\'now\') WHERE uuid = ?',
     [coverUrl, spineUrl, req.bookUuid],
   );
