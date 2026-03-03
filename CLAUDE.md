@@ -1,135 +1,131 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code working on this repo.
 
-## Commands & Workflows
+## Commands
 
-### Development & Deployment
-- **Start dev server (React only)**: `npm start`
-- **Start worker preview (full stack)**: `npm run preview` ← use this for complete local testing
-- **Build for production**: `npm run build`
-- **Deploy to Cloudflare**: `npm run deploy`
-- **Run tests**: `npm test`
-- **Eject from CRA**: `npm run eject` (⚠️ irreversible)
+### Dev & Deploy
+- `npm run preview` — Full-stack local dev (Worker + React)
+- `npm run deploy` — `yarn build && wrangler deploy`
+- `npm test` — Vitest
+- `npm run test:visual` — Playwright visual regression tests
+- `npm run format` / `npm run format:check` — Prettier
 
-### Book Management (TypeScript scripts)
-- **Import**: `yarn import-book -- --file="book.epub" --target="zh" --provider="openai"`
-- **List local**: `yarn list-books:local`
-- **List remote**: `yarn list-books:remote`
-- **Remove local**: `yarn remove-book:local -- --uuid="book-uuid"`
-- **Remove remote**: `yarn remove-book:remote -- --uuid="book-uuid"`
-- **Sync to D1**: `yarn sync-remote-book -- --uuid="book-uuid"`
+### Book Management
+- `yarn import-book -- --file="book.epub" --target="zh"` — Import EPUB with translation
+- `yarn list-books:local` / `yarn list-books:remote` — List books
+- `yarn remove-book:local -- --uuid="..."` / `yarn remove-book:remote -- --uuid="..."` — Remove book
+- `yarn sync-remote-book -- --uuid="..."` — Sync local book to remote D1
+- `yarn generate-cover -- --uuid="..."` — Generate cover image
 
-### Database Management
-- **Run SQL on local DB**: `npm run db:local -- "SELECT * FROM books;"`
-- **Run SQL on remote D1**: `npm run db:remote -- "SELECT * FROM books;"`
-- **Execute SQL file locally**: `npm run db:local -- --file database/schema.sql`
-- **Execute SQL file remotely**: `npm run db:remote -- --file database/schema.sql`
+### Database
+- `npm run db:init` — Create schema locally
+- `npm run db:seed` — Insert sample data
+- `npm run db:local -- "SQL"` — Run SQL on local D1
+- `npm run db:remote -- "SQL"` — Run SQL on remote D1
+- `npm run db:local:file` / `npm run db:remote:file` — Execute SQL file
 
 ## Architecture
 
-This is a **TypeScript-first** React application built with Create React App and Cloudflare Workers, using D1 SQLite for persistence. **100% TypeScript** across frontend, backend, and CLI scripts for type safety and consistency.
+TypeScript everywhere. React frontend + Cloudflare Worker backend + D1 database + R2 asset storage.
 
-### Core Modules
+### Key Directories
+- `src/components/` — React: `BookShelf.tsx`, `BilingualReaderV2.tsx`, `ErrorBoundary.tsx`
+- `src/worker/` — CF Worker modules:
+  - `index.ts` — Router, static serving, SPA fallback
+  - `auth.ts` — Google OAuth flow
+  - `book-handlers.ts` — Book CRUD, upload, translation orchestration
+  - `cover-generator.ts` — SVG-based cover/spine image generation
+  - `credits.ts` — Credit balance, Stripe checkout/webhooks
+  - `db.ts` — D1 query helpers
+  - `types.ts` — Shared types/Env interface
+- `services/translator/` — Railway translation service (Hono server):
+  - `index.ts` — Routes: `/translate`, `/status/:uuid`, `/health`, cover preview
+  - `translate-worker.ts` — Chapter-by-chapter translation (5 concurrent, resume support)
+  - `d1-client.ts` — D1 REST API client (reads/writes directly to D1)
+  - `image-processor.ts` — Cover/spine image processing (Sharp)
+  - `cover-preview.ts` — HTML preview generation for covers
+- `scripts/` — CLI: import-book, list-books, remove-book, sync-remote-book, generate-cover
+- `database/` — `schema.sql`, `sample_data.sql`, migrations
 
-- **Entry point**: `src/index.tsx` - React initialization with error boundary
-- **Main app**: `src/App.tsx` - Book shelf, authentication state, theme management
-- **Book shelf**: `src/components/BookShelf.tsx` - Two-row layout with public/user books, hover preview, direct entry
-- **Reader**: `src/components/BilingualReader.tsx` - XPath-based bilingual text with paragraph-level toggle, scroll navigation (auto-load chapters), reading progress tracking
-- **Worker backend**: `src/worker/index.ts` - Full API server with auth, books, chapters, uploads, payments
-- **Translation engine**: `src/utils/translator.ts` - Unified interface for OpenAI-compatible APIs with sequential processing and context preservation
-- **CLI scripts**: `scripts/*.ts` - TypeScript book import, listing, removal, sync with full schema management
-- **Database**: `D1 SQLite` - users, sessions, books, chapters, content_items, credit_transactions tables
-- **Styling**: `src/App.css` + component CSS with CJK typography (Noto Sans CJK SC)
+### R2 Asset Storage
+- Bucket served at `https://assets.ovid.jrd.pub`
+- Stores: book cover images, spine images, in-book images extracted from EPUBs
+- Cover/spine auto-generated during upload (SVG → PNG via Sharp on Railway)
 
-## Reading Experience
-
-The bilingual reader provides an optimized reading workflow:
-
-### Navigation & Performance
-- **Single-chapter mode**: Only active chapter in memory for smooth scrolling
-- **Automatic scroll-based loading**:
-  - Scroll to bottom → loads next chapter seamlessly
-  - Scroll to top → loads previous chapter
-  - No manual navigation needed for continuous reading
-- **Manual chapter menu**: Jump to any chapter via dropdown selector
-- **Reading progress**: Automatic tracking and restoration of last reading position
-
-### Text Interaction
-- **Paragraph-level toggle**: Click any paragraph to switch original ↔ translated
-- **XPath-based mapping**: Precise alignment between original and translated text
-- **Language optimization**: 
-  - CJK typography with Noto Sans CJK SC for Chinese text
-  - Optimized line height, letter spacing, paragraph spacing for comfort
-
-### Translation Quality
-- **Sequential translation with context**: Preserves character voice and narrative consistency
-- **Proper noun handling**: Maintains names, places, and technical terms accurately
-- **XML stripping**: Clean output without translation artifacts
+### Translation Flow
+1. User uploads EPUB → Worker parses, stores chapters in D1 (untranslated)
+2. Worker fires webhook to Railway translator via `waitUntil`
+3. Railway fetches untranslated chapters from D1, translates via OpenRouter (Claude Sonnet)
+4. Railway writes translations back to D1, 5 chapters concurrently, with checkpoint resume
+5. Worker's `/api/book/:uuid/status` polls D1 to report progress to frontend
 
 ## API Endpoints
 
-### Authentication (OAuth 2.0)
-- `GET /api/auth/google` - Initiate Google OAuth flow
-- `GET /api/auth/callback/google` - OAuth callback handler with session creation
-- `GET /api/auth/me` - Get current authenticated user profile
-- `POST /api/auth/logout` - Terminate user session
+### Auth
+- `GET /api/auth/google` — Start OAuth
+- `GET /api/auth/callback/google` — OAuth callback
+- `GET /api/auth/me` — Current user
+- `POST /api/auth/logout` — Logout
 
-### Books & Reading
-- `GET /api/books` - List all books (public + user's private books)
-- `POST /api/books/upload` - Upload EPUB/TXT file with async translation
-  - Requires auth + sufficient credits
-  - Returns immediately, translation happens in background
-  - Emits server-sent events for progress tracking
-- `GET /api/book/:uuid/content` - Get full book content (all chapters)
-- `GET /api/book/:uuid/chapters` - Get list of all chapters with metadata
-- `GET /api/book/:uuid/chapter/:number` - Load specific chapter content (XPath-mapped paragraphs)
-- `DELETE /api/book/:uuid` - Delete book (owner only)
+### Books
+- `GET /api/books` — List books (public + user's private)
+- `POST /api/books/upload` — Upload EPUB (auth required, costs credits)
+- `POST /api/books/estimate` — Estimate translation cost
+- `GET /api/book/:uuid/chapters` — Chapter list
+- `GET /api/book/:uuid/chapter/:number` — Chapter content
+- `GET /api/book/:uuid/content` — Full book content
+- `GET /api/book/:uuid/status` — Translation status
+- `POST /api/book/:uuid/translate-next` — Trigger next chapter translation
+- `POST /api/book/:uuid/mark-complete` — Mark translation complete
+- `DELETE /api/book/:uuid` — Delete book (owner only)
 
-### Credits & Payments (Stripe Integration)
-- `GET /api/credits` - Get user's credit balance and available purchase packages
-- `GET /api/credits/transactions` - Get user's credit usage and purchase history
-- `POST /api/stripe/checkout` - Create Stripe checkout session for credit purchase
-- `GET /api/stripe/verify-session` - Verify checkout and apply credits (webhook fallback)
-- `POST /api/stripe/webhook` - Stripe webhook endpoint (payment events)
+### Reading Progress
+- `GET /api/book/:uuid/progress` — Get reading progress
+- `PUT /api/book/:uuid/progress` — Update reading progress
 
-## Database Schema
+### Credits & Payments
+- `GET /api/credits` — Credit balance + packages
+- `GET /api/credits/transactions` — Transaction history
+- `POST /api/stripe/checkout` — Create checkout session
+- `GET /api/stripe/verify-session` — Verify payment
+- `POST /api/stripe/webhook` — Stripe webhook
 
-### User Management
-- **users** - Google OAuth accounts with credit balance
-  - Fields: google_id, email, name, picture, credits, created_at, updated_at
-- **sessions** - Authentication sessions with expiration
-  - Fields: user_id, session_token, expires_at
+## Database Schema (D1)
 
-### Content Storage
-- **books** - Book metadata with ownership and styling
-  - Fields: title, author, language_pair, uuid, user_id, is_public, styles, created_at, updated_at
-- **chapters** - Chapter structure with ordering
-  - Fields: book_id, chapter_number, chinese_title, english_title, order_index
-- **content_items** - Paragraph-level bilingual content with XPath mapping
-  - Fields: chapter_id, paragraph_number, original_text, translated_text, xpath, order_index
+### Content
+- **books** — `id, uuid, title, original_title, author, language_pair, styles, user_id, book_cover_img_url, book_spine_img_url, created_at, updated_at`
+- **chapters** — `id, book_id, chapter_number, title, original_title, order_index, created_at`
+- **content_items** — `id, book_id, chapter_id, item_id, original_text, translated_text, type, class_name, tag_name, styles, order_index, created_at`
 
-### Payments & Credits
-- **credit_transactions** - Credit purchase and usage history
-  - Fields: user_id, amount, type (purchase/usage), stripe_payment_intent_id, balance_after, created_at
+### Users & Auth
+- **users** — `id, google_id, email, name, picture, credits (default 1000), created_at, updated_at`
+- **sessions** — `id, user_id, session_token, expires_at, created_at`
+
+### Progress & Credits
+- **reading_progress** — `id, user_id, book_uuid, chapter_number, updated_at` (unique on user_id+book_uuid)
+- **credit_transactions** — `id, user_id, amount, type, description, stripe_payment_intent_id, book_uuid, balance_after, created_at`
 
 ## Environment Variables
 
-### Cloudflare Worker (wrangler secrets)
-- `GOOGLE_OAUTH_CLIENT_ID` - Google OAuth client ID
-- `GOOGLE_OAUTH_CLIENT_SECRET` - Google OAuth client secret
-- `APP_URL` - Application URL (e.g., `https://lib.jrd.pub`)
-- `OPENAI_API_KEY` - API key for web upload translation
-- `OPENAI_API_BASE_URL` - API endpoint (default: `https://api.openai.com/v1`)
-- `OPENAI_MODEL` - Translation model (default: `gpt-4o-mini`)
-- `STRIPE_SECRET_KEY` - Stripe secret key for payments
-- `STRIPE_WEBHOOK_SECRET` - Stripe webhook signing secret
-- `STRIPE_PUBLISHABLE_KEY` - Stripe publishable key (can be in wrangler.toml vars)
+### Worker (wrangler secrets)
+`GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `APP_URL`, `OPENAI_API_KEY`, `OPENAI_API_BASE_URL`, `OPENAI_MODEL`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PUBLISHABLE_KEY`, `TRANSLATOR_SECRET`, `TRANSLATOR_URL`
 
-### Local CLI scripts (.env)
-- `OPENAI_API_KEY` - API key for translation (OpenAI or compatible provider)
-- `OPENAI_API_BASE_URL` - API endpoint (default: `https://api.openai.com/v1`)
-- `OPENAI_MODEL` - Translation model (default: `gpt-4o-mini`)
-- `CLOUDFLARE_ACCOUNT_ID` - Cloudflare account ID (for remote operations)
-- `CLOUDFLARE_API_TOKEN` - Cloudflare API token (for remote database access)
-- `CLOUDFLARE_D1_DATABASE_ID` - D1 database ID (can be read from `wrangler.toml`)
+### Railway Translator
+`CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_D1_DATABASE_ID`, `OPENAI_API_KEY`, `OPENAI_API_BASE_URL`, `OPENAI_MODEL`, `TRANSLATOR_SECRET`
+
+### Local CLI (.env)
+`OPENAI_API_KEY`, `OPENAI_API_BASE_URL`, `OPENAI_MODEL`, `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_D1_DATABASE_ID`
+
+## URLs
+- Production: https://lib.jrd.pub
+- Staging: https://ovid-staging.drapor.workers.dev
+- Assets (R2): https://assets.ovid.jrd.pub
+
+## Key Patterns
+- EPUB parsing uses TOC (not spine) for chapter detection — spine is unreliable
+- XPath-based paragraph mapping for bilingual alignment
+- Single-chapter rendering for scroll performance
+- Cover/spine images auto-generated as SVG, rendered to PNG via Railway's Sharp
+- `ErrorBoundary` wraps the app for graceful crash recovery
+- Database still named "polyink-db" in wrangler.toml (legacy, preserves data)

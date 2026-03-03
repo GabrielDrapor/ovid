@@ -136,6 +136,72 @@ app.post('/preview/login', async (c) => {
   return c.json({ error: 'Wrong password' }, 401);
 });
 
+// Diagnostic: test Gemini raw response
+app.post('/preview/diag', async (c) => {
+  const cookie = c.req.header('cookie') || '';
+  if (!cookie.includes(`preview_auth=${env.TRANSLATOR_SECRET}`)) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+  if (!GEMINI_API_KEY) {
+    return c.json({ error: 'GEMINI_API_KEY not configured' }, 500);
+  }
+
+  try {
+    const resp = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent?key=${GEMINI_API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: 'A simple red circle on white background.' }] }],
+          generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
+        }),
+      },
+    );
+
+    const status = resp.status;
+    const data = await resp.json() as any;
+
+    const parts: any[] = [];
+    for (const candidate of data.candidates || []) {
+      for (const part of candidate.content?.parts || []) {
+        if (part.inlineData?.data) {
+          const b64 = part.inlineData.data;
+          const buf = Buffer.from(b64, 'base64');
+          const magic = buf.slice(0, 8).toString('hex');
+
+          // Try sharp
+          let sharpResult = 'unknown';
+          try {
+            const sharp = (await import('sharp')).default;
+            const meta = await sharp(buf).metadata();
+            sharpResult = `ok: ${meta.format} ${meta.width}x${meta.height}`;
+          } catch (e) {
+            sharpResult = `error: ${(e as Error).message}`;
+          }
+
+          parts.push({
+            type: 'image',
+            mimeType: part.inlineData.mimeType,
+            b64Length: b64.length,
+            bufSize: buf.length,
+            magic,
+            sharpResult,
+            // include first 100 chars of b64 for inspection
+            b64Start: b64.slice(0, 100),
+          });
+        } else if (part.text) {
+          parts.push({ type: 'text', text: part.text.slice(0, 200) });
+        }
+      }
+    }
+
+    return c.json({ status, candidateCount: data.candidates?.length || 0, parts, promptFeedback: data.promptFeedback });
+  } catch (err) {
+    return c.json({ error: (err as Error).message }, 500);
+  }
+});
+
 app.post('/preview', async (c) => {
   // Verify auth
   const cookie = c.req.header('cookie') || '';
