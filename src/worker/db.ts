@@ -544,17 +544,48 @@ export async function upsertUserBookProgress(
   const progress = readingProgress ?? null;
   
   await db.prepare(
-    `INSERT INTO user_book_progress (user_id, book_uuid, is_completed, reading_progress, last_read_at)
-     VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+    `INSERT INTO user_book_progress (user_id, book_uuid, is_completed, reading_progress, last_read_at,
+       completed_at)
+     VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP,
+       CASE WHEN ? = 1 THEN CURRENT_TIMESTAMP ELSE NULL END)
      ON CONFLICT(user_id, book_uuid) DO UPDATE SET
        is_completed = ?,
        reading_progress = CASE WHEN ? IS NOT NULL THEN ? ELSE reading_progress END,
-       completed_at = CASE WHEN ? = 1 THEN CURRENT_TIMESTAMP ELSE NULL END,
+       completed_at = CASE
+         WHEN ? = 1 THEN COALESCE(user_book_progress.completed_at, CURRENT_TIMESTAMP)
+         WHEN ? = 0 THEN NULL
+         ELSE user_book_progress.completed_at
+       END,
        last_read_at = CURRENT_TIMESTAMP,
        updated_at = CURRENT_TIMESTAMP`
   )
-    .bind(userId, bookUuid, isCompletedInt, progress, isCompletedInt, progress, progress, isCompletedInt)
+    .bind(userId, bookUuid, isCompletedInt, progress, isCompletedInt, isCompletedInt, progress, progress, isCompletedInt, isCompletedInt)
     .run();
+}
+
+/**
+ * Update only reading_progress without touching is_completed or completed_at
+ */
+export async function updateReadingProgress(
+  db: D1Database,
+  userId: number,
+  bookUuid: string,
+  readingProgress: number
+): Promise<void> {
+  // Try to update existing row first
+  const result = await db.prepare(
+    `UPDATE user_book_progress 
+     SET reading_progress = ?, last_read_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+     WHERE user_id = ? AND book_uuid = ?`
+  ).bind(readingProgress, userId, bookUuid).run();
+  
+  // If no row existed, insert one
+  if (!result.meta.changes || result.meta.changes === 0) {
+    await db.prepare(
+      `INSERT INTO user_book_progress (user_id, book_uuid, is_completed, reading_progress, last_read_at)
+       VALUES (?, ?, 0, ?, CURRENT_TIMESTAMP)`
+    ).bind(userId, bookUuid, readingProgress).run();
+  }
 }
 
 /**

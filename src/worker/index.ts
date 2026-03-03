@@ -28,6 +28,7 @@ import {
   getBookStatus,
   getTranslationJob,
   upsertUserBookProgress,
+  updateReadingProgress,
   getUserBookProgress,
 } from './db';
 import {
@@ -361,11 +362,8 @@ export default {
               });
             }
             
-            // Update progress while preserving completion status
-            const currentProgress = await getUserBookProgress(env.DB, user.id, bookUuid);
-            const isCompleted = currentProgress?.is_completed ?? false;
-            
-            await upsertUserBookProgress(env.DB, user.id, bookUuid, isCompleted, body.readingProgress);
+            // Update only reading_progress — never touch is_completed or completed_at
+            await updateReadingProgress(env.DB, user.id, bookUuid, body.readingProgress);
             const updatedProgress = await getUserBookProgress(env.DB, user.id, bookUuid);
             
             return new Response(JSON.stringify({ success: true, progress: updatedProgress }), {
