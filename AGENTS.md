@@ -1,119 +1,115 @@
 # AGENTS.md — Ovid Deep Technical Reference
 
-For quick command reference, see [CLAUDE.md](CLAUDE.md). This document covers implementation details, lessons learned, and non-obvious behaviors.
+For quick reference, see [CLAUDE.md](CLAUDE.md). This document covers architecture details, EPUB parsing lessons, and implementation notes that are useful for deeper work.
 
-## EPUB Parsing — Lessons Learned
+## Architecture Overview
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full system diagram.
+
+**Stack**: React + Cloudflare Worker + D1 (SQLite) + R2 (assets) + Railway (translation service)
+
+### How Upload → Translation Works
+1. User uploads EPUB via `/api/books/upload`
+2. Worker parses EPUB: extracts TOC, chapters, paragraphs → stores in D1 with `translated_text = ''`
+3. Worker extracts/generates cover and spine images → uploads to R2
+4. `waitUntil` fires POST to Railway translator (`TRANSLATOR_URL/translate`)
+5. Railway reads untranslated items from D1 (via REST API), translates 5 chapters concurrently
+6. Each translated paragraph is written back to D1 immediately (checkpoint resume)
+7. Frontend polls `/api/book/:uuid/status` for progress
+
+### Cover/Spine Generation
+- Worker generates SVG covers with title/author text
+- Railway's `image-processor.ts` uses Sharp to render SVG → PNG
+- Spine images: vertical text, auto-sized
+- Cover preview: `/cover-preview/:uuid` endpoint on Railway
+- Images stored in R2 at `assets.ovid.jrd.pub`
+
+## EPUB Parsing — Hard-Won Lessons
 
 ### Use TOC, Not Spine
-The initial implementation failed because it relied on EPUB spine contents, which often lack proper titles. **Always use TOC entries** for chapter detection:
+The spine lists reading order but items often lack titles and include non-content files (cover pages, copyright). **Always use the TOC** for chapter detection:
 
 ```javascript
-// WRONG: spine contents are unreliable
-epub.spine.contents.forEach(item => { /* many have no title */ });
-
-// CORRECT: TOC has actual chapter structure
-const chapters = epub.toc.filter(entry => {
-  const title = entry.title.toLowerCase();
-  return title.includes('chapter') || title.includes('introduction') || ...;
-});
+// TOC entries have titles and href to content files
+const chapters = epub.toc.filter(entry => /* title-based filtering */);
 ```
 
 ### File ID Resolution
-TOC entries reference files by href, but `epub.getChapter()` needs manifest IDs. You need a two-pass lookup:
-
-1. **Exact match**: Compare TOC href (sans anchor) against manifest hrefs
-2. **Filename fallback**: Match by filename if direct href fails
-
-```javascript
-const href = entry.href.split('#')[0];
-let fileId = null;
-// Pass 1: exact href
-for (const id in epub.manifest) {
-  if (epub.manifest[id].href === href) { fileId = id; break; }
-}
-// Pass 2: filename fallback
-if (!fileId) {
-  const filename = href.split('/').pop();
-  for (const id in epub.manifest) {
-    if (epub.manifest[id].href.endsWith(filename)) { fileId = id; break; }
-  }
-}
-```
-
-### Chapter Ordering
-EPUB import may process chapters out of order (async). The DB uses a dual system:
-- `chapter_number` — display order (1, 2, 3...)
-- `order_index` — logical reading order from book structure
-
-After import, sync them: `UPDATE chapters SET chapter_number = order_index WHERE book_id = ?`
+TOC references files by `href`, but `epub.getChapter()` needs manifest IDs. You must map:
+1. Strip anchors from TOC href
+2. Match against manifest by href
+3. Fallback: match by filename only
 
 ### Content Cleanup
-HTML → text extraction needs aggressive cleanup:
-- Strip `<script>` and `<style>` blocks
-- Convert block elements (`<p>`, `<div>`, `<h1-6>`, `<br>`) to newlines
-- Remove remaining tags
-- Normalize whitespace
-- Split on double-newlines into paragraphs
-- Paragraphs < 30 chars are dropped
+HTML from EPUBs is messy. Strip scripts, styles, convert block elements to newlines, remove tags, normalize whitespace. Filter paragraphs < 30 chars.
 
-### Image Handling
-- In-book images are extracted from EPUB and uploaded to R2: `books/{uuid}/images/{filename}`
-- `rawHtml` `src` attributes are rewritten to point to R2 URLs
-- Internal links (non-http `<a>` tags) are expanded to plain text
-
-## Translation System
-
-### Architecture
-Worker CPU limit (30s) can't handle full-book translation. Solution: Railway-hosted service.
-
-**Flow:**
-1. Worker receives EPUB upload → parses → stores in D1 (translated_text = '')
-2. `waitUntil`: POST webhook to Railway with `{bookUuid, secret}`
-3. Railway picks up → reads untranslated chapters from D1 REST API
-4. Translates 5 chapters concurrently via OpenAI-compatible API (default: gpt-4o-mini)
-5. Writes translations back to D1 per-paragraph (checkpoint resume)
-6. Marks book complete
-
-**Checkpoint resume**: Tracks `current_chapter` + `current_item_offset`. If interrupted, picks up where it left off.
-
-### Cover & Spine Generation
-- AI-generated via Gemini 2.5 Flash Image
-- Cover images stored in R2, URLs saved in `books.book_cover_img_url` / `book_spine_img_url`
-- Sharp used for image processing (crop, resize, format conversion)
-- Password-protected preview page at `/api/cover-preview/:uuid`
-
-## Worker Internals
-
-### Error Handling
-- `ErrorBoundary` component wraps the React app
-- `fetchWithRetry` for resilient API calls
-- Rate limiter on upload endpoint
-- Credits use atomic DB operations (SELECT + UPDATE in same query)
-
-### Auth Flow
-Google OAuth → callback creates session → session token in cookie → `GET /api/auth/me` checks session on each page load.
-
-### SPA Routing
-Worker serves React build. Routes matching `/book/*` return `index.html` for client-side routing. React reads URL params for book UUID and chapter number.
+### Chapter Ordering
+EPUB processing can be async → chapters may arrive out of order. Always use `order_index` for correct sequence, and sync `chapter_number = order_index` after import.
 
 ## Database Notes
 
-### D1 Quirks
-- **SQLITE_BUSY**: Bulk writes cause lock contention. Solution: generate a single SQL file and ingest it (`--sql-out=exports/book.sql --apply=local`)
-- **SQLITE_AUTH on PRAGMA**: `wrangler d1 execute` doesn't allow PRAGMA statements. Strip them from SQL files.
-- **Multiple local DBs**: Different wrangler configs create different local DB hashes. Use `yarn db:local:legacy` to access old ones.
-- DB is named `ovid-db` in wrangler.toml (was `polyink-db` historically)
+Full schema in `database/schema.sql`. Key tables:
+- `books`, `chapters`, `content_items` — content
+- `users`, `sessions` — auth
+- `reading_progress` — cloud-synced reading position
+- `credit_transactions` — credit ledger (signup_bonus, purchase, usage, refund)
 
-### Migration Strategy
-Auto-migrations in `src/worker/db.ts` — Worker checks and applies on startup. Schema additions use `CREATE TABLE IF NOT EXISTS` and `ALTER TABLE ... ADD COLUMN` (wrapped in try/catch since D1 doesn't support `IF NOT EXISTS` on ALTER).
+### D1 Gotchas
+- **SQLITE_BUSY**: Avoid many small writes. Use single SQL file ingestion: `--sql-out=exports/book.sql --apply=local`
+- **SQLITE_AUTH**: D1 rejects PRAGMA statements. Remove from manual SQL files.
+- **Legacy DB name**: Still "polyink-db" in wrangler.toml to preserve existing data.
+
+## Frontend Notes
+
+### Routing
+- `/` — Bookshelf
+- `/book/:uuid/chapter/:number` — Reader (deep-linkable, SPA served by Worker)
+
+### BilingualReaderV2
+- Click paragraph → toggle `original` ↔ `translated` (state per paragraph via `item_id`)
+- Single-chapter in memory, scroll triggers next/prev chapter load
+- Reading progress auto-saved and restored
+- CJK typography: Noto Sans CJK SC, tuned spacing
+
+### BookShelf
+- Two rows: public books, user's books
+- Hover preview, click spine to read
+- Cover/spine images from R2
+
+### ErrorBoundary
+Wraps the app. Catches render errors, shows recovery UI.
+
+## Translation Service (Railway)
+
+Located in `services/translator/`. Hono server deployed on Railway.
+
+### Endpoints
+- `POST /translate` — Start translation (requires `secret` in body)
+- `GET /status/:uuid` — Translation progress
+- `GET /health` — Health check
+- `GET /cover-preview/:uuid` — Cover preview page
+
+### Translation Engine
+- Model: OpenRouter → `anthropic/claude-sonnet`
+- 5 concurrent chapter workers
+- Checkpoint resume: skips already-translated paragraphs on restart
+- Writes directly to D1 via REST API (`d1-client.ts`)
+
+### Image Processing
+- `image-processor.ts`: Sharp-based cover/spine generation
+- `cover-preview.ts`: HTML preview with login gate
+
+## Testing
+
+- `npm test` — Vitest unit tests
+- `npm run test:visual` — Playwright visual regression
+- `scripts/debug-epub-structure.js` — Analyze EPUB structure for debugging
 
 ## Common Issues
 
-| Symptom | Cause | Fix |
+| Problem | Cause | Fix |
 |---|---|---|
 | Only TOC imported, no content | Using spine instead of TOC | Use TOC-based chapter detection |
-| Chapters in wrong order | Async processing | Sync `chapter_number` with `order_index` |
-| "Could not read content" on import | File ID resolution failure | Check both href and filename matching |
-| Import/sync hangs | SQLITE_BUSY from many small writes | Use `--sql-out` for bulk SQL ingestion |
-| `no such table: books` locally | Fresh DB or wrong config hash | Run `yarn db:init` or use legacy script |
-| Cover preview 404 | Missing R2 image | Check R2 bucket, regenerate cover |
+| Chapters in wrong order | Async processing | Sync `chapter_number = order_index` |
+| SQLITE_BUSY during import | Many small writes | Use SQL file ingestion |
+| "no such table" locally | No schema | Run `npm run db:init` |
