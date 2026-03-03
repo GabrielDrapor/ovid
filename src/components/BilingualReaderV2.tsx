@@ -449,6 +449,11 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
           padding-left: 0;
           margin-left: 0;
         }
+        .reader-content-v2 img,
+        .reader-content-v2 svg {
+          max-width: 100%;
+          height: auto;
+        }
       `}} />
 
       <main
