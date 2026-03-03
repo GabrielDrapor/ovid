@@ -215,7 +215,9 @@ export async function processSpine(imageBuffer: Buffer): Promise<Buffer> {
   // Resize to target with padding to prevent text clipping.
   // Use 'contain' to fit the content, then extend with the dominant
   // background color to fill the exact target dimensions.
-  const resizedBuf = await spineImage.toBuffer();
+  // Must encode to PNG first — spineImage is constructed from raw pixels,
+  // and .toBuffer() without format returns raw data that sharp can't re-read.
+  const resizedBuf = await spineImage.png().toBuffer();
   const { dominant } = await sharp(resizedBuf).stats();
   const bgColor = { r: dominant.r, g: dominant.g, b: dominant.b };
 
