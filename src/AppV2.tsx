@@ -48,20 +48,9 @@ interface ReadingProgress {
 
 const PROGRESS_KEY = (uuid: string) => `ovid_progress_v2_${uuid}`;
 
-// Get initial progress from URL hash or localStorage
+// Get initial progress from localStorage
 const getInitialProgress = (uuid: string): ReadingProgress => {
-  // First, check URL hash (e.g., #chapter-5 or #chapter-5:/body[1]/p[3])
-  const hash = window.location.hash;
-  const hashMatch = hash.match(/^#chapter-(\d+)(?::(.+))?$/);
-  if (hashMatch) {
-    const chapter = parseInt(hashMatch[1], 10);
-    const xpath = hashMatch[2] ? decodeURIComponent(hashMatch[2]) : undefined;
-    if (chapter >= 1) {
-      return { chapter, xpath, timestamp: Date.now() };
-    }
-  }
-
-  // Fall back to localStorage (new format)
+  // Check localStorage (new format)
   const saved = localStorage.getItem(PROGRESS_KEY(uuid));
   if (saved) {
     try {
@@ -137,7 +126,7 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
     }
   }, [bookUuid, calculateProgress]);
 
-  // Save progress to localStorage and URL
+  // Save progress to localStorage only (URL stays clean as /book/{uuid})
   const saveProgress = useCallback((chapter: number, xpath?: string) => {
     const progress: ReadingProgress = {
       chapter,
@@ -145,13 +134,6 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
       timestamp: Date.now(),
     };
     localStorage.setItem(PROGRESS_KEY(bookUuid), JSON.stringify(progress));
-
-    // Update URL hash
-    const xpathPart = xpath ? `:${encodeURIComponent(xpath)}` : '';
-    const newHash = `#chapter-${chapter}${xpathPart}`;
-    if (window.location.hash !== newHash) {
-      window.history.replaceState(null, '', newHash);
-    }
   }, [bookUuid]);
 
   // Called by reader when visible element changes
