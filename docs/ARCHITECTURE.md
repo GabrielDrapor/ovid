@@ -47,7 +47,7 @@ Object storage served at `assets.ovid.jrd.pub`:
 
 ### Railway Translator Service
 A standalone Hono server that handles CPU-intensive work that exceeds CF Worker limits:
-- **Book translation** — Fetches untranslated paragraphs from D1 via REST API, translates with Claude Sonnet (via OpenRouter), writes back to D1. 5 concurrent chapter workers with checkpoint resume.
+- **Book translation** — Fetches untranslated paragraphs from D1 via REST API, translates with configurable LLM (default: gpt-4o-mini via OpenAI-compatible API), writes back to D1. 5 concurrent chapter workers with checkpoint resume.
 - **Image processing** — Uses Sharp for SVG→PNG rendering of covers/spines
 - **Cover preview** — Generates HTML previews of book covers
 

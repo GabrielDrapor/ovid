@@ -70,14 +70,14 @@ Worker CPU limit (30s) can't handle full-book translation. Solution: Railway-hos
 1. Worker receives EPUB upload → parses → stores in D1 (translated_text = '')
 2. `waitUntil`: POST webhook to Railway with `{bookUuid, secret}`
 3. Railway picks up → reads untranslated chapters from D1 REST API
-4. Translates 5 chapters concurrently via OpenRouter (Claude Sonnet)
+4. Translates 5 chapters concurrently via OpenAI-compatible API (default: gpt-4o-mini)
 5. Writes translations back to D1 per-paragraph (checkpoint resume)
 6. Marks book complete
 
 **Checkpoint resume**: Tracks `current_chapter` + `current_item_offset`. If interrupted, picks up where it left off.
 
 ### Cover & Spine Generation
-- AI-generated via Gemini (Nano Banana Pro)
+- AI-generated via Gemini 2.5 Flash Image
 - Cover images stored in R2, URLs saved in `books.book_cover_img_url` / `book_spine_img_url`
 - Sharp used for image processing (crop, resize, format conversion)
 - Password-protected preview page at `/api/cover-preview/:uuid`

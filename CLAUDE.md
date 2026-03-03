@@ -41,9 +41,9 @@ TypeScript-first across frontend, backend, CLI, and translator service.
 - **CF Worker** (`src/worker/`) — API server: auth, book-handlers, cover-generator, credits, db, types
 - **Railway Translator** (`services/translator/`) — Long-running translation service (Hono + Sharp)
   - Receives webhook from Worker on EPUB upload
-  - Translates via OpenRouter (Claude Sonnet), 5 concurrent chapters
+  - Translates via OpenAI-compatible API (default: gpt-4o-mini), 5 concurrent chapters
   - Reads/writes D1 via REST API, supports checkpoint resume
-  - Also handles cover/spine AI generation (Gemini) and image processing
+  - Also handles cover/spine AI generation (Gemini 2.5 Flash Image) and image processing
 - **CLI Scripts** (`scripts/`) — import-book, list-books, remove-book, sync-remote-book, generate-cover
 - **D1 SQLite** — Users, sessions, books, chapters, content_items, credits, reading progress
 - **R2 Storage** — Cover images, spine images, in-book images (`books/{uuid}/images/`)

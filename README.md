@@ -14,7 +14,7 @@ English | [简体中文](README.zh-CN.md)
 - **Reading progress** — Picks up where you left off, synced to the cloud
 - **Infinite scroll** — Chapters load seamlessly as you scroll up/down
 - **Multiple languages** — EN ↔ ZH, ES, FR, DE, JA, KO, RU
-- **CJK typography** — LXGW WenKai Screen with tuned line height and spacing
+- **CJK typography** — LXGW Neo ZhiSong Screen with tuned line height and spacing
 - **Google OAuth** — Login, get your own private library
 - **Credits & payments** — Stripe-powered, pay per book translation
 
@@ -34,7 +34,7 @@ Cloudflare D1         Cloudflare R2
                 5 concurrent chapters, checkpoint resume)
 ```
 
-**Upload flow:** You upload an EPUB → Worker parses it, stores chapters in D1 → fires a webhook to Railway → Railway translates chapter-by-chapter (Claude Sonnet via OpenRouter) and writes back to D1. Book appears on your shelf when done.
+**Upload flow:** You upload an EPUB → Worker parses it, stores chapters in D1 → fires a webhook to Railway → Railway translates chapter-by-chapter (default: gpt-4o-mini) and writes back to D1. Book appears on your shelf when done.
 
 **Reading flow:** Click a paragraph → it toggles between original and translated text. XPath-based mapping keeps alignment precise at the paragraph level.
 

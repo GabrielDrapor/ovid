@@ -58,7 +58,7 @@ The `language_pair` field on books stores this as e.g. `en-zh`.
 
 ## Cost
 
-Translation cost depends on book length and model. With Claude Sonnet via OpenRouter, a typical novel (~80k words) costs roughly $3–8. Users pay via the credits system (Stripe).
+Translation cost depends on book length and model. With gpt-4o-mini, a typical novel (~80k words) costs roughly $3–8. Users pay via the credits system (Stripe).
 
 ## Local CLI Translation
 
