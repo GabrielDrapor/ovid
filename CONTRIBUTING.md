@@ -3,7 +3,7 @@
 ## Development Setup
 
 ```bash
-git clone https://github.com/your-org/ovid && cd ovid
+git clone https://github.com/GabrielDrapor/ovid && cd ovid
 npm install
 cp wrangler.toml.example wrangler.toml  # add your D1 database ID
 npm run db:init

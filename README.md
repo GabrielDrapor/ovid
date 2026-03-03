@@ -2,7 +2,9 @@
 
 **A bilingual reader for the browser.** Import any EPUB, click a paragraph, and it flips between the original and its translation. No split screens, no popups — just tap and read.
 
-🔗 **[Try it live → lib.jrd.pub](https://lib.jrd.pub)**
+🔗 **[Try it live → ovid.ink](https://ovid.ink)**
+
+English | [简体中文](README.zh-CN.md)
 
 ## Features
 

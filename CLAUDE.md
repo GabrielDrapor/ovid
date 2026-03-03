@@ -117,7 +117,7 @@ TypeScript-first across frontend, backend, CLI, and translator service.
 - `TRANSLATOR_URL`, `TRANSLATOR_SECRET`
 
 ### wrangler.toml vars
-- `APP_URL` — e.g. `https://lib.jrd.pub`
+- `APP_URL` — e.g. `https://ovid.ink`
 
 ### Local .env (CLI scripts)
 - `OPENAI_API_KEY`, `OPENAI_API_BASE_URL`, `OPENAI_MODEL`
