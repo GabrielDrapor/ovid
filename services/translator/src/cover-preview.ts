@@ -4,6 +4,7 @@
  * returns final images for preview.
  */
 
+import sharp from 'sharp';
 import { processSpine, processCover } from './image-processor.js';
 
 const GEMINI_MODEL = 'gemini-2.5-flash-image';
@@ -57,12 +58,16 @@ async function generateImageB64(apiKey: string, prompt: string, maxRetries = 2):
               throw new Error(`Image too small (${buf.length} bytes), likely invalid`);
             }
 
-            // Validate with sharp: ensure it's a recognized image format
-            const sharp = (await import('sharp')).default;
+            // Check magic bytes to identify actual format
+            const magic = buf.slice(0, 4).toString('hex');
+            console.log(`[cover-preview] attempt=${attempt} mimeType=${mimeType} bufSize=${buf.length} magic=${magic}`);
+
+            // Validate with sharp
             const meta = await sharp(buf).metadata();
             if (!meta.width || !meta.height) {
               throw new Error('Sharp cannot read image dimensions');
             }
+            console.log(`[cover-preview] validated format=${meta.format} ${meta.width}x${meta.height}`);
 
             return { data: b64, mimeType };
           }
@@ -70,9 +75,9 @@ async function generateImageB64(apiKey: string, prompt: string, maxRetries = 2):
       }
       throw new Error('No image in Gemini response');
     } catch (err) {
+      console.error(`[cover-preview] attempt=${attempt} error:`, (err as Error).message);
       lastError = err as Error;
       if (attempt < maxRetries) {
-        // Wait before retry (1s, 2s)
         await new Promise(r => setTimeout(r, (attempt + 1) * 1000));
       }
     }
@@ -140,9 +145,8 @@ Design for "${title}" by ${author}:
 
   // Step 4: Process images with sharp
   // Normalize to PNG via sharp to handle any format Gemini returns (JPEG, WebP, etc.)
-  const sharpMod = (await import('sharp')).default;
-  const coverBuf = await sharpMod(Buffer.from(coverB64, 'base64')).png().toBuffer();
-  const spineBuf = await sharpMod(Buffer.from(spineResult.data, 'base64')).png().toBuffer();
+  const coverBuf = await sharp(Buffer.from(coverB64, 'base64')).png().toBuffer();
+  const spineBuf = await sharp(Buffer.from(spineResult.data, 'base64')).png().toBuffer();
 
   const [finalCover, finalSpine] = await Promise.all([
     processCover(coverBuf),
