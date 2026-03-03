@@ -44,8 +44,8 @@ Cloudflare D1         Cloudflare R2
 git clone https://github.com/GabrielDrapor/ovid.git && cd ovid
 yarn install
 cp wrangler.toml.example wrangler.toml   # fill in your D1 database ID
-npm run db:init                           # create tables
-npm run preview                           # http://localhost:8787
+yarn db:init                           # create tables
+yarn preview                           # http://localhost:8787
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development workflow and PR process.
@@ -54,10 +54,10 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development workflow and PR process.
 
 | Command | Description |
 |---|---|
-| `npm run preview` | Full-stack local dev (Worker + React on :8787) |
-| `npm run deploy` | Build + deploy to Cloudflare Workers |
-| `npm test` | Unit tests (Vitest) |
-| `npm run test:visual` | Visual regression (Playwright) |
+| `yarn preview` | Full-stack local dev (Worker + React on :8787) |
+| `yarn deploy` | Build + deploy to Cloudflare Workers |
+| `yarn test` | Unit tests (Vitest) |
+| `yarn test:visual` | Visual regression (Playwright) |
 | `yarn import-book -- --file="book.epub" --target="zh"` | Import & translate a book via CLI |
 | `yarn list-books:local` / `remote` | List books in local/production DB |
 | `yarn remove-book:local` / `remote -- --uuid="..."` | Remove a book |

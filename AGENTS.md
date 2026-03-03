@@ -101,7 +101,7 @@ Worker serves React build. Routes matching `/book/*` return `index.html` for cli
 ### D1 Quirks
 - **SQLITE_BUSY**: Bulk writes cause lock contention. Solution: generate a single SQL file and ingest it (`--sql-out=exports/book.sql --apply=local`)
 - **SQLITE_AUTH on PRAGMA**: `wrangler d1 execute` doesn't allow PRAGMA statements. Strip them from SQL files.
-- **Multiple local DBs**: Different wrangler configs create different local DB hashes. Use `npm run db:local:legacy` to access old ones.
+- **Multiple local DBs**: Different wrangler configs create different local DB hashes. Use `yarn db:local:legacy` to access old ones.
 - DB is named `ovid-db` in wrangler.toml (was `polyink-db` historically)
 
 ### Migration Strategy
@@ -115,5 +115,5 @@ Auto-migrations in `src/worker/db.ts` — Worker checks and applies on startup. 
 | Chapters in wrong order | Async processing | Sync `chapter_number` with `order_index` |
 | "Could not read content" on import | File ID resolution failure | Check both href and filename matching |
 | Import/sync hangs | SQLITE_BUSY from many small writes | Use `--sql-out` for bulk SQL ingestion |
-| `no such table: books` locally | Fresh DB or wrong config hash | Run `npm run db:init` or use legacy script |
+| `no such table: books` locally | Fresh DB or wrong config hash | Run `yarn db:init` or use legacy script |
 | Cover preview 404 | Missing R2 image | Check R2 bucket, regenerate cover |

@@ -44,18 +44,18 @@ Cloudflare D1         Cloudflare R2
 git clone https://github.com/GabrielDrapor/ovid.git && cd ovid
 yarn install
 cp wrangler.toml.example wrangler.toml   # 填入你的 D1 数据库 ID
-npm run db:init                           # 建表
-npm run preview                           # http://localhost:8787
+yarn db:init                           # 建表
+yarn preview                           # http://localhost:8787
 ```
 
 ## 常用命令
 
 | 命令 | 说明 |
 |---|---|
-| `npm run preview` | 本地全栈开发（Worker + React，端口 8787） |
-| `npm run deploy` | 构建 + 部署到 Cloudflare Workers |
-| `npm test` | 单元测试（Vitest） |
-| `npm run test:visual` | 视觉回归测试（Playwright） |
+| `yarn preview` | 本地全栈开发（Worker + React，端口 8787） |
+| `yarn deploy` | 构建 + 部署到 Cloudflare Workers |
+| `yarn test` | 单元测试（Vitest） |
+| `yarn test:visual` | 视觉回归测试（Playwright） |
 | `yarn import-book -- --file="book.epub" --target="zh"` | CLI 导入并翻译书籍 |
 | `yarn list-books:local` / `remote` | 列出本地/线上书籍 |
 | `yarn remove-book:local` / `remote -- --uuid="..."` | 删除书籍 |

@@ -5,26 +5,26 @@ Guidance for Claude Code working on this repo.
 ## Commands
 
 ### Dev & Deploy
-- `npm run preview` — Full-stack local dev (Worker + React on :8787)
-- `npm run deploy` — `yarn build && wrangler deploy` to production
-- `npm run deploy -- --env staging` — Deploy to staging
-- `npm run build` — Build React app only
-- `npm run format` — Prettier
-- `npm run format:check` — Check formatting
+- `yarn preview` — Full-stack local dev (Worker + React on :8787)
+- `yarn deploy` — `yarn build && wrangler deploy` to production
+- `yarn deploy -- --env staging` — Deploy to staging
+- `yarn build` — Build React app only
+- `yarn format` — Prettier
+- `yarn format:check` — Check formatting
 
 ### Testing
-- `npm test` — Vitest unit tests
-- `npm run test:watch` — Vitest watch mode
-- `npm run test:visual` — Playwright visual regression
-- `npm run test:visual:update` — Update Playwright snapshots
+- `yarn test` — Vitest unit tests
+- `yarn test:watch` — Vitest watch mode
+- `yarn test:visual` — Playwright visual regression
+- `yarn test:visual:update` — Update Playwright snapshots
 
 ### Database
-- `npm run db:init` — Init local DB schema
-- `npm run db:seed` — Load sample data
-- `npm run db:local -- "SQL"` — Run SQL on local D1
-- `npm run db:remote -- "SQL"` — Run SQL on remote D1
-- `npm run db:local:file -- path.sql` — Execute SQL file locally
-- `npm run db:remote:file -- path.sql` — Execute SQL file remotely
+- `yarn db:init` — Init local DB schema
+- `yarn db:seed` — Load sample data
+- `yarn db:local -- "SQL"` — Run SQL on local D1
+- `yarn db:remote -- "SQL"` — Run SQL on remote D1
+- `yarn db:local:file -- path.sql` — Execute SQL file locally
+- `yarn db:remote:file -- path.sql` — Execute SQL file remotely
 
 ### Book Management (TypeScript CLI)
 - `yarn import-book -- --file="book.epub" --target="zh"` — Import + translate
@@ -127,6 +127,6 @@ TypeScript-first across frontend, backend, CLI, and translator service.
 
 - **Branch off main** — `feature/` or `fix/` branches, PR back to main
 - **Never force push**
-- **Tests required** — Run `npm test` before submitting. New features need new tests.
+- **Tests required** — Run `yarn test` before submitting. New features need new tests.
 - **CI** — Push to main auto-deploys via GitHub Actions
 - **Railway** — Translator service auto-deploys on git push separately
