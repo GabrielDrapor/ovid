@@ -443,6 +443,12 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
         .reader-content-v2 * {
           line-height: inherit !important;
         }
+        .reader-content-v2 ol,
+        .reader-content-v2 ul {
+          list-style-position: inside;
+          padding-left: 0;
+          margin-left: 0;
+        }
       `}} />
 
       <main
