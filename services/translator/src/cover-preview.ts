@@ -34,14 +34,50 @@ async function callGemini(apiKey: string, parts: any[], responseModalities: stri
   return resp.json();
 }
 
-async function generateImageB64(apiKey: string, prompt: string): Promise<string> {
-  const data = await callGemini(apiKey, [{ text: prompt }]);
-  for (const candidate of data.candidates || []) {
-    for (const part of candidate.content?.parts || []) {
-      if (part.inlineData?.data) return part.inlineData.data;
+interface ImageResult {
+  data: string;      // base64
+  mimeType: string;  // e.g. 'image/png', 'image/jpeg'
+}
+
+async function generateImageB64(apiKey: string, prompt: string, maxRetries = 2): Promise<ImageResult> {
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const data = await callGemini(apiKey, [{ text: prompt }]);
+      for (const candidate of data.candidates || []) {
+        for (const part of candidate.content?.parts || []) {
+          if (part.inlineData?.data) {
+            const b64 = part.inlineData.data;
+            const mimeType = part.inlineData.mimeType || 'image/png';
+
+            // Validate: decode and check it's a non-trivial buffer
+            const buf = Buffer.from(b64, 'base64');
+            if (buf.length < 1000) {
+              throw new Error(`Image too small (${buf.length} bytes), likely invalid`);
+            }
+
+            // Validate with sharp: ensure it's a recognized image format
+            const sharp = (await import('sharp')).default;
+            const meta = await sharp(buf).metadata();
+            if (!meta.width || !meta.height) {
+              throw new Error('Sharp cannot read image dimensions');
+            }
+
+            return { data: b64, mimeType };
+          }
+        }
+      }
+      throw new Error('No image in Gemini response');
+    } catch (err) {
+      lastError = err as Error;
+      if (attempt < maxRetries) {
+        // Wait before retry (1s, 2s)
+        await new Promise(r => setTimeout(r, (attempt + 1) * 1000));
+      }
     }
   }
-  throw new Error('No image in Gemini response');
+  throw lastError || new Error('Image generation failed');
 }
 
 async function describeCover(apiKey: string, coverB64: string): Promise<{ color: string; style: string; accent: string }> {
@@ -79,7 +115,8 @@ Requirements:
 - The design must fill the ENTIRE image edge to edge with NO white borders
 - Rich, atmospheric, visually compelling`;
 
-  const coverB64 = await generateImageB64(apiKey, coverPrompt);
+  const coverResult = await generateImageB64(apiKey, coverPrompt);
+  const coverB64 = coverResult.data;
 
   // Step 2: Describe cover
   const description = await describeCover(apiKey, coverB64);
@@ -99,11 +136,13 @@ Design for "${title}" by ${author}:
 - The rectangle should be about 1/6 the width of the total image
 - Sharp edges, no shadows, no 3D effects, no page edges visible`;
 
-  const spineB64 = await generateImageB64(apiKey, spinePrompt);
+  const spineResult = await generateImageB64(apiKey, spinePrompt);
 
   // Step 4: Process images with sharp
-  const coverBuf = Buffer.from(coverB64, 'base64');
-  const spineBuf = Buffer.from(spineB64, 'base64');
+  // Normalize to PNG via sharp to handle any format Gemini returns (JPEG, WebP, etc.)
+  const sharpMod = (await import('sharp')).default;
+  const coverBuf = await sharpMod(Buffer.from(coverB64, 'base64')).png().toBuffer();
+  const spineBuf = await sharpMod(Buffer.from(spineResult.data, 'base64')).png().toBuffer();
 
   const [finalCover, finalSpine] = await Promise.all([
     processCover(coverBuf),
@@ -113,7 +152,7 @@ Design for "${title}" by ${author}:
   return {
     cover: `data:image/png;base64,${finalCover.toString('base64')}`,
     spine: `data:image/png;base64,${finalSpine.toString('base64')}`,
-    spineRaw: `data:image/png;base64,${spineB64}`,
+    spineRaw: `data:${spineResult.mimeType};base64,${spineResult.data}`,
     description,
   };
 }
