@@ -43,39 +43,16 @@ function App() {
 
     const handlePopState = () => syncFromUrl();
     window.addEventListener('popstate', handlePopState);
-    window.addEventListener('hashchange', handlePopState);
 
     return () => {
       window.removeEventListener('popstate', handlePopState);
-      window.removeEventListener('hashchange', handlePopState);
     };
   }, []);
 
   const handleSelectBook = (uuid: string) => {
-    // Check for saved progress (try new v2 format first, then legacy)
-    let chapterToLoad = 1;
-    let xpathToLoad: string | undefined;
-    
-    const savedV2 = localStorage.getItem(`ovid_progress_v2_${uuid}`);
-    if (savedV2) {
-      try {
-        const progress = JSON.parse(savedV2);
-        if (progress.chapter >= 1) {
-          chapterToLoad = progress.chapter;
-          xpathToLoad = progress.xpath;
-        }
-      } catch { /* ignore */ }
-    } else {
-      const savedChapter = localStorage.getItem(`ovid_progress_${uuid}`);
-      if (savedChapter) {
-        chapterToLoad = parseInt(savedChapter, 10) || 1;
-      }
-    }
-
-    // Navigation: Go to book reader (include xpath in hash if available)
-    const xpathPart = xpathToLoad ? `:${encodeURIComponent(xpathToLoad)}` : '';
-    const url = `/book/${uuid}#chapter-${chapterToLoad}${xpathPart}`;
-    window.history.pushState({}, '', url);
+    // Navigation: clean URL with just the book UUID
+    // Reading progress (chapter/xpath) is restored from localStorage by AppV2
+    window.history.pushState({}, '', `/book/${uuid}`);
 
     // Manually trigger sync because pushState doesn't fire popstate
     syncFromUrl();
