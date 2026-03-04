@@ -7,7 +7,7 @@
 import sharp from 'sharp';
 import { processSpine, processCover } from './image-processor.js';
 
-const GEMINI_MODEL = 'gemini-2.5-flash-image';
+const GEMINI_MODEL = 'gemini-3.1-flash-image-preview';
 const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
 interface PreviewResult {
