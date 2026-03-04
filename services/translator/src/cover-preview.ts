@@ -126,27 +126,68 @@ Requirements:
   // Step 2: Describe cover
   const description = await describeCover(apiKey, coverB64);
 
-  // Step 3: Generate spine on green screen
-  const spinePrompt = `A flat front-facing book spine on bright solid lime green (#00FF00) background. The spine is a narrow vertical dark rectangle, centered, with green space on all sides.
+  // Step 3: Generate spine using reference images
+  const refSpineUrls = [
+    'https://assets.ovid.jrd.pub/ref/spine_stud.png',
+    'https://assets.ovid.jrd.pub/ref/spine_advs_02.png',
+    'https://assets.ovid.jrd.pub/ref/spine_stranger_v2_spine.png',
+  ];
 
-Design for "${title}" by ${author}:
-- Background color: ${description.color} (matching the book's cover)
+  // Fetch reference spines and encode as base64
+  const refSpines = await Promise.all(
+    refSpineUrls.map(async (url) => {
+      const resp = await fetch(url);
+      if (!resp.ok) return null;
+      const buf = Buffer.from(await resp.arrayBuffer());
+      return buf.toString('base64');
+    }),
+  );
+  const validRefs = refSpines.filter((r): r is string => r !== null);
+
+  const spinePrompt = `Generate a book spine image for "${title}" by ${author}.
+
+I'm showing you ${validRefs.length} reference book spines. Study their format carefully:
+- They are NARROW VERTICAL rectangles (approximately 114px wide × 607px tall)
+- Text runs VERTICALLY from top to bottom
+- Title in LARGE BOLD serif capitals, rotated 90° (reading bottom-to-top)
+- Author name at the bottom, smaller
+- A small thematic icon/motif at the very top
+- Solid colored background, clean and minimal
+- NO borders, NO 3D effects, just a flat colored rectangle
+
+Now generate a NEW spine for "${title}" by ${author}:
+- Background: ${description.color}
 - Style: ${description.style}
-- LARGE, BOLD ${description.accent} text filling most of the spine width — must be readable at thumbnail size
-- Title "${title.toUpperCase()}" running vertically in LARGE BOLD capitals
-- Author "${author.toUpperCase()}" at the bottom, also reasonably large
-- A small decorative motif at the top matching the cover's aesthetic
-- Simple border lines on left and right edges
-- Keep decoration MINIMAL — prioritize text legibility
-- The rectangle should be about 1/6 the width of the total image
-- Sharp edges, no shadows, no 3D effects, no page edges visible`;
+- Text color: ${description.accent}
+- Must be the SAME narrow vertical format as the references
+- Title: "${title.toUpperCase()}"
+- Author: "${author.toUpperCase()}"
+- Choose a small icon that represents the book's themes
+- The output should be a narrow vertical rectangle, NOT a square`;
 
-  const spineResult = await generateImageB64(apiKey, spinePrompt);
+  // Build parts: reference images + text prompt
+  const spineParts: any[] = [];
+  for (const ref of validRefs) {
+    spineParts.push({ inlineData: { mimeType: 'image/png', data: ref } });
+  }
+  spineParts.push({ text: spinePrompt });
+
+  const spineData = await callGemini(apiKey, spineParts);
+  let spineB64 = '';
+  for (const candidate of spineData.candidates || []) {
+    for (const part of candidate.content?.parts || []) {
+      if (part.inlineData?.data) {
+        spineB64 = part.inlineData.data;
+        break;
+      }
+    }
+    if (spineB64) break;
+  }
+  if (!spineB64) throw new Error('No spine image in Gemini response');
 
   // Step 4: Process images with sharp
-  // Normalize to PNG via sharp to handle any format Gemini returns (JPEG, WebP, etc.)
   const coverBuf = await sharp(Buffer.from(coverB64, 'base64')).png().toBuffer();
-  const spineBuf = await sharp(Buffer.from(spineResult.data, 'base64')).png().toBuffer();
+  const spineBuf = await sharp(Buffer.from(spineB64, 'base64')).png().toBuffer();
 
   const [finalCover, finalSpine] = await Promise.all([
     processCover(coverBuf),
@@ -156,7 +197,7 @@ Design for "${title}" by ${author}:
   return {
     cover: `data:image/png;base64,${finalCover.toString('base64')}`,
     spine: `data:image/png;base64,${finalSpine.toString('base64')}`,
-    spineRaw: `data:${spineResult.mimeType};base64,${spineResult.data}`,
+    spineRaw: `data:image/png;base64,${spineB64}`,
     description,
   };
 }
