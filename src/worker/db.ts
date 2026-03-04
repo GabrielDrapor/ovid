@@ -589,6 +589,19 @@ export async function updateReadingProgress(
 }
 
 /**
+ * Get all reading progress for a user (batch)
+ */
+export async function getAllUserBookProgress(
+  db: D1Database,
+  userId: number
+): Promise<UserBookProgress[]> {
+  const rows = await db.prepare(
+    `SELECT * FROM user_book_progress WHERE user_id = ?`
+  ).bind(userId).all();
+  return rows.results as UserBookProgress[];
+}
+
+/**
  * Get user's reading progress for a specific book
  */
 export async function getUserBookProgress(

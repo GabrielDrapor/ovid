@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { upsertUserBookProgress, updateReadingProgress, getUserBookProgress } from '../../../src/worker/db';
+import { upsertUserBookProgress, updateReadingProgress, getUserBookProgress, getAllUserBookProgress } from '../../../src/worker/db';
 
 function createMockDB(firstResult: any = null) {
   const mockStatement = {
@@ -112,6 +112,31 @@ describe('reading progress', () => {
       
       // Only one prepare call (the UPDATE)
       expect(db.prepare).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('getAllUserBookProgress', () => {
+    it('queries all progress for a user in a single call', async () => {
+      const mockResults = [
+        { id: 1, user_id: 1, book_uuid: 'book-1', is_completed: 1, reading_progress: 100 },
+        { id: 2, user_id: 1, book_uuid: 'book-2', is_completed: 0, reading_progress: 42 },
+      ];
+      const mockStatement = {
+        bind: vi.fn().mockReturnThis(),
+        all: vi.fn().mockResolvedValue({ results: mockResults }),
+      };
+      const db = { prepare: vi.fn().mockReturnValue(mockStatement) } as any;
+
+      const result = await getAllUserBookProgress(db, 1);
+      
+      expect(db.prepare).toHaveBeenCalledTimes(1);
+      const sql = db.prepare.mock.calls[0][0] as string;
+      expect(sql).toContain('SELECT * FROM user_book_progress');
+      expect(sql).toContain('WHERE user_id = ?');
+      expect(mockStatement.bind).toHaveBeenCalledWith(1);
+      expect(result).toHaveLength(2);
+      expect(result[0].book_uuid).toBe('book-1');
+      expect(result[1].reading_progress).toBe(42);
     });
   });
 });

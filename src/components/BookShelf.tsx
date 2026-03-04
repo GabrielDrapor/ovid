@@ -74,23 +74,21 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
       }
       setLoading(false);
 
-      // Fetch progress in background (non-blocking, parallel)
+      // Fetch all progress in a single request
       if (user && booksData.length > 0) {
-        const progressMap = new Map<string, UserBookProgress>();
-        await Promise.all(booksData.map(async (book) => {
-          try {
-            const progressResponse = await fetch(`/api/book/${book.uuid}/progress`);
-            if (progressResponse.ok) {
-              const progressData = await progressResponse.json() as { progress: UserBookProgress | null };
-              if (progressData.progress) {
-                progressMap.set(book.uuid, progressData.progress);
-              }
+        try {
+          const progressResponse = await fetch('/api/progress');
+          if (progressResponse.ok) {
+            const data = await progressResponse.json() as { progress: Record<string, UserBookProgress> };
+            const progressMap = new Map<string, UserBookProgress>();
+            for (const [uuid, p] of Object.entries(data.progress)) {
+              progressMap.set(uuid, p);
             }
-          } catch {
-            // Silently skip
+            setBookProgressMap(progressMap);
           }
-        }));
-        setBookProgressMap(progressMap);
+        } catch {
+          // Silently skip
+        }
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch books');
