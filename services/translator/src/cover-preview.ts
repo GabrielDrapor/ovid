@@ -146,8 +146,10 @@ Requirements:
 
   const spinePrompt = `Generate a book spine image for "${title}" by ${author}.
 
-I'm showing you ${validRefs.length} reference book spines. Study their format carefully:
-- They are NARROW VERTICAL rectangles (approximately 114px wide × 607px tall)
+The LAST image is the book's FRONT COVER — your spine MUST match its exact color palette, typography style, and visual mood.
+
+The other images are reference book spines showing the correct FORMAT:
+- NARROW VERTICAL rectangles (approximately 114px wide × 607px tall)
 - Text runs VERTICALLY from top to bottom
 - Title in LARGE BOLD serif capitals, rotated 90° (reading bottom-to-top)
 - Author name at the bottom, smaller
@@ -155,21 +157,21 @@ I'm showing you ${validRefs.length} reference book spines. Study their format ca
 - Solid colored background, clean and minimal
 - NO borders, NO 3D effects, just a flat colored rectangle
 
-Now generate a NEW spine for "${title}" by ${author}:
-- Background: ${description.color}
-- Style: ${description.style}
-- Text color: ${description.accent}
-- Must be the SAME narrow vertical format as the references
+Generate a spine that:
+- Uses the SAME colors and design style as the front cover
+- Follows the SAME narrow vertical format as the reference spines
 - Title: "${title.toUpperCase()}"
 - Author: "${author.toUpperCase()}"
-- Choose a small icon that represents the book's themes
+- A small icon at the top matching the cover's theme
 - The output should be a narrow vertical rectangle, NOT a square`;
 
-  // Build parts: reference images + text prompt
+  // Build parts: reference spines + cover image + text prompt
   const spineParts: any[] = [];
   for (const ref of validRefs) {
     spineParts.push({ inlineData: { mimeType: 'image/png', data: ref } });
   }
+  // Include the generated cover so Gemini can match its style
+  spineParts.push({ inlineData: { mimeType: 'image/png', data: coverB64 } });
   spineParts.push({ text: spinePrompt });
 
   const spineData = await callGemini(apiKey, spineParts);
