@@ -189,9 +189,11 @@ Now generate a NEW spine for "${title}" by ${author}:
   const coverBuf = await sharp(Buffer.from(coverB64, 'base64')).png().toBuffer();
   const spineBuf = await sharp(Buffer.from(spineB64, 'base64')).png().toBuffer();
 
+  // processSpine assumes green-screen input; with reference-based generation
+  // the spine is already correctly formatted, just needs resizing.
   const [finalCover, finalSpine] = await Promise.all([
     processCover(coverBuf),
-    processSpine(spineBuf),
+    sharp(spineBuf).resize(114, 607, { fit: 'cover', position: 'centre' }).png().toBuffer(),
   ]);
 
   return {
