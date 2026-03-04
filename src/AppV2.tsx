@@ -200,18 +200,14 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
       setCurrentChapter(chapterNumber);
       saveProgress(chapterNumber, scrollToXpath);
       
-      // Auto-update reading progress in database (debounced)
-      // Only save if we've loaded chapters info
+      // Auto-update reading progress in database (fire-and-forget)
+      // Use PUT progress endpoint to avoid resetting completion status
       if (chapters.length > 0) {
         const progressPercent = Math.round((chapterNumber / chapters.length) * 100);
-        // Don't await this - let it happen in background
-        fetch(`/api/book/${bookUuid}/mark-complete`, {
-          method: 'POST',
+        fetch(`/api/book/${bookUuid}/progress`, {
+          method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            isCompleted: false,
-            readingProgress: progressPercent 
-          }),
+          body: JSON.stringify({ readingProgress: progressPercent }),
         }).catch(err => console.error('Error updating progress:', err));
       }
 

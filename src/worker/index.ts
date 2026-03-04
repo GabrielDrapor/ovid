@@ -28,7 +28,9 @@ import {
   getBookStatus,
   getTranslationJob,
   upsertUserBookProgress,
+  updateReadingProgress,
   getUserBookProgress,
+  getAllUserBookProgress,
 } from './db';
 import {
   handleBookUpload,
@@ -327,6 +329,24 @@ export default {
           }
         }
 
+        // Get all reading progress for the current user (batch)
+        if (url.pathname === '/api/progress' && request.method === 'GET') {
+          const user = await getCurrentUser(env.DB, request);
+          if (!user) {
+            return new Response(JSON.stringify({ progress: {} }), {
+              headers: { 'Content-Type': 'application/json' },
+            });
+          }
+          const allProgress = await getAllUserBookProgress(env.DB, user.id);
+          const progressMap: Record<string, any> = {};
+          for (const p of allProgress) {
+            progressMap[p.book_uuid] = p;
+          }
+          return new Response(JSON.stringify({ progress: progressMap }), {
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+
         // Get user's reading progress for a book
         const progressMatch = url.pathname.match(/^\/api\/book\/([^\/]+)\/progress$/);
         if (progressMatch && request.method === 'GET') {
@@ -361,11 +381,8 @@ export default {
               });
             }
             
-            // Update progress while preserving completion status
-            const currentProgress = await getUserBookProgress(env.DB, user.id, bookUuid);
-            const isCompleted = currentProgress?.is_completed ?? false;
-            
-            await upsertUserBookProgress(env.DB, user.id, bookUuid, isCompleted, body.readingProgress);
+            // Update only reading_progress — never touch is_completed or completed_at
+            await updateReadingProgress(env.DB, user.id, bookUuid, body.readingProgress);
             const updatedProgress = await getUserBookProgress(env.DB, user.id, bookUuid);
             
             return new Response(JSON.stringify({ success: true, progress: updatedProgress }), {
