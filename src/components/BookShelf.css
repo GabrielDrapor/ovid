@@ -562,6 +562,15 @@
   max-height: 280px;
   object-fit: contain;
   border-radius: 8px;
+  transition: opacity 0.2s ease-in-out;
+}
+
+.preview-cover img.cover-loading {
+  opacity: 0;
+}
+
+.preview-cover img.cover-loaded {
+  opacity: 1;
 }
 
 .default-preview-cover {
