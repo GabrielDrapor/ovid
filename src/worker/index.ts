@@ -31,6 +31,7 @@ import {
   updateReadingProgress,
   getUserBookProgress,
   getAllUserBookProgress,
+  checkBookAccess,
 } from './db';
 import {
   handleBookUpload,
@@ -237,6 +238,16 @@ export default {
         const statusMatch = url.pathname.match(/^\/api\/book\/([^\/]+)\/status$/);
         if (statusMatch) {
           const bookUuid = statusMatch[1];
+
+          // Access check
+          const statusUser = await getCurrentUser(env.DB, request);
+          const statusAccess = await checkBookAccess(env.DB, bookUuid, statusUser?.id);
+          if (!statusAccess.accessible) {
+            return new Response(JSON.stringify({ error: 'Not found' }), {
+              status: 404, headers: { 'Content-Type': 'application/json' },
+            });
+          }
+
           const status = await getBookStatus(env.DB, bookUuid);
           if (!status) {
             return new Response(JSON.stringify({ error: 'Book not found' }), {
@@ -414,6 +425,17 @@ export default {
           const bookUuid = apiMatch[1];
           const endpoint = apiMatch[2];
 
+          // Access check for book data endpoints
+          if (endpoint === 'chapters' || endpoint.startsWith('chapter/')) {
+            const user = await getCurrentUser(env.DB, request);
+            const access = await checkBookAccess(env.DB, bookUuid, user?.id);
+            if (!access.accessible) {
+              return new Response(JSON.stringify({ error: 'Not found' }), {
+                status: 404, headers: { 'Content-Type': 'application/json' },
+              });
+            }
+          }
+
           if (endpoint === 'chapters') {
             const chapters = await getBookChaptersV2(env.DB, bookUuid);
             return new Response(JSON.stringify(chapters), {
@@ -453,6 +475,8 @@ export default {
     }
 
     // Handle book URLs: /book/:uuid and /v2/book/:uuid (all use V2 database)
+    // For private books, we serve the SPA and let the frontend handle the auth check
+    // via API calls (which have access control). This avoids needing cookie parsing here.
     const bookUrlMatch = url.pathname.match(/^\/(?:v2\/)?book\/([^\/]+)/);
     if (bookUrlMatch) {
       const bookUuid = bookUrlMatch[1];
@@ -471,12 +495,12 @@ export default {
                 { headers: { 'Content-Type': 'text/html' } }
               );
             }
-          } else {
-            return new Response('Book not found', { status: 404 });
           }
         } catch {
-          return new Response('Database error', { status: 500 });
+          // Fall through to redirect
         }
+        // Book not found — redirect to home
+        return Response.redirect(new URL('/', request.url).toString(), 302);
       }
     }
 
@@ -496,10 +520,12 @@ export default {
     try {
       const asset = await env.ASSETS.fetch(request);
       if (asset.status !== 404) return asset;
-      return new Response('Not found', { status: 404 });
     } catch {
-      return new Response('Asset not found', { status: 404 });
+      // Fall through to redirect
     }
+
+    // Unknown route — redirect to home
+    return Response.redirect(new URL('/', request.url).toString(), 302);
   },
 };
 

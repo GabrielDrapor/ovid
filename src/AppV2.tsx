@@ -159,6 +159,11 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
     const loadChapters = async () => {
       try {
         const response = await fetchWithRetry(`/api/v2/book/${bookUuid}/chapters`);
+        if (response.status === 404) {
+          // Book not found or not accessible — redirect to home
+          window.location.replace('/');
+          return;
+        }
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`);
         }

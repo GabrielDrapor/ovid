@@ -282,6 +282,17 @@ export const PREVIEW_HTML = `<!DOCTYPE html>
     min-height: 100vh; padding: 2rem;
   }
   h1 { font-size: 1.5rem; margin-bottom: 1.5rem; color: #fff; }
+  .book-select {
+    margin-bottom: 1rem; display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;
+  }
+  .book-select select {
+    padding: 0.6rem 1rem; border-radius: 8px; border: 1px solid #333;
+    background: #16213e; color: #fff; font-size: 1rem; flex: 1; min-width: 200px;
+    cursor: pointer;
+  }
+  .book-select select option { background: #16213e; }
+  .current-cover { font-size: 0.8rem; color: #666; }
+  .current-cover img { height: 40px; border-radius: 3px; vertical-align: middle; margin-left: 0.5rem; }
   .form { display: flex; gap: 0.75rem; margin-bottom: 2rem; flex-wrap: wrap; }
   input {
     padding: 0.6rem 1rem; border-radius: 8px; border: 1px solid #333;
@@ -295,6 +306,10 @@ export const PREVIEW_HTML = `<!DOCTYPE html>
   }
   button:hover { opacity: 0.85; }
   button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-save {
+    background: #4ecca3; color: #1a1a2e; margin-top: 1.5rem; padding: 0.8rem 2rem;
+    font-size: 1.1rem;
+  }
   .results { display: flex; gap: 2rem; flex-wrap: wrap; align-items: flex-start; }
   .card {
     background: #16213e; border-radius: 12px; padding: 1rem;
@@ -314,11 +329,17 @@ export const PREVIEW_HTML = `<!DOCTYPE html>
     font-size: 0.85rem; margin-bottom: 1rem; line-height: 1.5;
   }
   .description span { color: #7ec8e3; }
-  .size { font-size: 0.75rem; color: #555; }
 </style>
 </head>
 <body>
 <h1>📚 Cover Preview</h1>
+
+<div class="book-select">
+  <select id="bookSelect" onchange="onBookSelect()">
+    <option value="">— Custom (enter manually) —</option>
+  </select>
+  <span id="currentCover" class="current-cover"></span>
+</div>
 
 <div class="form">
   <input id="title" placeholder="Book title" value="The Great Gatsby">
@@ -329,8 +350,56 @@ export const PREVIEW_HTML = `<!DOCTYPE html>
 <div id="status"></div>
 <div id="desc"></div>
 <div id="results" class="results"></div>
+<div id="saveArea"></div>
 
 <script>
+let books = [];
+let lastResult = null;
+let selectedBookUuid = null;
+
+// Load books on page load
+(async function loadBooks() {
+  try {
+    const resp = await fetch('/preview/books');
+    const data = await resp.json();
+    books = data.books || [];
+    const sel = document.getElementById('bookSelect');
+    books.forEach(b => {
+      const opt = document.createElement('option');
+      opt.value = b.uuid;
+      opt.textContent = b.title + ' — ' + b.author;
+      sel.appendChild(opt);
+    });
+  } catch (e) {
+    console.error('Failed to load books:', e);
+  }
+})();
+
+function onBookSelect() {
+  const sel = document.getElementById('bookSelect');
+  const uuid = sel.value;
+  selectedBookUuid = uuid || null;
+  const book = books.find(b => b.uuid === uuid);
+  if (book) {
+    document.getElementById('title').value = book.title || '';
+    document.getElementById('author').value = book.author || '';
+    // Show current cover/spine if exists
+    const cc = document.getElementById('currentCover');
+    let html = '';
+    if (book.book_cover_img_url) html += 'Current: <img src="' + book.book_cover_img_url + '">';
+    if (book.book_spine_img_url) html += '<img src="' + book.book_spine_img_url + '">';
+    cc.innerHTML = html;
+  } else {
+    document.getElementById('currentCover').innerHTML = '';
+  }
+  // Clear previous results
+  document.getElementById('results').innerHTML = '';
+  document.getElementById('saveArea').innerHTML = '';
+  document.getElementById('status').className = '';
+  document.getElementById('status').textContent = '';
+  document.getElementById('desc').innerHTML = '';
+}
+
 async function generate() {
   const title = document.getElementById('title').value.trim();
   const author = document.getElementById('author').value.trim();
@@ -340,6 +409,7 @@ async function generate() {
   const status = document.getElementById('status');
   const results = document.getElementById('results');
   const desc = document.getElementById('desc');
+  const saveArea = document.getElementById('saveArea');
 
   btn.disabled = true;
   btn.textContent = 'Generating...';
@@ -347,6 +417,8 @@ async function generate() {
   status.textContent = '⏳ Generating cover and spine... (this takes 30-60s)';
   results.innerHTML = '';
   desc.innerHTML = '';
+  saveArea.innerHTML = '';
+  lastResult = null;
 
   const start = Date.now();
 
@@ -366,6 +438,7 @@ async function generate() {
       return;
     }
 
+    lastResult = data;
     status.className = 'status success';
     status.textContent = '✅ Generated in ' + elapsed + 's';
 
@@ -386,15 +459,62 @@ async function generate() {
         '<img class="spine-final" src="' + data.spine + '">' +
       '</div>' +
       '<div class="card">' +
-        '<h3>Spine raw (green screen)</h3>' +
+        '<h3>Spine raw</h3>' +
         '<img class="spine-raw" src="' + data.spineRaw + '">' +
       '</div>';
+
+    // Show save button if a book is selected
+    if (selectedBookUuid) {
+      saveArea.innerHTML =
+        '<button class="btn-save" onclick="saveToBook()">💾 Save to book</button>';
+    }
   } catch (err) {
     status.className = 'status error';
     status.textContent = '❌ ' + err.message;
   } finally {
     btn.disabled = false;
     btn.textContent = 'Generate';
+  }
+}
+
+async function saveToBook() {
+  if (!lastResult || !selectedBookUuid) return;
+
+  const saveArea = document.getElementById('saveArea');
+  const status = document.getElementById('status');
+  saveArea.innerHTML = '<button class="btn-save" disabled>Saving...</button>';
+
+  try {
+    const resp = await fetch('/preview/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        bookUuid: selectedBookUuid,
+        cover: lastResult.cover,
+        spine: lastResult.spine,
+      }),
+    });
+    const data = await resp.json();
+    if (data.error) {
+      status.className = 'status error';
+      status.textContent = '❌ Save failed: ' + data.error;
+      saveArea.innerHTML = '<button class="btn-save" onclick="saveToBook()">💾 Retry save</button>';
+      return;
+    }
+    status.className = 'status success';
+    status.textContent = '✅ Saved! Cover: ' + data.coverUrl;
+    saveArea.innerHTML = '<button class="btn-save" disabled style="background:#666;">✅ Saved</button>';
+
+    // Update the book in local list
+    const book = books.find(b => b.uuid === selectedBookUuid);
+    if (book) {
+      book.book_cover_img_url = data.coverUrl;
+      book.book_spine_img_url = data.spineUrl;
+    }
+  } catch (err) {
+    status.className = 'status error';
+    status.textContent = '❌ Save error: ' + err.message;
+    saveArea.innerHTML = '<button class="btn-save" onclick="saveToBook()">💾 Retry save</button>';
   }
 }
 </script>

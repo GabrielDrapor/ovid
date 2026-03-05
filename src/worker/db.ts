@@ -131,6 +131,38 @@ export async function insertChapterTranslationsV2(
   }
 }
 
+/**
+ * Check if a user can access a book.
+ * Returns { accessible: true, book } if the book is public (user_id IS NULL) or owned by the user.
+ * Returns { accessible: false } if the book doesn't exist or is private and not owned by the user.
+ */
+export async function checkBookAccess(
+  db: D1Database,
+  bookUuid: string,
+  userId?: number
+): Promise<{ accessible: boolean; book?: any }> {
+  const book = await db
+    .prepare('SELECT id, uuid, user_id FROM books_v2 WHERE uuid = ?')
+    .bind(bookUuid)
+    .first();
+
+  if (!book) {
+    return { accessible: false };
+  }
+
+  // Public book (user_id IS NULL) — anyone can access
+  if (book.user_id === null) {
+    return { accessible: true, book };
+  }
+
+  // Private book — only the owner can access
+  if (userId && book.user_id === userId) {
+    return { accessible: true, book };
+  }
+
+  return { accessible: false };
+}
+
 export async function getBookChaptersV2(db: D1Database, bookUuid: string) {
   const book = await db
     .prepare('SELECT id FROM books_v2 WHERE uuid = ?')

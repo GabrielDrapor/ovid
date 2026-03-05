@@ -32,9 +32,9 @@ function App() {
       return;
     }
 
-    // Fallback/Error state
-    setError('Invalid URL. Expected / or /book/:uuid');
-    setShowBookShelf(false);
+    // Unknown URL — redirect to home
+    window.location.replace('/');
+    return;
   };
 
   // Initial load and event listeners
