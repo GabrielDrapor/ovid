@@ -675,7 +675,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
       {showUploadModal && (
         <div className="upload-modal-overlay" onClick={() => !uploading && !estimating && !uploadError && !estimate && setShowUploadModal(false)}>
           <div className="upload-modal-content" onClick={(e) => e.stopPropagation()}>
-            <h2>Upload EPUB Book</h2>
+            <h2>Upload Book</h2>
             {uploadError ? (
               <div className="upload-error">
                 <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#ff6b6b" strokeWidth="2">
@@ -803,7 +803,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                 </div>
                 <input
                   type="file"
-                  accept=".epub"
+                  accept=".epub,.mobi,.azw3"
                   onChange={(e) => {
                     const file = e.target.files?.[0];
                     if (file) {

@@ -56,9 +56,13 @@ export async function handleBookUpload(
       });
     }
 
-    if (!file.name.endsWith('.epub')) {
+    const fileName = file.name.toLowerCase();
+    const supportedExtensions = ['.epub', '.mobi', '.azw3'];
+    const fileExtension = supportedExtensions.find(ext => fileName.endsWith(ext));
+
+    if (!fileExtension) {
       return new Response(
-        JSON.stringify({ error: 'Only EPUB files are supported' }),
+        JSON.stringify({ error: 'Only EPUB, MOBI, and AZW3 files are supported' }),
         { status: 400, headers: { 'Content-Type': 'application/json' } }
       );
     }
@@ -72,8 +76,10 @@ export async function handleBookUpload(
       model: env.OPENAI_MODEL,
     });
 
-    // Parse EPUB
-    const bookData = await processor.parseEPUBV2(buffer);
+    // Parse book based on format
+    const bookData = fileExtension === '.epub'
+      ? await processor.parseEPUBV2(buffer)
+      : await processor.parseMOBI(buffer, fileExtension);
 
     const allTexts: string[] = [];
     for (const chapter of bookData.chapters) {
@@ -605,9 +611,13 @@ export async function handleBookEstimate(
       });
     }
 
-    if (!file.name.endsWith('.epub')) {
+    const fileName = file.name.toLowerCase();
+    const supportedExtensions = ['.epub', '.mobi', '.azw3'];
+    const fileExtension = supportedExtensions.find(ext => fileName.endsWith(ext));
+
+    if (!fileExtension) {
       return new Response(
-        JSON.stringify({ error: 'Only EPUB files are supported' }),
+        JSON.stringify({ error: 'Only EPUB, MOBI, and AZW3 files are supported' }),
         { status: 400, headers: { 'Content-Type': 'application/json' } }
       );
     }
@@ -621,8 +631,10 @@ export async function handleBookEstimate(
       model: env.OPENAI_MODEL,
     });
 
-    // Use V2 XPath-based parsing
-    const bookData = await processor.parseEPUBV2(buffer);
+    // Parse book based on format
+    const bookData = fileExtension === '.epub'
+      ? await processor.parseEPUBV2(buffer)
+      : await processor.parseMOBI(buffer, fileExtension);
 
     const allTexts: string[] = [];
     let chapterCount = 0;
@@ -640,7 +652,7 @@ export async function handleBookEstimate(
 
     return new Response(
       JSON.stringify({
-        title: bookData.title || file.name.replace('.epub', ''),
+        title: bookData.title || file.name.replace(/\.(epub|mobi|azw3)$/i, ''),
         author: bookData.author || 'Unknown',
         chapters: chapterCount,
         characters: totalCharacters,
