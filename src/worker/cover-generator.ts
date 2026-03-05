@@ -2,7 +2,8 @@
  * Generate book cover and spine images using Gemini 2.5 Flash Image.
  * Designed to run inside a Cloudflare Worker (uses fetch, R2).
  *
- * v2: No reference images — each book gets a unique style.
+ * v3: Style diversity — each book gets a randomly assigned visual style
+ * from a curated pool to prevent Art Deco/gold convergence.
  * Spine uses green-screen (#00FF00) background; post-processing
  * (crop + despill + resize) is done by the Railway cover-processor service.
  */
@@ -11,6 +12,85 @@ const GEMINI_MODEL = 'gemini-2.5-flash-image';
 const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
 const R2_PUBLIC_BASE = 'https://assets.ovid.jrd.pub';
+
+/**
+ * Curated style pool — each entry defines a distinct visual direction.
+ * The generator picks one at random per book to ensure diversity.
+ */
+const STYLE_POOL = [
+  {
+    name: 'Woodblock Print',
+    cover: 'Japanese ukiyo-e woodblock print style. Bold outlines, flat color areas, traditional compositions. Limited palette of 4-5 colors.',
+    palette: 'muted indigo, vermillion, cream, and sage green',
+    textStyle: 'bold serif capitals in cream or white',
+  },
+  {
+    name: 'Swiss Modernist',
+    cover: 'Swiss International Typographic Style. Strong grid layout, bold sans-serif type as the main visual element, geometric shapes. Clean and austere.',
+    palette: 'white background with black, one bold accent color (red or yellow)',
+    textStyle: 'large Helvetica-style sans-serif in black or the accent color',
+  },
+  {
+    name: 'Risograph Illustration',
+    cover: 'Risograph-style illustration with visible grain, limited ink colors, slight misregistration. Playful, indie, tactile feel.',
+    palette: 'two-tone risograph inks — e.g. fluorescent pink and teal, or orange and blue',
+    textStyle: 'hand-drawn or chunky sans-serif lettering in one of the ink colors',
+  },
+  {
+    name: 'Vintage Penguin',
+    cover: 'Classic Penguin paperback design: horizontal color bands, clean typography, minimal illustration. Simple and iconic.',
+    palette: 'three horizontal bands — a signature color (orange, green, or blue) with white/cream center band',
+    textStyle: 'clean serif type centered on the white band',
+  },
+  {
+    name: 'Watercolor Botanical',
+    cover: 'Soft watercolor botanical illustration. Delicate plant/flower motifs framing the title. Airy, light, organic.',
+    palette: 'soft greens, dusty rose, warm cream, touches of gold',
+    textStyle: 'elegant thin serif in dark green or brown',
+  },
+  {
+    name: 'Soviet Constructivist',
+    cover: 'Soviet Constructivist poster style. Bold diagonal compositions, photomontage feel, strong geometric shapes, propaganda-poster energy.',
+    palette: 'red, black, cream/off-white',
+    textStyle: 'bold angular sans-serif in red or black, tilted at dynamic angles',
+  },
+  {
+    name: 'Psychedelic 60s',
+    cover: 'Late 1960s psychedelic poster art. Flowing organic lettering, vibrant saturated colors, swirling patterns, op-art influences.',
+    palette: 'electric purple, hot pink, acid green, orange',
+    textStyle: 'flowing Art Nouveau-inspired hand lettering that melts into the illustration',
+  },
+  {
+    name: 'Minimal Geometric',
+    cover: 'Ultra-minimal design. One or two geometric shapes as metaphor for the book\'s theme. Maximum negative space. Conceptual.',
+    palette: 'monochrome with one accent — e.g. all black with a single red circle',
+    textStyle: 'small, understated sans-serif in a corner or along an edge',
+  },
+  {
+    name: 'Noir Paperback',
+    cover: 'Pulp noir paperback style from the 1940s-50s. Dramatic shadows, venetian blind lighting, moody atmospheric scene.',
+    palette: 'deep shadows, muted yellows and blues, smoky grays',
+    textStyle: 'bold condensed type in yellow or white, slightly distressed',
+  },
+  {
+    name: 'Folk Art Pattern',
+    cover: 'Eastern European or Scandinavian folk art. Symmetrical decorative patterns, stylized animals or flowers, naive flat perspective.',
+    palette: 'rich folk colors — deep red, forest green, cobalt blue, gold accents on dark background',
+    textStyle: 'decorative serif or slab-serif centered in a clear cartouche',
+  },
+  {
+    name: 'Collage Mixed Media',
+    cover: 'Cut-paper collage style. Torn edges, layered textures, mixed found imagery. Handmade, editorial, contemporary.',
+    palette: 'varied paper textures — newsprint, colored paper, kraft brown, pops of bright color',
+    textStyle: 'ransom-note style mixed typefaces or clean modern type contrasting with the collage',
+  },
+  {
+    name: 'Line Drawing',
+    cover: 'Single continuous line drawing or fine pen illustration. White or light background, intricate detail, intellectual feel.',
+    palette: 'white background with black or dark ink lines, optional one spot color',
+    textStyle: 'refined serif type, well-spaced, in black',
+  },
+];
 
 interface CoverResult {
   coverUrl: string;
@@ -53,56 +133,6 @@ async function generateImage(apiKey: string, prompt: string): Promise<ArrayBuffe
   throw new Error('No image in Gemini response');
 }
 
-/**
- * Ask Gemini to describe the cover's visual style (text-only response).
- */
-async function describeCoverStyle(
-  apiKey: string,
-  coverB64: string,
-): Promise<{ color: string; style: string; accent: string }> {
-  const resp = await fetch(`${GEMINI_API_URL}?key=${apiKey}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{
-        parts: [
-          { inlineData: { mimeType: 'image/png', data: coverB64 } },
-          {
-            text: `Describe this book cover in exactly 3 lines:
-Line 1: The primary background color (e.g. "deep midnight blue", "burnt orange")
-Line 2: The overall design style in a few words (e.g. "Art Deco geometric", "gothic ornamental")
-Line 3: The accent/text color (e.g. "gold", "cream", "silver")
-Respond with ONLY these 3 lines, nothing else.`,
-          },
-        ],
-      }],
-      generationConfig: { responseModalities: ['TEXT'] },
-    }),
-  });
-
-  const defaults = { color: 'a distinctive thematic color', style: 'elegant', accent: 'gold' };
-  if (!resp.ok) return defaults;
-
-  const data = (await resp.json()) as any;
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-  const lines = text.trim().split('\n').filter((l: string) => l.trim());
-
-  return {
-    color: lines[0]?.trim() || defaults.color,
-    style: lines[1]?.trim() || defaults.style,
-    accent: lines[2]?.trim() || defaults.accent,
-  };
-}
-
-function arrayBufferToBase64(buf: ArrayBuffer): string {
-  const bytes = new Uint8Array(buf);
-  let binary = '';
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return btoa(binary);
-}
-
 function slugify(text: string): string {
   return text
     .toLowerCase()
@@ -116,9 +146,9 @@ function slugify(text: string): string {
  * then webhook Railway service for post-processing.
  *
  * Flow:
- * 1. Generate cover (unique style per book)
- * 2. Describe cover style via Gemini
- * 3. Generate spine on green-screen background
+ * 1. Pick random style from curated pool
+ * 2. Generate cover with that style
+ * 3. Generate spine on green-screen with same style
  * 4. Upload raw images to R2
  * 5. Webhook Railway cover-processor for crop + despill + resize + DB update
  */
@@ -135,42 +165,43 @@ export async function generateBookCovers(
   const uniqueId = crypto.randomUUID().slice(0, 8);
   const keyPrefix = `${slug}_${uniqueId}`;
 
-  // --- Step 1: Generate cover ---
+  // --- Step 1: Pick a random style ---
+  const style = STYLE_POOL[Math.floor(Math.random() * STYLE_POOL.length)];
+
+  // --- Step 2: Generate cover ---
   const coverPrompt = `Book cover for "${title}" by ${author}. Portrait orientation, approximately 3:4 ratio.
 
-Design a visually striking, elegant book cover with a style that fits the book's themes and era. Be creative — Art Deco, gothic, minimalist, impressionist, or any style that suits the book.
+Visual style: ${style.name} — ${style.cover}
+Color palette: ${style.palette}
+Typography: ${style.textStyle}
 
 Requirements:
-- Title "${title.toUpperCase()}" prominently displayed in elegant typography
+- Title "${title.toUpperCase()}" prominently displayed
 - Author "${author.toUpperCase()}" at the bottom in smaller text
 - The design must fill the ENTIRE image edge to edge with NO white borders
-- Rich, atmospheric, visually compelling`;
+- Commit fully to the ${style.name} aesthetic — do NOT default to Art Deco or dark blue/gold`;
 
   const coverBuf = await generateImage(apiKey, coverPrompt);
-  const coverB64 = arrayBufferToBase64(coverBuf);
 
-  // --- Step 2: Describe cover for spine consistency ---
-  const { color, style, accent } = await describeCoverStyle(apiKey, coverB64);
-
-  // --- Step 3: Generate spine on green screen ---
-  const spinePrompt = `A flat front-facing book spine on bright solid lime green (#00FF00) background. The spine is a narrow vertical dark rectangle, centered, with green space on all sides.
+  // --- Step 3: Generate spine on green screen (reuse style info directly) ---
+  const spinePrompt = `A flat front-facing book spine on bright solid lime green (#00FF00) background. The spine is a narrow vertical rectangle, centered, with green space on all sides.
 
 Design for "${title}" by ${author}:
-- Background color: ${color} (matching the book's cover)
-- Style: ${style}
-- LARGE, BOLD ${accent} text — must be readable at thumbnail size
-- Title "${title.toUpperCase()}" running vertically in LARGE BOLD capitals
+- Visual style: ${style.name}
+- Color palette: ${style.palette}
+- Typography: ${style.textStyle}
+- Title "${title.toUpperCase()}" running vertically in LARGE BOLD capitals — must be readable at thumbnail size
 - Author "${author.toUpperCase()}" at the bottom, also reasonably large
-- A small decorative motif at the top matching the cover's aesthetic
-- Simple border lines on left and right edges
+- A small decorative motif at the top
 - Keep decoration MINIMAL — prioritize text legibility
 - The rectangle should be about 1/6 the width of the total image
 - Sharp edges, no shadows, no 3D effects, no page edges visible
-- CRITICAL: All text must be FULLY CONTAINED within the spine rectangle with generous margins on ALL sides. No text should touch or extend near the edges of the rectangle. Leave at least 10% padding on left and right sides.`;
+- CRITICAL: All text must be FULLY CONTAINED within the spine rectangle with generous margins on ALL sides. Leave at least 10% padding on left and right sides.`;
 
   const spineBuf = await generateImage(apiKey, spinePrompt);
 
   // --- Step 4: Upload raw images to R2 ---
+  console.log(`Cover style for ${bookUuid}: ${style.name}`);
   const rawCoverKey = `raw/${keyPrefix}_cover.png`;
   const rawSpineKey = `raw/${keyPrefix}_spine.png`;
 
