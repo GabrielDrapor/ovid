@@ -39,6 +39,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [hoveredBook, setHoveredBook] = useState<Book | null>(null);
+  const [coverLoaded, setCoverLoaded] = useState(false);
   const [mobileSelectedBook, setMobileSelectedBook] = useState<Book | null>(null);
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
   const [showUserMenu, setShowUserMenu] = useState(false);
@@ -73,6 +74,14 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
         setHoveredBook(booksData[0]);
       }
       setLoading(false);
+
+      // Preload cover images into browser cache
+      booksData.forEach((book) => {
+        if (book.book_cover_img_url) {
+          const img = new Image();
+          img.src = book.book_cover_img_url;
+        }
+      });
 
       // Fetch all progress in a single request
       if (user && booksData.length > 0) {
@@ -328,7 +337,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
               <div
                 key={book.uuid}
                 className={`book-spine-wrapper ${isProcessing ? 'processing' : ''}`}
-                onMouseEnter={() => !isMobile && setHoveredBook(book)}
+                onMouseEnter={() => { if (!isMobile) { setCoverLoaded(false); setHoveredBook(book); } }}
                 onMouseLeave={() => {}}
                 onClick={() => {
                   if (isProcessing) return;
@@ -378,7 +387,13 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
           <div className="preview-content">
             <div className="preview-cover">
               {hoveredBook.book_cover_img_url ? (
-                <img src={hoveredBook.book_cover_img_url} alt={hoveredBook.title} />
+                <img
+                  key={hoveredBook.uuid}
+                  src={hoveredBook.book_cover_img_url}
+                  alt={hoveredBook.title}
+                  className={coverLoaded ? 'cover-loaded' : 'cover-loading'}
+                  onLoad={() => setCoverLoaded(true)}
+                />
               ) : (
                 <div className="default-preview-cover">
                   <h3>{hoveredBook.title}</h3>
