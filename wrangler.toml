@@ -19,7 +19,7 @@ binding = "ASSETS_BUCKET"
 bucket_name = "ovid"
 
 [vars]
-APP_URL = "https://lib.jrd.pub"
+APP_URL = "https://ovid.ink"
 
 # Secrets (set via `wrangler secret put`):
 # - GOOGLE_OAUTH_CLIENT_ID

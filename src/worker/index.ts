@@ -435,14 +435,14 @@ export default {
           try {
             if (request.method === 'POST') {
               const token = await createShareToken(env.DB, bookUuid, user.id);
-              return new Response(JSON.stringify({ token, url: `https://lib.jrd.pub/shared/${token}` }), {
+              return new Response(JSON.stringify({ token, url: `${url.origin}/shared/${token}` }), {
                 headers: { 'Content-Type': 'application/json' },
               });
             }
 
             if (request.method === 'GET') {
               const token = await getShareToken(env.DB, bookUuid, user.id);
-              return new Response(JSON.stringify({ token, url: token ? `https://lib.jrd.pub/shared/${token}` : null }), {
+              return new Response(JSON.stringify({ token, url: token ? `${url.origin}/shared/${token}` : null }), {
                 headers: { 'Content-Type': 'application/json' },
               });
             }
