@@ -289,11 +289,11 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
   const handleShare = useCallback(async () => {
     const response = await fetch(`/api/book/${bookUuid}/share`, { method: 'POST' });
     if (response.ok) {
-      const data = await response.json() as { token: string };
+      const data = await response.json() as { token: string; url: string };
       setShareToken(data.token);
       // Auto-copy to clipboard
       try {
-        await navigator.clipboard.writeText(`https://lib.jrd.pub/shared/${data.token}`);
+        await navigator.clipboard.writeText(data.url);
       } catch { /* clipboard may fail */ }
     } else {
       throw new Error('Failed to create share link');

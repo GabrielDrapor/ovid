@@ -592,7 +592,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
                 <button
                   className="fab-menu-item"
                   onClick={() => {
-                    navigator.clipboard.writeText(`https://lib.jrd.pub/shared/${shareToken}`);
+                    navigator.clipboard.writeText(`${window.location.origin}/shared/${shareToken}`);
                     setShareCopied(true);
                     setTimeout(() => setShareCopied(false), 2000);
                   }}
