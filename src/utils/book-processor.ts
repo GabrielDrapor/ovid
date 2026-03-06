@@ -6,6 +6,7 @@
 import { Translator } from './translator';
 import JSZip from 'jszip';
 import { DOMParser } from '@xmldom/xmldom';
+import { initMobiFile, initKf8File } from '@lingo-reader/mobi-parser';
 
 // V2 content item with XPath support
 export interface ContentItemV2 {
@@ -229,6 +230,109 @@ export class BookProcessor {
       chapters,
       styles: globalStyles,
       images: images.length > 0 ? images : undefined,
+    };
+  }
+
+  /**
+   * Parse MOBI/AZW3 file with XPath-based extraction.
+   * @param buffer - Raw file bytes
+   * @param fileExtension - '.mobi' or '.azw3' to select the right parser
+   */
+  async parseMOBI(buffer: ArrayBuffer, fileExtension: string): Promise<BookDataV2> {
+    const uint8 = new Uint8Array(buffer);
+
+    // Try KF8 parser for .azw3, MOBI parser for .mobi.
+    // If KF8 parsing yields very few chapters (library bug), fall back to MOBI parser.
+    const isKf8 = fileExtension === '.azw3';
+    let parser: Awaited<ReturnType<typeof initMobiFile>> | Awaited<ReturnType<typeof initKf8File>>;
+
+    if (isKf8) {
+      // Try KF8 first, fall back to MOBI if chapters fail to load
+      try {
+        parser = await initKf8File(uint8);
+        const result = await this._parseMOBIInternal(parser);
+        if (result.chapters.length >= 1) {
+          return result;
+        }
+        // Too few chapters — fall back to MOBI parser
+        parser.destroy();
+      } catch {
+        // KF8 parse failed, try MOBI
+      }
+    }
+
+    parser = await initMobiFile(uint8);
+    return this._parseMOBIInternal(parser);
+  }
+
+  /**
+   * Internal: extract BookDataV2 from an already-initialized MOBI/KF8 parser.
+   */
+  private async _parseMOBIInternal(
+    parser: Awaited<ReturnType<typeof initMobiFile>> | Awaited<ReturnType<typeof initKf8File>>
+  ): Promise<BookDataV2> {
+    // Placeholder to satisfy TS — actual parser passed in
+
+    const metadata = parser.getMetadata();
+    const spine = parser.getSpine();
+
+    const title = metadata.title || 'Unknown Title';
+    const author = (metadata.author && metadata.author.length > 0)
+      ? metadata.author.join(', ')
+      : 'Unknown Author';
+
+    const chapters: ChapterV2[] = [];
+    let chapterNumber = 1;
+    let globalStyles = '';
+
+    for (const spineItem of spine) {
+      let loaded;
+      try {
+        loaded = parser.loadChapter(spineItem.id);
+      } catch (e) {
+        console.warn(`Failed to load chapter ${spineItem.id}, skipping:`, e);
+        continue;
+      }
+      if (!loaded) continue;
+
+      const html = loaded.html;
+      if (!html || !html.trim()) continue;
+
+      // Collect CSS from chapter
+      if (loaded.css && loaded.css.length > 0) {
+        for (const cssPart of loaded.css) {
+          // cssPart has id and href; the href content is embedded in the html
+          // We don't have raw CSS content from mobi-parser, skip
+        }
+      }
+
+      // Strip internal links (filepos:, kindle:, #) — replace <a> with its text content
+      const cleanedHtml = html.replace(
+        /<a\s+[^>]*href\s*=\s*["'](?:filepos:|kindle:|#)[^"']*["'][^>]*>([\s\S]*?)<\/a>/gi,
+        '$1'
+      );
+
+      // Wrap in a full HTML document for parseHTMLChapterV2
+      const wrappedHtml = `<html><body>${cleanedHtml}</body></html>`;
+      const chapterData = this.parseHTMLChapterV2(wrappedHtml, chapterNumber);
+
+      if (chapterData && chapterData.textNodes.length > 0) {
+        chapters.push({
+          ...chapterData,
+          number: chapterNumber++,
+        });
+      }
+    }
+
+    parser.destroy();
+
+    return {
+      title,
+      originalTitle: title,
+      author,
+      language: metadata.language || 'en',
+      chapters,
+      styles: globalStyles,
     };
   }
 

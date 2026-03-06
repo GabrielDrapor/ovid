@@ -42,6 +42,7 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@lingo-reader/mobi-parser": "^0.4.5",
     "@xmldom/xmldom": "^0.8.11",
     "epub2": "^3.0.2",
     "js-tiktoken": "^1.0.21",

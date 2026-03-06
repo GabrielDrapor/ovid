@@ -80,3 +80,4 @@ epubs
 -e 
 # Cover generation temp files
 .tmp_covers/
+.wrangler
