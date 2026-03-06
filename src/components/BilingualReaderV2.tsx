@@ -35,6 +35,11 @@ interface BilingualReaderV2Props {
   // Granular progress tracking
   initialXpath?: string;  // XPath to scroll to on initial load
   onProgressChange?: (xpath: string) => void;  // Called when visible element changes
+  // Sharing
+  isOwned?: boolean;  // Whether the current user owns this book
+  shareUrl?: string | null;  // Current share URL if shared
+  onShare?: () => Promise<string>;  // Generate share link, returns URL
+  onRevokeShare?: () => Promise<void>;  // Revoke share
 }
 
 /**
@@ -60,6 +65,10 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
   isCompleted,
   initialXpath,
   onProgressChange,
+  isOwned,
+  shareUrl,
+  onShare,
+  onRevokeShare,
 }) => {
   const contentRef = useRef<HTMLDivElement>(null);
   const [showOriginal, setShowOriginal] = useState(true);
@@ -73,6 +82,8 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
   const [isMarkingComplete, setIsMarkingComplete] = useState(false);
   const [markCompleteError, setMarkCompleteError] = useState<string | null>(null);
   const [isTypographyOpen, setIsTypographyOpen] = useState(false);
+  const [isSharing, setIsSharing] = useState(false);
+  const [shareCopied, setShareCopied] = useState(false);
 
   // Store element references for toggling
   // originalHtml preserves formatting (innerHTML), translated is plain text
@@ -557,6 +568,65 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
             )}
             {markCompleteError && (
               <div className="fab-error">{markCompleteError}</div>
+            )}
+            {isOwned && onShare && (
+              <>
+                {shareUrl ? (
+                  <>
+                    <button
+                      className="fab-menu-item"
+                      onClick={async () => {
+                        try {
+                          await navigator.clipboard.writeText(shareUrl);
+                          setShareCopied(true);
+                          setTimeout(() => setShareCopied(false), 2000);
+                        } catch {
+                          // Fallback
+                          prompt('Copy this link:', shareUrl);
+                        }
+                      }}
+                    >
+                      {shareCopied ? '✓ Link Copied' : 'Copy Share Link'}
+                    </button>
+                    {onRevokeShare && (
+                      <button
+                        className="fab-menu-item fab-menu-item-danger"
+                        onClick={async () => {
+                          setIsSharing(true);
+                          try {
+                            await onRevokeShare();
+                          } finally {
+                            setIsSharing(false);
+                          }
+                        }}
+                        disabled={isSharing}
+                      >
+                        {isSharing ? '...' : 'Revoke Share'}
+                      </button>
+                    )}
+                  </>
+                ) : (
+                  <button
+                    className="fab-menu-item"
+                    onClick={async () => {
+                      setIsSharing(true);
+                      try {
+                        const url = await onShare();
+                        await navigator.clipboard.writeText(url);
+                        setShareCopied(true);
+                        setTimeout(() => setShareCopied(false), 2000);
+                      } catch {
+                        // onShare handles its own errors
+                      } finally {
+                        setIsSharing(false);
+                      }
+                    }}
+                    disabled={isSharing}
+                  >
+                    {isSharing ? '...' : 'Share'}
+                  </button>
+                )}
+              </>
             )}
 
             {/* Divider */}

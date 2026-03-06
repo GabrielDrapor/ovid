@@ -186,6 +186,10 @@
   cursor: default;
 }
 
+.fab-menu-item-danger {
+  color: #d32f2f;
+}
+
 .fab-divider {
   height: 1px;
   background: #eee;

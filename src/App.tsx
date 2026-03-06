@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import BookShelf from './components/BookShelf';
 import AppV2 from './AppV2';
+import SharedBookView from './SharedBookView';
 import ErrorBoundary from './components/ErrorBoundary';
 import { UserProvider } from './contexts/UserContext';
 import './App.css';
 
 function App() {
   const [bookUuid, setBookUuid] = useState<string | null>(null);
+  const [shareToken, setShareToken] = useState<string | null>(null);
   const [showBookShelf, setShowBookShelf] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -18,6 +20,17 @@ function App() {
     if (path === '/' || path === '') {
       setShowBookShelf(true);
       setBookUuid(null);
+      setShareToken(null);
+      setError(null);
+      return;
+    }
+
+    // Shared book path: /shared/:token
+    const sharedMatch = path.match(/^\/shared\/([^\/]+)$/);
+    if (sharedMatch) {
+      setShareToken(sharedMatch[1]);
+      setBookUuid(null);
+      setShowBookShelf(false);
       setError(null);
       return;
     }
@@ -27,6 +40,7 @@ function App() {
     if (match) {
       const uuid = match[1];
       setBookUuid(uuid);
+      setShareToken(null);
       setShowBookShelf(false);
       setError(null);
       return;
@@ -93,6 +107,15 @@ function App() {
             </button>
           </div>
         </div>
+      </ErrorBoundary>
+    );
+  }
+
+  // Shared book reader (no auth required)
+  if (shareToken) {
+    return (
+      <ErrorBoundary>
+        <SharedBookView shareToken={shareToken} />
       </ErrorBoundary>
     );
   }

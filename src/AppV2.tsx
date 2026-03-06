@@ -91,6 +91,10 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
   // Track book completion status
   const [isCompleted, setIsCompleted] = useState(false);
 
+  // Share state
+  const [isOwned, setIsOwned] = useState(false);
+  const [shareUrl, setShareUrl] = useState<string | null>(null);
+
   // Calculate reading progress percentage
   const calculateProgress = useCallback(() => {
     if (chapters.length === 0) return 0;
@@ -188,8 +192,21 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
       }
     };
 
+    const loadShareStatus = async () => {
+      try {
+        const response = await fetch(`/api/book/${bookUuid}/share`);
+        if (response.ok) {
+          const data = await response.json();
+          setShareUrl(data.shareUrl || null);
+          // If we got a response (not 401), the user is the owner
+          setIsOwned(true);
+        }
+      } catch {}
+    };
+
     loadChapters();
     loadCompletion();
+    loadShareStatus();
   }, [bookUuid]);
 
   // Load chapter content
@@ -250,6 +267,21 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
     };
   }, []);
 
+  // Share handlers
+  const handleShare = useCallback(async (): Promise<string> => {
+    const response = await fetch(`/api/book/${bookUuid}/share`, { method: 'POST' });
+    if (!response.ok) throw new Error('Failed to create share link');
+    const data = await response.json();
+    setShareUrl(data.shareUrl);
+    return data.shareUrl;
+  }, [bookUuid]);
+
+  const handleRevokeShare = useCallback(async () => {
+    const response = await fetch(`/api/book/${bookUuid}/share`, { method: 'DELETE' });
+    if (!response.ok) throw new Error('Failed to revoke share');
+    setShareUrl(null);
+  }, [bookUuid]);
+
   // Wrapper for manual chapter navigation (no xpath) - must be before early returns
   const handleLoadChapter = useCallback((chapterNumber: number) => {
     loadChapter(chapterNumber);
@@ -297,6 +329,10 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
         isCompleted={isCompleted}
         initialXpath={targetXpath}
         onProgressChange={handleProgressChange}
+        isOwned={isOwned}
+        shareUrl={shareUrl}
+        onShare={handleShare}
+        onRevokeShare={handleRevokeShare}
       />
     </div>
   );

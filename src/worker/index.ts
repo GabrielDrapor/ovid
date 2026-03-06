@@ -32,6 +32,10 @@ import {
   getUserBookProgress,
   getAllUserBookProgress,
   checkBookAccess,
+  createShareToken,
+  revokeShareToken,
+  getShareToken,
+  getBookByShareToken,
 } from './db';
 import {
   handleBookUpload,
@@ -94,6 +98,8 @@ export default {
       )`);
       await runMigration('chapters_v2_text_nodes', 'ALTER TABLE chapters_v2 ADD COLUMN text_nodes_json TEXT');
       await runMigration('books_v2_display_order', 'ALTER TABLE books_v2 ADD COLUMN display_order INTEGER DEFAULT 0');
+      await runMigration('books_v2_share_token', 'ALTER TABLE books_v2 ADD COLUMN share_token TEXT');
+      await runMigration('books_v2_share_token_index', 'CREATE INDEX IF NOT EXISTS idx_books_v2_share_token ON books_v2(share_token)');
       await runMigration('create_user_book_progress', `CREATE TABLE IF NOT EXISTS user_book_progress (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER NOT NULL,
@@ -297,6 +303,114 @@ export default {
           });
         }
 
+        // ==================
+        // Share endpoints
+        // ==================
+        const shareMatch = url.pathname.match(/^\/api\/book\/([^\/]+)\/share$/);
+        if (shareMatch) {
+          const bookUuid = shareMatch[1];
+          const user = await getCurrentUser(env.DB, request);
+          if (!user) {
+            return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+              status: 401, headers: { 'Content-Type': 'application/json' },
+            });
+          }
+
+          if (request.method === 'POST') {
+            try {
+              const token = await createShareToken(env.DB, bookUuid, user.id);
+              const shareUrl = `${env.APP_URL}/shared/${token}`;
+              return new Response(JSON.stringify({ token, shareUrl }), {
+                headers: { 'Content-Type': 'application/json' },
+              });
+            } catch (e: any) {
+              const status = e.message?.includes('Forbidden') ? 403 : 404;
+              return new Response(JSON.stringify({ error: e.message }), {
+                status, headers: { 'Content-Type': 'application/json' },
+              });
+            }
+          }
+
+          if (request.method === 'DELETE') {
+            try {
+              await revokeShareToken(env.DB, bookUuid, user.id);
+              return new Response(JSON.stringify({ success: true }), {
+                headers: { 'Content-Type': 'application/json' },
+              });
+            } catch (e: any) {
+              const status = e.message?.includes('Forbidden') ? 403 : 404;
+              return new Response(JSON.stringify({ error: e.message }), {
+                status, headers: { 'Content-Type': 'application/json' },
+              });
+            }
+          }
+
+          if (request.method === 'GET') {
+            const token = await getShareToken(env.DB, bookUuid, user.id);
+            const shareUrl = token ? `${env.APP_URL}/shared/${token}` : null;
+            return new Response(JSON.stringify({ token, shareUrl }), {
+              headers: { 'Content-Type': 'application/json' },
+            });
+          }
+        }
+
+        // Shared book API: /api/shared/:token/chapters and /api/shared/:token/chapter/:num
+        const sharedApiMatch = url.pathname.match(/^\/api\/shared\/([^\/]+)\/(.+)$/);
+        if (sharedApiMatch) {
+          const shareToken = sharedApiMatch[1];
+          const endpoint = sharedApiMatch[2];
+
+          const sharedBook = await getBookByShareToken(env.DB, shareToken);
+          if (!sharedBook) {
+            return new Response(JSON.stringify({ error: 'Not found' }), {
+              status: 404, headers: { 'Content-Type': 'application/json' },
+            });
+          }
+
+          if (endpoint === 'book') {
+            // Return basic book info for shared view
+            const book = await env.DB.prepare(
+              'SELECT uuid, title, original_title, author, language_pair, status FROM books_v2 WHERE uuid = ?'
+            ).bind(sharedBook.uuid).first();
+            return new Response(JSON.stringify(book), {
+              headers: { 'Content-Type': 'application/json' },
+            });
+          }
+
+          if (endpoint === 'chapters') {
+            const chapters = await getBookChaptersV2(env.DB, sharedBook.uuid);
+            return new Response(JSON.stringify(chapters), {
+              headers: { 'Content-Type': 'application/json' },
+            });
+          }
+
+          if (endpoint.startsWith('chapter/')) {
+            const chapterNumber = parseInt(endpoint.split('/')[1] || '1');
+            const chapterData = await getChapterContentV2(env.DB, chapterNumber, sharedBook.uuid);
+            return new Response(JSON.stringify({
+              uuid: chapterData.book.uuid,
+              title: chapterData.book.title,
+              originalTitle: chapterData.book.original_title,
+              author: chapterData.book.author,
+              styles: chapterData.book.styles,
+              currentChapter: chapterNumber,
+              chapterInfo: {
+                number: chapterData.chapter.chapter_number,
+                title: chapterData.chapter.title,
+                originalTitle: chapterData.chapter.original_title,
+              },
+              rawHtml: chapterData.rawHtml,
+              translations: chapterData.translations,
+            }), {
+              headers: { 'Content-Type': 'application/json' },
+            });
+          }
+
+          return new Response(JSON.stringify({ error: 'Not found' }), {
+            status: 404, headers: { 'Content-Type': 'application/json' },
+          });
+        }
+
         // Mark book as completed/read (supports both public and user-owned books)
         const markCompleteMatch = url.pathname.match(/^\/api\/book\/([^\/]+)\/mark-complete$/);
         if (markCompleteMatch && request.method === 'POST') {
@@ -472,6 +586,24 @@ export default {
         console.error('API Error:', error);
         return new Response('Internal Server Error', { status: 500 });
       }
+    }
+
+    // Handle shared book URLs: /shared/:token
+    const sharedUrlMatch = url.pathname.match(/^\/shared\/([^\/]+)/);
+    if (sharedUrlMatch) {
+      const token = sharedUrlMatch[1];
+      const sharedBook = await getBookByShareToken(env.DB, token);
+      if (sharedBook) {
+        try {
+          return env.ASSETS.fetch(new Request(new URL('/index.html', request.url)));
+        } catch {
+          return new Response(
+            `<!DOCTYPE html><html><head><title>Ovid - Shared Book</title></head><body><div id="root">Loading...</div></body></html>`,
+            { headers: { 'Content-Type': 'text/html' } }
+          );
+        }
+      }
+      return Response.redirect(new URL('/', request.url).toString(), 302);
     }
 
     // Handle book URLs: /book/:uuid and /v2/book/:uuid (all use V2 database)

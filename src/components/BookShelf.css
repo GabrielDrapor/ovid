@@ -378,16 +378,14 @@
   box-shadow: inset -20px 0 50px rgba(0, 0, 0, 0.5);
   /* Shadow on the right edge */
 
-  background-size: 1200px auto;
+  background-size: auto 100%;
   background-position: left top;
-  /* Show top of shelf, align left */
   background-repeat: no-repeat;
+  max-width: 144.44vh;
 
   display: flex;
   align-items: flex-start;
-  /* Align contents to top */
   justify-content: center;
-  /* Center grid horizontally within the wall space if width allows, or flex-start */
 }
 
 /* Grid layout for "Books on Shelves" */
@@ -405,7 +403,7 @@
   justify-content: flex-start;
   align-items: flex-end;
   position: absolute;
-  padding-left: 40px;
+  padding-left: 4.8vh;
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;
@@ -413,13 +411,13 @@
 
 /* Row 1: Public/library books - top shelf */
 .books-row-1 {
-  padding-top: 95px;
+  padding-top: 11.4vh;
   max-height: 90%;
 }
 
 /* Row 2: User uploaded books - second shelf */
 .books-row-2 {
-  padding-top: 500px;
+  padding-top: 60.2vh;
 }
 
 .books-grid::-webkit-scrollbar {
@@ -428,8 +426,8 @@
 
 /* Individual Book Spine */
 .book-spine-container {
-  height: 300px;
-  width: calc(300px / 5.3);
+  height: 36.1vh;
+  width: calc(36.1vh / 5.3);
   flex-shrink: 0;
   position: relative;
   cursor: pointer;
@@ -504,6 +502,7 @@
   height: 100%;
   width: 350px;
   min-width: 350px;
+  flex-grow: 1;
   background: #111;
   border-left: 1px solid rgba(255, 255, 255, 0.1);
   display: flex;

@@ -542,6 +542,49 @@ export async function clearTextNodesJson(db: D1Database, bookId: number): Promis
   ).bind(bookId).run();
 }
 
+// ==================
+// Share functions
+// ==================
+
+export async function createShareToken(db: D1Database, bookUuid: string, userId: number): Promise<string> {
+  const book = await db.prepare('SELECT id, user_id, share_token FROM books_v2 WHERE uuid = ?')
+    .bind(bookUuid).first();
+  if (!book) throw new Error('Book not found');
+  if (book.user_id === null || book.user_id !== userId) throw new Error('Forbidden: can only share your own books');
+  
+  // If already shared, return existing token
+  if (book.share_token) return book.share_token as string;
+  
+  const token = crypto.randomUUID();
+  await db.prepare('UPDATE books_v2 SET share_token = ? WHERE uuid = ?')
+    .bind(token, bookUuid).run();
+  return token;
+}
+
+export async function revokeShareToken(db: D1Database, bookUuid: string, userId: number): Promise<void> {
+  const book = await db.prepare('SELECT id, user_id FROM books_v2 WHERE uuid = ?')
+    .bind(bookUuid).first();
+  if (!book) throw new Error('Book not found');
+  if (book.user_id === null || book.user_id !== userId) throw new Error('Forbidden');
+  await db.prepare('UPDATE books_v2 SET share_token = NULL WHERE uuid = ?')
+    .bind(bookUuid).run();
+}
+
+export async function getShareToken(db: D1Database, bookUuid: string, userId: number): Promise<string | null> {
+  const book = await db.prepare('SELECT user_id, share_token FROM books_v2 WHERE uuid = ?')
+    .bind(bookUuid).first();
+  if (!book) return null;
+  if (book.user_id === null || book.user_id !== userId) return null;
+  return (book.share_token as string) || null;
+}
+
+export async function getBookByShareToken(db: D1Database, token: string): Promise<{ uuid: string; id: number } | null> {
+  const book = await db.prepare('SELECT id, uuid FROM books_v2 WHERE share_token = ?')
+    .bind(token).first();
+  if (!book) return null;
+  return { uuid: book.uuid as string, id: book.id as number };
+}
+
 export async function deleteTranslationJob(db: D1Database, bookUuid: string): Promise<void> {
   await db.prepare('DELETE FROM translation_jobs WHERE book_uuid = ?')
     .bind(bookUuid).run();
