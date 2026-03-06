@@ -306,8 +306,14 @@ export class BookProcessor {
         }
       }
 
+      // Strip internal links (filepos:, kindle:, #) — replace <a> with its text content
+      const cleanedHtml = html.replace(
+        /<a\s+[^>]*href\s*=\s*["'](?:filepos:|kindle:|#)[^"']*["'][^>]*>([\s\S]*?)<\/a>/gi,
+        '$1'
+      );
+
       // Wrap in a full HTML document for parseHTMLChapterV2
-      const wrappedHtml = `<html><body>${html}</body></html>`;
+      const wrappedHtml = `<html><body>${cleanedHtml}</body></html>`;
       const chapterData = this.parseHTMLChapterV2(wrappedHtml, chapterNumber);
 
       if (chapterData && chapterData.textNodes.length > 0) {
