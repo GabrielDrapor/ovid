@@ -32,6 +32,11 @@ interface BilingualReaderV2Props {
   // Reading status
   onMarkComplete?: (isCompleted: boolean) => Promise<void>;
   isCompleted?: boolean;
+  // Sharing
+  isOwner?: boolean;
+  shareToken?: string | null;
+  onShare?: () => Promise<void>;
+  onRevokeShare?: () => Promise<void>;
   // Granular progress tracking
   initialXpath?: string;  // XPath to scroll to on initial load
   onProgressChange?: (xpath: string) => void;  // Called when visible element changes
@@ -58,6 +63,10 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
   onBackToShelf,
   onMarkComplete,
   isCompleted,
+  isOwner,
+  shareToken,
+  onShare,
+  onRevokeShare,
   initialXpath,
   onProgressChange,
 }) => {
@@ -73,6 +82,8 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
   const [isMarkingComplete, setIsMarkingComplete] = useState(false);
   const [markCompleteError, setMarkCompleteError] = useState<string | null>(null);
   const [isTypographyOpen, setIsTypographyOpen] = useState(false);
+  const [isSharing, setIsSharing] = useState(false);
+  const [shareCopied, setShareCopied] = useState(false);
 
   // Store element references for toggling
   // originalHtml preserves formatting (innerHTML), translated is plain text
@@ -557,6 +568,54 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
             )}
             {markCompleteError && (
               <div className="fab-error">{markCompleteError}</div>
+            )}
+
+            {/* Share buttons (owner only) */}
+            {isOwner && onShare && !shareToken && (
+              <button
+                className="fab-menu-item"
+                onClick={async () => {
+                  setIsSharing(true);
+                  try {
+                    await onShare();
+                  } finally {
+                    setIsSharing(false);
+                  }
+                }}
+                disabled={isSharing}
+              >
+                {isSharing ? '...' : 'Share'}
+              </button>
+            )}
+            {isOwner && shareToken && (
+              <>
+                <button
+                  className="fab-menu-item"
+                  onClick={() => {
+                    navigator.clipboard.writeText(`https://lib.jrd.pub/shared/${shareToken}`);
+                    setShareCopied(true);
+                    setTimeout(() => setShareCopied(false), 2000);
+                  }}
+                >
+                  {shareCopied ? '✓ Copied!' : 'Copy Share Link'}
+                </button>
+                <button
+                  className="fab-menu-item"
+                  onClick={async () => {
+                    if (onRevokeShare) {
+                      setIsSharing(true);
+                      try {
+                        await onRevokeShare();
+                      } finally {
+                        setIsSharing(false);
+                      }
+                    }
+                  }}
+                  disabled={isSharing}
+                >
+                  {isSharing ? '...' : 'Revoke Share'}
+                </button>
+              </>
             )}
 
             {/* Divider */}

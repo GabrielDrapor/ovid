@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import BilingualReaderV2 from './components/BilingualReaderV2';
+import { useUser } from './contexts/UserContext';
 import { fetchWithRetry } from './utils/fetchWithRetry';
 import './App.css';
 
@@ -90,6 +91,11 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
 
   // Track book completion status
   const [isCompleted, setIsCompleted] = useState(false);
+
+  // Share state
+  const [shareToken, setShareToken] = useState<string | null>(null);
+  const [bookOwnerId, setBookOwnerId] = useState<number | null>(null);
+  const { user } = useUser();
 
   // Calculate reading progress percentage
   const calculateProgress = useCallback(() => {
@@ -188,8 +194,36 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
       }
     };
 
+    const loadShareStatus = async () => {
+      try {
+        const response = await fetch(`/api/book/${bookUuid}/share`);
+        if (response.ok) {
+          const data = await response.json() as { token: string | null };
+          setShareToken(data.token);
+        }
+      } catch (err) {
+        // Not owner or not logged in — ignore
+      }
+    };
+
+    // Fetch book metadata to know the owner
+    const loadBookMeta = async () => {
+      try {
+        const response = await fetch('/api/books');
+        if (response.ok) {
+          const books = await response.json() as Array<{ uuid: string; user_id: number | null }>;
+          const book = books.find((b: any) => b.uuid === bookUuid);
+          if (book) setBookOwnerId(book.user_id);
+        }
+      } catch {
+        // ignore
+      }
+    };
+
     loadChapters();
     loadCompletion();
+    loadShareStatus();
+    loadBookMeta();
   }, [bookUuid]);
 
   // Load chapter content
@@ -250,6 +284,31 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
     };
   }, []);
 
+  const isOwner = !!(user && bookOwnerId && user.id === bookOwnerId);
+
+  const handleShare = useCallback(async () => {
+    const response = await fetch(`/api/book/${bookUuid}/share`, { method: 'POST' });
+    if (response.ok) {
+      const data = await response.json() as { token: string };
+      setShareToken(data.token);
+      // Auto-copy to clipboard
+      try {
+        await navigator.clipboard.writeText(`https://lib.jrd.pub/shared/${data.token}`);
+      } catch { /* clipboard may fail */ }
+    } else {
+      throw new Error('Failed to create share link');
+    }
+  }, [bookUuid]);
+
+  const handleRevokeShare = useCallback(async () => {
+    const response = await fetch(`/api/book/${bookUuid}/share`, { method: 'DELETE' });
+    if (response.ok) {
+      setShareToken(null);
+    } else {
+      throw new Error('Failed to revoke share');
+    }
+  }, [bookUuid]);
+
   // Wrapper for manual chapter navigation (no xpath) - must be before early returns
   const handleLoadChapter = useCallback((chapterNumber: number) => {
     loadChapter(chapterNumber);
@@ -295,6 +354,10 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
         onBackToShelf={onBackToShelf}
         onMarkComplete={handleMarkComplete}
         isCompleted={isCompleted}
+        isOwner={isOwner}
+        shareToken={shareToken}
+        onShare={handleShare}
+        onRevokeShare={handleRevokeShare}
         initialXpath={targetXpath}
         onProgressChange={handleProgressChange}
       />

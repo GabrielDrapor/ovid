@@ -636,6 +636,80 @@ export async function getAllUserBookProgress(
 /**
  * Get user's reading progress for a specific book
  */
+// ==================
+// Share token functions
+// ==================
+
+/**
+ * Generate and store a share token for a book (owner only)
+ */
+export async function createShareToken(
+  db: D1Database,
+  bookUuid: string,
+  userId: number
+): Promise<string> {
+  const book = await db.prepare('SELECT id, user_id, share_token FROM books_v2 WHERE uuid = ?')
+    .bind(bookUuid).first();
+
+  if (!book) throw new Error('Book not found');
+  if (book.user_id !== userId) throw new Error('Forbidden');
+
+  // Return existing token if already shared
+  if (book.share_token) return book.share_token as string;
+
+  const token = crypto.randomUUID();
+  await db.prepare('UPDATE books_v2 SET share_token = ? WHERE uuid = ?')
+    .bind(token, bookUuid).run();
+  return token;
+}
+
+/**
+ * Get share token for a book (owner only)
+ */
+export async function getShareToken(
+  db: D1Database,
+  bookUuid: string,
+  userId: number
+): Promise<string | null> {
+  const book = await db.prepare('SELECT user_id, share_token FROM books_v2 WHERE uuid = ?')
+    .bind(bookUuid).first();
+
+  if (!book) throw new Error('Book not found');
+  if (book.user_id !== userId) throw new Error('Forbidden');
+
+  return (book.share_token as string) || null;
+}
+
+/**
+ * Revoke share token for a book (owner only)
+ */
+export async function revokeShareToken(
+  db: D1Database,
+  bookUuid: string,
+  userId: number
+): Promise<void> {
+  const book = await db.prepare('SELECT id, user_id FROM books_v2 WHERE uuid = ?')
+    .bind(bookUuid).first();
+
+  if (!book) throw new Error('Book not found');
+  if (book.user_id !== userId) throw new Error('Forbidden');
+
+  await db.prepare('UPDATE books_v2 SET share_token = NULL WHERE uuid = ?')
+    .bind(bookUuid).run();
+}
+
+/**
+ * Get book by share token (for unauthenticated access)
+ */
+export async function getBookByShareToken(
+  db: D1Database,
+  token: string
+): Promise<{ id: number; uuid: string } | null> {
+  const book = await db.prepare('SELECT id, uuid FROM books_v2 WHERE share_token = ?')
+    .bind(token).first();
+  return book ? { id: book.id as number, uuid: book.uuid as string } : null;
+}
+
 export async function getUserBookProgress(
   db: D1Database,
   userId: number,
