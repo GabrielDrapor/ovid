@@ -27,17 +27,17 @@ export async function deductCredits(
   bookUuid: string,
   description: string
 ): Promise<boolean> {
-  const currentCredits = await getUserCredits(db, userId);
-  if (currentCredits < amount) {
+  // Atomic deduction: single UPDATE with WHERE credits >= amount to prevent race conditions
+  const result = await db
+    .prepare('UPDATE users SET credits = credits - ?, updated_at = datetime(\'now\') WHERE id = ? AND credits >= ?')
+    .bind(amount, userId, amount)
+    .run();
+
+  if (!result.meta.changes || result.meta.changes === 0) {
     return false;
   }
 
-  const newBalance = currentCredits - amount;
-
-  await db
-    .prepare('UPDATE users SET credits = ?, updated_at = datetime(\'now\') WHERE id = ?')
-    .bind(newBalance, userId)
-    .run();
+  const newBalance = await getUserCredits(db, userId);
 
   await db
     .prepare(

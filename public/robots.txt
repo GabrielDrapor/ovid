@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://ovid.ink/sitemap.xml
