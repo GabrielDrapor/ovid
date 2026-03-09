@@ -6,7 +6,7 @@ function createMockDB() {
     bind: vi.fn().mockReturnThis(),
     first: vi.fn().mockResolvedValue({ credits: 1000 }),
     all: vi.fn().mockResolvedValue({ results: [] }),
-    run: vi.fn().mockResolvedValue({ success: true }),
+    run: vi.fn().mockResolvedValue({ success: true, meta: { changes: 1 } }),
   };
   const db = {
     prepare: vi.fn().mockReturnValue(mockStatement),
@@ -44,7 +44,7 @@ describe('credits', () => {
   describe('deductCredits', () => {
     it('returns false when insufficient credits', async () => {
       const db = createMockDB();
-      db._statement.first.mockResolvedValue({ credits: 10 });
+      db._statement.run.mockResolvedValue({ success: true, meta: { changes: 0 } });
 
       const result = await deductCredits(db, 1, 100, 'book-1', 'translate');
       expect(result).toBe(false);
