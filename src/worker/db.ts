@@ -57,9 +57,15 @@ export async function insertBookShellV2(
   bookUuid: string,
   userId?: number
 ): Promise<number> {
+  // Auto-assign display_order to append after existing books
+  const maxOrder = await db.prepare(
+    'SELECT COALESCE(MAX(display_order), 0) as max_order FROM books_v2'
+  ).first();
+  const nextOrder = ((maxOrder?.max_order as number) || 0) + 1;
+
   await db.prepare(
-    `INSERT INTO books_v2 (uuid, title, original_title, author, language_pair, styles, user_id, status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'processing')`
+    `INSERT INTO books_v2 (uuid, title, original_title, author, language_pair, styles, user_id, status, display_order)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'processing', ?)`
   )
     .bind(
       bookUuid,
@@ -68,7 +74,8 @@ export async function insertBookShellV2(
       bookData.author,
       bookData.languagePair,
       bookData.styles,
-      userId ?? null
+      userId ?? null,
+      nextOrder
     )
     .run();
 
@@ -312,10 +319,16 @@ export async function insertProcessedBookV2(
 ): Promise<number> {
   const translatedBookTitle = processedBook.metadata.title;
 
+  // Auto-assign display_order to append after existing books
+  const maxOrderRow = await db.prepare(
+    'SELECT COALESCE(MAX(display_order), 0) as max_order FROM books_v2'
+  ).first();
+  const nextDisplayOrder = ((maxOrderRow?.max_order as number) || 0) + 1;
+
   // Insert book metadata into books_v2
   await db.prepare(
-    `INSERT INTO books_v2 (uuid, title, original_title, author, language_pair, styles, user_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO books_v2 (uuid, title, original_title, author, language_pair, styles, user_id, display_order)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
   )
     .bind(
       bookUuid,
@@ -324,7 +337,8 @@ export async function insertProcessedBookV2(
       processedBook.metadata.author,
       processedBook.metadata.languagePair,
       processedBook.metadata.styles,
-      userId ?? null
+      userId ?? null,
+      nextDisplayOrder
     )
     .run();
 
