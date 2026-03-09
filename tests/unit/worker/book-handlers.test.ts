@@ -12,7 +12,7 @@ function createMockDB(rows: any[] = []) {
     bind: vi.fn().mockReturnThis(),
     first: vi.fn().mockResolvedValue(null),
     all: vi.fn().mockResolvedValue({ results: rows }),
-    run: vi.fn().mockResolvedValue({ success: true }),
+    run: vi.fn().mockResolvedValue({ success: true, meta: { changes: 1 } }),
   };
   const db = {
     prepare: vi.fn().mockReturnValue(mockStatement),
@@ -105,13 +105,14 @@ describe('Book Handlers', () => {
 
     it('deducts credits on successful operation', async () => {
       const db = createMockDB();
-      // First call: getUserCredits returns 5000
-      db._statement.first.mockResolvedValueOnce({ credits: 5000 });
+      // Atomic UPDATE returns changes: 1 when credits >= amount
+      db._statement.run.mockResolvedValue({ success: true, meta: { changes: 1 } });
+      db._statement.first.mockResolvedValue({ credits: 4900 });
 
       const result = await deductCredits(db, 1, 100, 'book-uuid', 'Test deduction');
       expect(result).toBe(true);
 
-      // Verify UPDATE was called to set new balance
+      // Verify UPDATE was called
       const updateCalls = db.prepare.mock.calls.filter((c: any) =>
         (c[0] as string).includes('UPDATE users SET credits')
       );
@@ -120,7 +121,8 @@ describe('Book Handlers', () => {
 
     it('fails deduction when insufficient credits', async () => {
       const db = createMockDB();
-      db._statement.first.mockResolvedValueOnce({ credits: 50 });
+      // Atomic UPDATE returns changes: 0 when credits < amount
+      db._statement.run.mockResolvedValue({ success: true, meta: { changes: 0 } });
 
       const result = await deductCredits(db, 1, 100, 'book-uuid', 'Test');
       expect(result).toBe(false);
