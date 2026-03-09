@@ -134,6 +134,19 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
 
   // Save progress to localStorage only (URL stays clean as /book/{uuid})
   const saveProgress = useCallback((chapter: number, xpath?: string) => {
+    // When xpath is not provided, preserve the existing saved xpath
+    // only if we're on the same chapter (avoids stale xpath from a different chapter)
+    if (!xpath) {
+      const existing = localStorage.getItem(PROGRESS_KEY(bookUuid));
+      if (existing) {
+        try {
+          const prev = JSON.parse(existing) as ReadingProgress;
+          if (prev.chapter === chapter && prev.xpath) {
+            xpath = prev.xpath;
+          }
+        } catch { /* ignore */ }
+      }
+    }
     const progress: ReadingProgress = {
       chapter,
       xpath,
@@ -237,8 +250,7 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
       const data = await response.json();
       setChapterContent(data as ChapterContent);
       setCurrentChapter(chapterNumber);
-      saveProgress(chapterNumber, scrollToXpath);
-      
+
       // Auto-update reading progress in database (fire-and-forget)
       // Use PUT progress endpoint to avoid resetting completion status
       if (chapters.length > 0) {
@@ -253,8 +265,15 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
       // Set target xpath for scroll (or clear it for new chapter)
       setTargetXpath(scrollToXpath);
 
-      // Save progress - xpath will be updated when reader reports visible element
-      saveProgress(chapterNumber, scrollToXpath);
+      // Only save progress with xpath when we actually have one;
+      // don't overwrite good progress with empty/undefined xpath
+      if (scrollToXpath) {
+        saveProgress(chapterNumber, scrollToXpath);
+      } else {
+        // Save chapter number only, preserving any existing xpath via
+        // a fresh save without xpath (the reader observer will update it soon)
+        saveProgress(chapterNumber);
+      }
 
       // If no target xpath, scroll to top
       if (!scrollToXpath) {
@@ -275,14 +294,30 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
     loadChapter(initialProgress.current.chapter, initialProgress.current.xpath);
   }, [bookUuid]);
 
-  // Cleanup debounced progress timer on unmount
+  // Flush current reading position to localStorage on page exit or tab hide
   useEffect(() => {
+    const flushProgress = () => {
+      if (currentXpathRef.current) {
+        saveProgress(currentChapter, currentXpathRef.current);
+      }
+    };
+
+    const handleBeforeUnload = () => flushProgress();
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') flushProgress();
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
     return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       if (progressTimerRef.current) {
         clearTimeout(progressTimerRef.current);
       }
     };
-  }, []);
+  }, [currentChapter, saveProgress]);
 
   const isOwner = !!(user && bookOwnerId && user.id === bookOwnerId);
 
