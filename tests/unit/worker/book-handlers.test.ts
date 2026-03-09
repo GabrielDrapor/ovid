@@ -8,12 +8,20 @@ import { getUserCredits, deductCredits } from '../../../src/worker/credits';
 
 /** Create a mock D1Database */
 function createMockDB(rows: any[] = []) {
-  const mockStatement = {
-    bind: vi.fn().mockReturnThis(),
+  const mockStatement: any = {
+    bind: vi.fn(),
     first: vi.fn().mockResolvedValue(null),
     all: vi.fn().mockResolvedValue({ results: rows }),
     run: vi.fn().mockResolvedValue({ success: true, meta: { changes: 1 } }),
   };
+  // bind() returns a new object that delegates to the same mocks
+  // This ensures chained .bind().run() returns proper results
+  mockStatement.bind.mockImplementation((..._args: any[]) => ({
+    first: mockStatement.first,
+    all: mockStatement.all,
+    run: mockStatement.run,
+    bind: mockStatement.bind,
+  }));
   const db = {
     prepare: vi.fn().mockReturnValue(mockStatement),
     _statement: mockStatement,
