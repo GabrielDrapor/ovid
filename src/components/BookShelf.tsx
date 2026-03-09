@@ -357,7 +357,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                     />
                   ) : (
                     <div className="book-spine-default" style={{ backgroundColor: stringToColor(book.title) }}>
-                      <span className="spine-title">{book.title}</span>
+                      <span className="spine-title">{book.original_title || book.title}</span>
                     </div>
                   )}
                 </div>
