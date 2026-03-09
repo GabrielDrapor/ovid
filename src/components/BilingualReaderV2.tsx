@@ -95,6 +95,9 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
   const progressCallbackRef = useRef(onProgressChange);
   progressCallbackRef.current = onProgressChange;
 
+  // Set of all currently-visible xpaths (kept up to date across observer callbacks)
+  const visibleXpathsSetRef = useRef<Set<string>>(new Set());
+
   // Debounce timer for progress updates
   const progressTimerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -290,25 +293,38 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
   useEffect(() => {
     if (!translationsReady || elementsRef.current.size === 0) return;
 
+    // Reset the visible set when observer is (re-)created
+    visibleXpathsSetRef.current.clear();
+
     const observer = new IntersectionObserver(
       (entries) => {
-        // Find the topmost visible element
+        // Update the persistent set of visible xpaths
+        entries.forEach((entry) => {
+          // Resolve xpath for this entry's target
+          let entryXpath: string | undefined;
+          elementsRef.current.forEach((data, xpath) => {
+            if (data.element === entry.target) entryXpath = xpath;
+          });
+          if (!entryXpath) return;
+
+          if (entry.isIntersecting) {
+            visibleXpathsSetRef.current.add(entryXpath);
+          } else {
+            visibleXpathsSetRef.current.delete(entryXpath);
+          }
+        });
+
+        // Find the topmost visible element from the full set
         let topmostXpath: string | undefined;
         let topmostTop = Infinity;
 
-        entries.forEach((entry) => {
-          if (entry.isIntersecting) {
-            const rect = entry.boundingClientRect;
-            // Element is visible and closer to the top of viewport
-            if (rect.top < topmostTop && rect.top >= -rect.height / 2) {
-              topmostTop = rect.top;
-              // Find the xpath for this element
-              elementsRef.current.forEach((data, xpath) => {
-                if (data.element === entry.target) {
-                  topmostXpath = xpath;
-                }
-              });
-            }
+        visibleXpathsSetRef.current.forEach((xpath) => {
+          const data = elementsRef.current.get(xpath);
+          if (!data) return;
+          const rect = data.element.getBoundingClientRect();
+          if (rect.top < topmostTop && rect.top >= -rect.height / 2) {
+            topmostTop = rect.top;
+            topmostXpath = xpath;
           }
         });
 
