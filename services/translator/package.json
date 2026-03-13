@@ -12,13 +12,15 @@
   },
   "dependencies": {
     "@hono/node-server": "^1.19.9",
+    "@xmldom/xmldom": "^0.9.5",
     "hono": "^4.4.0",
+    "jszip": "^3.10.1",
     "sharp": "^0.33.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "tsx": "^4.16.0",
-    "typescript": "^5.7.0",
+    "typescript": "^5.9.3",
     "vitest": "^4.0.18"
   }
 }

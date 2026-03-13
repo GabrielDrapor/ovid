@@ -1,34 +1,31 @@
 /**
  * Book upload, estimate, and chunked translation handlers
+ *
+ * Upload & estimate are thin relays — the heavy EPUB/MOBI parsing
+ * happens on the Railway translator service to avoid CF Worker CPU limits.
  */
 
 import { Env } from './types';
 import { getCurrentUser } from './auth';
-import { getUserCredits, deductCredits } from './credits';
 import {
-  insertBookShellV2,
   updateBookStatus,
-  createTranslationJob,
   getTranslationJob,
   updateTranslationJob,
-  storeChapterTextNodes,
   getChapterTextNodes,
   getChapterIdByNumber,
   insertTranslationRow,
   updateChapterTitle,
   clearTextNodesJson,
-  deleteTranslationJob,
 } from './db';
-import { calculateBookCredits, TOKENS_PER_CREDIT } from '../utils/token-counter';
 import { Translator, SimpleKVStore } from '../utils/translator';
 
 /** Max paragraphs to translate per /translate-next call (well under 50 subrequest limit) */
 const BATCH_SIZE = 25;
 
 /**
- * Handle book upload. Parses EPUB, inserts book shell + text nodes,
- * creates a translation job. No LLM calls — translation is driven
- * by the frontend via /translate-next.
+ * Handle book upload.
+ * Stores the raw file to R2 and delegates parsing + DB writes to Railway.
+ * No EPUB parsing in-worker — avoids CF CPU time limits.
  */
 export async function handleBookUpload(
   request: Request,
@@ -67,193 +64,50 @@ export async function handleBookUpload(
       );
     }
 
-    const buffer = await file.arrayBuffer();
+    // Require Railway translator service for upload
+    if (!env.TRANSLATOR_SERVICE_URL || !env.TRANSLATOR_SECRET) {
+      return new Response(
+        JSON.stringify({ error: 'Translation service not configured' }),
+        { status: 503, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
 
-    const { BookProcessor } = await import('../utils/book-processor');
-    const processor = new BookProcessor(1, {
-      apiKey: env.OPENAI_API_KEY,
-      baseURL: env.OPENAI_API_BASE_URL,
-      model: env.OPENAI_MODEL,
+    const buffer = await file.arrayBuffer();
+    const bookUuid = crypto.randomUUID();
+
+    // Store raw file to R2 — this is lightweight, no CPU-heavy parsing
+    const r2Key = `uploads/${bookUuid}/original${fileExtension}`;
+    await env.ASSETS_BUCKET.put(r2Key, buffer, {
+      httpMetadata: { contentType: file.type || 'application/octet-stream' },
+      customMetadata: { originalName: file.name },
     });
 
-    // Parse book based on format
-    const bookData = fileExtension === '.epub'
-      ? await processor.parseEPUBV2(buffer)
-      : await processor.parseMOBI(buffer, fileExtension);
-
-    const allTexts: string[] = [];
-    for (const chapter of bookData.chapters) {
-      for (const node of chapter.textNodes) {
-        allTexts.push(node.text);
-      }
-    }
-
-    const model = env.OPENAI_MODEL || 'gpt-4o-mini';
-    const requiredCredits = calculateBookCredits(allTexts, targetLanguage, model);
-    const userCredits = await getUserCredits(env.DB, user.id);
-
-    if (userCredits < requiredCredits) {
-      return new Response(
-        JSON.stringify({
-          error: 'Insufficient credits',
-          required: requiredCredits,
-          available: userCredits,
-          message: `This book requires ${requiredCredits.toLocaleString()} credits to translate, but you only have ${userCredits.toLocaleString()} credits.`,
+    // Delegate everything to Railway (parsing, DB writes, credits, translation)
+    const translatorUrl = env.TRANSLATOR_SERVICE_URL;
+    const translatorSecret = env.TRANSLATOR_SECRET;
+    ctx.waitUntil(
+      fetch(`${translatorUrl}/upload-and-parse`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bookUuid,
+          fileKey: r2Key,
+          fileExtension,
+          sourceLanguage,
+          targetLanguage,
+          userId: user.id,
+          secret: translatorSecret,
         }),
-        { status: 402, headers: { 'Content-Type': 'application/json' } }
-      );
-    }
-
-    // Deduct credits upfront
-    const bookUuid = crypto.randomUUID();
-    await deductCredits(
-      env.DB,
-      user.id,
-      requiredCredits,
-      bookUuid,
-      `Translation: ${bookData.title || 'Book'}`
+      }).catch((err) => {
+        console.error(`Failed to notify translator service for ${bookUuid}:`, err);
+      })
     );
 
-    // Upload EPUB images to R2 and build rewrite map
-    const R2_PUBLIC_BASE = 'https://assets.ovid.jrd.pub';
-    const imgRewriteMap = new Map<string, string>(); // original relative path → R2 URL
-
-    if (bookData.images && bookData.images.length > 0 && env.ASSETS_BUCKET) {
-      for (const img of bookData.images) {
-        const r2Key = `books/${bookUuid}/images/${img.filename}`;
-        try {
-          await env.ASSETS_BUCKET.put(r2Key, img.data, {
-            httpMetadata: { contentType: img.mediaType },
-          });
-          const publicUrl = `${R2_PUBLIC_BASE}/${r2Key}`;
-          // Map all possible relative references to this image
-          // e.g. "../images/fig1.jpg", "images/fig1.jpg", "fig1.jpg"
-          imgRewriteMap.set(img.filename, publicUrl);
-          // Also map the full zip path segments
-          const parts = img.zipPath.split('/');
-          for (let i = 0; i < parts.length; i++) {
-            imgRewriteMap.set(parts.slice(i).join('/'), publicUrl);
-            imgRewriteMap.set('../' + parts.slice(i).join('/'), publicUrl);
-          }
-        } catch (e) {
-          console.warn(`Failed to upload image ${img.filename} to R2:`, e);
-        }
-      }
-    }
-
-    // Rewrite <img src="..."> in rawHtml to point to R2 URLs
-    const rewriteImgSrc = (html: string): string => {
-      if (imgRewriteMap.size === 0) return html;
-      return html.replace(/<img([^>]*)\ssrc="([^"]*)"([^>]*)\/?\s*>/gi, (match, before, src, after) => {
-        // Try exact match first, then filename-only
-        let newSrc = imgRewriteMap.get(src);
-        if (!newSrc) {
-          // Try without leading ../
-          const cleaned = src.replace(/^(\.\.\/)+/, '');
-          newSrc = imgRewriteMap.get(cleaned);
-        }
-        if (!newSrc) {
-          // Try just the filename
-          const fname = src.split('/').pop() || src;
-          newSrc = imgRewriteMap.get(fname);
-        }
-        if (newSrc) {
-          return `<img${before} src="${newSrc}"${after}/>`;
-        }
-        return match;
-      });
-    };
-
-    // Insert book shell (metadata + chapters with raw HTML, no translations)
-    const bookId = await insertBookShellV2(
-      env.DB,
-      {
-        title: bookData.title,
-        originalTitle: bookData.title,
-        author: bookData.author,
-        languagePair: `${sourceLanguage}-${targetLanguage}`,
-        styles: bookData.styles || '',
-        chapters: bookData.chapters.map(ch => ({
-          number: ch.number,
-          title: ch.originalTitle,
-          originalTitle: ch.originalTitle,
-          rawHtml: rewriteImgSrc(ch.rawHtml),
-        })),
-      },
-      bookUuid,
-      user.id
-    );
-
-    // Store text nodes on each chapter for the translate-next endpoint
-    for (const chapter of bookData.chapters) {
-      await storeChapterTextNodes(
-        env.DB,
-        bookId,
-        chapter.number,
-        JSON.stringify(chapter.textNodes)
-      );
-    }
-
-    // Create translation job
-    await createTranslationJob(
-      env.DB,
-      bookId,
-      bookUuid,
-      sourceLanguage,
-      targetLanguage,
-      bookData.chapters.length
-    );
-
-    // Notify Railway translator service (non-blocking)
-    if (env.TRANSLATOR_SERVICE_URL && env.TRANSLATOR_SECRET) {
-      const translatorUrl = env.TRANSLATOR_SERVICE_URL;
-      const translatorSecret = env.TRANSLATOR_SECRET;
-      ctx.waitUntil(
-        fetch(`${translatorUrl}/translate`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ bookUuid, secret: translatorSecret }),
-        }).catch((err) => {
-          console.warn(`Failed to notify translator service for ${bookUuid}:`, err);
-        })
-      );
-    }
-
-    // Generate cover images in background (non-blocking)
-    if (env.GEMINI_API_KEY && env.ASSETS_BUCKET) {
-      ctx.waitUntil(
-        (async () => {
-          try {
-            const { generateBookCovers } = await import('./cover-generator');
-            const covers = await generateBookCovers(
-              env.GEMINI_API_KEY!,
-              env.ASSETS_BUCKET,
-              bookData.title,
-              bookData.author,
-              bookUuid,
-              env.TRANSLATOR_SERVICE_URL || '',
-              env.TRANSLATOR_SECRET || '',
-            );
-            // If translator service is configured, it handles DB update.
-            // Otherwise fall back to raw images.
-            if (!env.TRANSLATOR_SERVICE_URL) {
-              await env.DB.prepare(
-                'UPDATE books_v2 SET book_cover_img_url = ?, book_spine_img_url = ? WHERE uuid = ?'
-              ).bind(covers.coverUrl, covers.spineUrl, bookUuid).run();
-            }
-            console.log(`Cover generated for ${bookUuid}: ${covers.coverUrl}`);
-          } catch (err) {
-            console.warn(`Cover generation failed for ${bookUuid}:`, err);
-          }
-        })()
-      );
-    }
-
+    // Return immediately — Railway handles the rest
     return new Response(
       JSON.stringify({
         success: true,
         bookUuid,
-        creditsUsed: requiredCredits,
         status: 'processing',
       }),
       { headers: { 'Content-Type': 'application/json' } }
@@ -585,7 +439,8 @@ export async function handleTranslateNext(
 }
 
 /**
- * Handle book estimate (calculate credits before upload)
+ * Handle book estimate — delegates to Railway to avoid CPU-heavy parsing in Worker.
+ * Stores file temporarily in R2, asks Railway to parse and estimate, returns result.
  */
 export async function handleBookEstimate(
   request: Request,
@@ -597,6 +452,14 @@ export async function handleBookEstimate(
       status: 401,
       headers: { 'Content-Type': 'application/json' },
     });
+  }
+
+  // Require Railway translator service for estimate
+  if (!env.TRANSLATOR_SERVICE_URL || !env.TRANSLATOR_SECRET) {
+    return new Response(
+      JSON.stringify({ error: 'Translation service not configured' }),
+      { status: 503, headers: { 'Content-Type': 'application/json' } }
+    );
   }
 
   try {
@@ -624,45 +487,39 @@ export async function handleBookEstimate(
 
     const buffer = await file.arrayBuffer();
 
-    const { BookProcessor } = await import('../utils/book-processor');
-    const processor = new BookProcessor(1, {
-      apiKey: env.OPENAI_API_KEY,
-      baseURL: env.OPENAI_API_BASE_URL,
-      model: env.OPENAI_MODEL,
+    // Store file temporarily in R2 for Railway to parse
+    const tempKey = `uploads/_estimate/${crypto.randomUUID()}${fileExtension}`;
+    await env.ASSETS_BUCKET.put(tempKey, buffer, {
+      httpMetadata: { contentType: file.type || 'application/octet-stream' },
+      customMetadata: { originalName: file.name },
     });
 
-    // Parse book based on format
-    const bookData = fileExtension === '.epub'
-      ? await processor.parseEPUBV2(buffer)
-      : await processor.parseMOBI(buffer, fileExtension);
+    // Ask Railway to parse and estimate
+    const resp = await fetch(`${env.TRANSLATOR_SERVICE_URL}/estimate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fileKey: tempKey,
+        fileExtension,
+        targetLanguage,
+        userId: user.id,
+        secret: env.TRANSLATOR_SECRET,
+      }),
+    });
 
-    const allTexts: string[] = [];
-    let chapterCount = 0;
-    for (const chapter of bookData.chapters) {
-      chapterCount++;
-      for (const node of chapter.textNodes) {
-        allTexts.push(node.text);
-      }
+    if (!resp.ok) {
+      const errText = await resp.text();
+      console.error('Railway estimate error:', errText);
+      return new Response(
+        JSON.stringify({ error: 'Estimation failed', details: errText }),
+        { status: 500, headers: { 'Content-Type': 'application/json' } }
+      );
     }
 
-    const model = env.OPENAI_MODEL || 'gpt-4o-mini';
-    const requiredCredits = calculateBookCredits(allTexts, targetLanguage, model);
-    const userCredits = await getUserCredits(env.DB, user.id);
-    const totalCharacters = allTexts.reduce((sum, text) => sum + text.length, 0);
-
-    return new Response(
-      JSON.stringify({
-        title: bookData.title || file.name.replace(/\.(epub|mobi|azw3)$/i, ''),
-        author: bookData.author || 'Unknown',
-        chapters: chapterCount,
-        characters: totalCharacters,
-        estimatedTokens: requiredCredits * TOKENS_PER_CREDIT,
-        requiredCredits,
-        availableCredits: userCredits,
-        canAfford: userCredits >= requiredCredits,
-      }),
-      { headers: { 'Content-Type': 'application/json' } }
-    );
+    const result = await resp.json();
+    return new Response(JSON.stringify(result), {
+      headers: { 'Content-Type': 'application/json' },
+    });
   } catch (error) {
     console.error('Book estimate error:', error);
     const errorMessage = error instanceof Error ? error.message : String(error);
