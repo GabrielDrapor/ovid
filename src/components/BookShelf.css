@@ -426,6 +426,183 @@
   display: none;
 }
 
+/* Shelf action buttons row (avatar, upload, github) */
+.shelf-actions {
+  position: absolute;
+  left: 250px;
+  top: 402px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  z-index: 10;
+}
+
+.shelf-avatar-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.6);
+  padding: 0;
+  cursor: pointer;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.3);
+  transition: opacity 0.2s ease;
+}
+
+.shelf-avatar-btn:hover {
+  opacity: 0.8;
+}
+
+.shelf-avatar-btn .user-avatar {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.shelf-avatar-btn .user-avatar-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  color: white;
+  background: rgba(100, 100, 100, 0.5);
+}
+
+.shelf-upload-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  background: none;
+  color: rgba(255, 255, 255, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.2s ease;
+}
+
+.shelf-upload-btn:hover {
+  opacity: 0.7;
+}
+
+.shelf-signin-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  background: rgba(0, 0, 0, 0.3);
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 12px;
+  cursor: pointer;
+  transition: opacity 0.2s ease;
+  white-space: nowrap;
+}
+
+.shelf-signin-btn:hover {
+  opacity: 0.8;
+}
+
+.shelf-github-btn {
+  width: 30px;
+  height: 30px;
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  transition: opacity 0.2s ease;
+}
+
+.shelf-github-btn:hover {
+  opacity: 0.7;
+}
+
+.shelf-user-dropdown {
+  position: absolute;
+  top: 40px;
+  left: 0;
+  background: rgba(30, 30, 30, 0.95);
+  backdrop-filter: blur(10px);
+  border-radius: 12px;
+  padding: 16px;
+  min-width: 200px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  z-index: 100;
+}
+
+.shelf-user-dropdown .user-info {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 12px;
+}
+
+.shelf-user-dropdown .user-name {
+  color: white;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.shelf-user-dropdown .user-email {
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 12px;
+}
+
+.shelf-user-dropdown .user-credits {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  margin-bottom: 8px;
+}
+
+.shelf-user-dropdown .credits-label {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 13px;
+}
+
+.shelf-user-dropdown .credits-amount {
+  color: white;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.shelf-user-dropdown .buy-credits-btn,
+.shelf-user-dropdown .logout-btn {
+  width: 100%;
+  padding: 8px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+
+.shelf-user-dropdown .buy-credits-btn {
+  background: rgba(255, 255, 255, 0.15);
+  color: white;
+}
+
+.shelf-user-dropdown .buy-credits-btn:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.shelf-user-dropdown .logout-btn {
+  background: none;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.shelf-user-dropdown .logout-btn:hover {
+  color: white;
+}
+
 /* Individual Book Spine */
 .book-spine-container {
   height: 300px;
@@ -775,6 +952,52 @@
     background-position: -30px top;
   }
 
+  .shelf-actions {
+    left: 215px;
+    top: 48%;
+    gap: 6px;
+  }
+
+  .shelf-avatar-btn {
+    width: 35px;
+    height: 35px;
+  }
+
+  .shelf-upload-btn {
+    width: 35px;
+    height: 35px;
+  }
+
+  .shelf-upload-btn svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  .shelf-github-btn {
+    width: 35px;
+    height: 35px;
+  }
+
+  .shelf-github-btn svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  .shelf-signin-btn {
+    font-size: 11px;
+    padding: 4px 10px;
+  }
+
+  .shelf-signin-btn .google-icon {
+    width: 14px;
+    height: 14px;
+  }
+
+  .shelf-user-dropdown {
+    left: -20px;
+    top: 36px;
+  }
+
   .books-grid {
     padding-left: 16px;
     justify-content: flex-start;
@@ -825,53 +1048,7 @@
     display: none;
   }
 
-  /* Mobile floating auth button */
-  .mobile-auth-floating {
-    position: fixed;
-    top: 12px;
-    right: 12px;
-    z-index: 500;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-
-  .mobile-auth-floating .google-login-btn {
-    padding: 10px 16px;
-    font-size: 13px;
-    border-radius: 50%;
-    width: 48px;
-    height: 48px;
-    justify-content: center;
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
-  }
-
-  .mobile-auth-floating .google-login-btn span {
-    display: none;
-  }
-
-  .mobile-auth-floating .user-avatar-btn {
-    width: 48px;
-    height: 48px;
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
-  }
-
-  .mobile-auth-floating .upload-book-btn-icon {
-    width: 48px;
-    height: 48px;
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
-  }
-
-  .mobile-auth-floating .user-dropdown {
-    top: 58px;
-    right: 0;
-    left: auto;
-  }
-
-  /* Hide desktop auth container on mobile */
-  .user-auth-container {
-    display: none;
-  }
+  /* Auth is now in shelf-actions, no separate mobile floating */
 
   /* Mobile bottom sheet */
   .mobile-book-sheet-overlay {
