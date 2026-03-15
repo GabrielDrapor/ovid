@@ -656,3 +656,64 @@ sup:hover {
 }
 
 /* (removed - completed style now in .fab-completed) */
+
+/* Onboarding tooltip */
+.onboarding-tooltip {
+  position: fixed;
+  top: 30%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(30, 30, 30, 0.92);
+  color: #fff;
+  padding: 14px 22px;
+  border-radius: 10px;
+  font-size: 15px;
+  line-height: 1.6;
+  text-align: center;
+  z-index: 1000;
+  cursor: pointer;
+  animation: onboarding-fade-in 0.4s ease-out;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  max-width: 320px;
+  pointer-events: auto;
+}
+
+.onboarding-tooltip-arrow {
+  position: absolute;
+  top: -6px;
+  left: 50%;
+  transform: translateX(-50%) rotate(45deg);
+  width: 12px;
+  height: 12px;
+  background: rgba(30, 30, 30, 0.92);
+}
+
+.onboarding-tooltip-en {
+  display: block;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.65);
+  margin-top: 4px;
+}
+
+@keyframes onboarding-fade-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+@media (max-width: 768px) {
+  .onboarding-tooltip {
+    top: auto;
+    bottom: 100px;
+    max-width: 280px;
+    font-size: 14px;
+    padding: 12px 18px;
+  }
+}
