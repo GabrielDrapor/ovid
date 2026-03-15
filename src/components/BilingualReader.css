@@ -659,13 +659,10 @@ sup:hover {
 
 /* Onboarding tooltip */
 .onboarding-tooltip {
-  position: fixed;
-  top: 30%;
-  left: 50%;
-  transform: translateX(-50%);
+  position: absolute;
   background: rgba(30, 30, 30, 0.92);
   color: #fff;
-  padding: 14px 22px;
+  padding: 12px 18px;
   border-radius: 10px;
   font-size: 15px;
   line-height: 1.6;
@@ -676,15 +673,15 @@ sup:hover {
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
-  max-width: 320px;
+  white-space: nowrap;
   pointer-events: auto;
 }
 
 .onboarding-tooltip-arrow {
   position: absolute;
-  top: -6px;
-  left: 50%;
-  transform: translateX(-50%) rotate(45deg);
+  top: 50%;
+  right: -6px;
+  transform: translateY(-50%) rotate(45deg);
   width: 12px;
   height: 12px;
   background: rgba(30, 30, 30, 0.92);
@@ -694,26 +691,25 @@ sup:hover {
   display: block;
   font-size: 13px;
   color: rgba(255, 255, 255, 0.65);
-  margin-top: 4px;
+  margin-top: 2px;
 }
 
 @keyframes onboarding-fade-in {
   from {
     opacity: 0;
-    transform: translateX(-50%) translateY(8px);
+    transform: translateY(-50%) translateX(-8px);
   }
   to {
     opacity: 1;
-    transform: translateX(-50%) translateY(0);
+    transform: translateY(-50%) translateX(0);
   }
 }
 
 @media (max-width: 768px) {
   .onboarding-tooltip {
-    top: auto;
-    bottom: 100px;
-    max-width: 280px;
+    white-space: normal;
+    max-width: 200px;
     font-size: 14px;
-    padding: 12px 18px;
+    padding: 10px 14px;
   }
 }

@@ -390,13 +390,26 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
     };
   }, [translationsReady]);
 
-  // Show onboarding tooltip for first-time users
+  // Show onboarding tooltip for first-time users, positioned near first paragraph
+  const [tooltipPos, setTooltipPos] = useState<{ top: number; right: number } | null>(null);
   useEffect(() => {
     if (!translationsReady || elementsRef.current.size === 0) return;
     const seen = localStorage.getItem('ovid_onboarding_seen');
     if (seen) return;
-    // Small delay so the content is rendered
-    const timer = setTimeout(() => setShowOnboardingTooltip(true), 500);
+    // Small delay so the content is rendered and laid out
+    const timer = setTimeout(() => {
+      // Find the first paragraph element
+      const firstEntry = elementsRef.current.values().next().value;
+      if (firstEntry?.element) {
+        const rect = firstEntry.element.getBoundingClientRect();
+        const scrollTop = window.scrollY || document.documentElement.scrollTop;
+        setTooltipPos({
+          top: rect.top + scrollTop + rect.height / 2,
+          right: window.innerWidth - rect.left + 12,
+        });
+      }
+      setShowOnboardingTooltip(true);
+    }, 500);
     return () => clearTimeout(timer);
   }, [translationsReady]);
 
@@ -575,10 +588,20 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
 
         {/* Onboarding tooltip for first-time users */}
         {showOnboardingTooltip && (
-          <div className="onboarding-tooltip" onClick={dismissOnboarding}>
+          <div
+            className="onboarding-tooltip"
+            onClick={dismissOnboarding}
+            style={tooltipPos ? {
+              position: 'absolute',
+              top: tooltipPos.top,
+              right: tooltipPos.right,
+              left: 'auto',
+              transform: 'translateY(-50%)',
+            } : undefined}
+          >
             <div className="onboarding-tooltip-arrow" />
-            <span>点击段落切换原文/翻译</span>
-            <span className="onboarding-tooltip-en">Click any paragraph to toggle translation</span>
+            <span>点击段落切换翻译</span>
+            <span className="onboarding-tooltip-en">Tap to toggle translation</span>
           </div>
         )}
 

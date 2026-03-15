@@ -68,8 +68,8 @@ describe('Onboarding Tooltip', () => {
       expect(tooltip).toBeInTheDocument();
     }, { timeout: 2000 });
 
-    expect(screen.getByText('点击段落切换原文/翻译')).toBeInTheDocument();
-    expect(screen.getByText('Click any paragraph to toggle translation')).toBeInTheDocument();
+    expect(screen.getByText('点击段落切换翻译')).toBeInTheDocument();
+    expect(screen.getByText('Tap to toggle translation')).toBeInTheDocument();
   });
 
   it('does not show tooltip if already seen', async () => {
