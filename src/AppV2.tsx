@@ -47,10 +47,17 @@ interface ReadingProgress {
   timestamp: number;
 }
 
+// Cloud progress from backend
+interface CloudProgress {
+  chapter_number: number | null;
+  paragraph_xpath: string | null;
+  updated_at: string | null;
+}
+
 const PROGRESS_KEY = (uuid: string) => `ovid_progress_v2_${uuid}`;
 
 // Get initial progress from localStorage
-const getInitialProgress = (uuid: string): ReadingProgress => {
+const getLocalProgress = (uuid: string): ReadingProgress => {
   // Check localStorage (new format)
   const saved = localStorage.getItem(PROGRESS_KEY(uuid));
   if (saved) {
@@ -72,16 +79,49 @@ const getInitialProgress = (uuid: string): ReadingProgress => {
   return { chapter: 1, timestamp: Date.now() };
 };
 
+// Fetch cloud progress and merge with local — cloud wins if newer
+const fetchAndMergeProgress = async (uuid: string): Promise<ReadingProgress> => {
+  const local = getLocalProgress(uuid);
+  
+  try {
+    const response = await fetch(`/api/book/${uuid}/progress`);
+    if (!response.ok) return local;
+    
+    const data = await response.json() as { progress: CloudProgress | null };
+    if (!data.progress?.chapter_number) return local;
+    
+    const cloud = data.progress;
+    const cloudTimestamp = cloud.updated_at ? new Date(cloud.updated_at).getTime() : 0;
+    
+    // Use whichever is more recent
+    if (cloudTimestamp > local.timestamp) {
+      const merged: ReadingProgress = {
+        chapter: cloud.chapter_number!,
+        xpath: cloud.paragraph_xpath || undefined,
+        timestamp: cloudTimestamp,
+      };
+      // Update localStorage with cloud data
+      localStorage.setItem(PROGRESS_KEY(uuid), JSON.stringify(merged));
+      return merged;
+    }
+    
+    return local;
+  } catch {
+    return local;
+  }
+};
+
 function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
   const [chapterContent, setChapterContent] = useState<ChapterContent | null>(null);
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Initialize from saved progress
-  const initialProgress = useRef(getInitialProgress(bookUuid));
+  // Initialize from local progress first, then merge with cloud
+  const initialProgress = useRef(getLocalProgress(bookUuid));
   const [currentChapter, setCurrentChapter] = useState(initialProgress.current.chapter);
   const [targetXpath, setTargetXpath] = useState<string | undefined>(initialProgress.current.xpath);
+
 
   // Track current visible xpath for saving
   const currentXpathRef = useRef<string | undefined>(undefined);
@@ -161,16 +201,20 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
     // Save to localStorage immediately
     saveProgress(currentChapter, xpath);
     
-    // Debounced API update - only save to backend every 2 seconds to avoid excessive writes
+    // Debounced API update - save chapter + xpath to backend every 5 seconds
     if (progressTimerRef.current) clearTimeout(progressTimerRef.current);
     progressTimerRef.current = setTimeout(() => {
       const progressPercent = calculateProgress();
       fetch(`/api/book/${bookUuid}/progress`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ readingProgress: progressPercent }),
+        body: JSON.stringify({
+          readingProgress: progressPercent,
+          chapterNumber: currentChapter,
+          paragraphXpath: xpath,
+        }),
       }).catch(err => console.error('Error saving progress to backend:', err));
-    }, 2000);
+    }, 5000);
   }, [currentChapter, saveProgress, bookUuid, calculateProgress]);
 
   // Load chapters list
@@ -258,7 +302,11 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
         fetch(`/api/book/${bookUuid}/progress`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ readingProgress: progressPercent }),
+          body: JSON.stringify({
+            readingProgress: progressPercent,
+            chapterNumber: chapterNumber,
+            paragraphXpath: scrollToXpath || null,
+          }),
         }).catch(err => console.error('Error updating progress:', err));
       }
 
@@ -289,16 +337,44 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
     }
   };
 
-  // Initial chapter load - include xpath from saved progress
+  // Initial chapter load — merge cloud progress, then load
   useEffect(() => {
-    loadChapter(initialProgress.current.chapter, initialProgress.current.xpath);
+    const init = async () => {
+      const merged = await fetchAndMergeProgress(bookUuid);
+      initialProgress.current = merged;
+      
+      // If cloud had a different chapter/xpath, update state before loading
+      if (merged.chapter !== currentChapter || merged.xpath !== targetXpath) {
+        setCurrentChapter(merged.chapter);
+        setTargetXpath(merged.xpath);
+      }
+      
+      await loadChapter(merged.chapter, merged.xpath);
+    };
+    init();
   }, [bookUuid]);
 
-  // Flush current reading position to localStorage on page exit or tab hide
+  // Flush current reading position to localStorage AND backend on page exit or tab hide
   useEffect(() => {
     const flushProgress = () => {
       if (currentXpathRef.current) {
         saveProgress(currentChapter, currentXpathRef.current);
+        
+        // Also flush to backend using sendBeacon for reliability
+        const progressPercent = chapters.length > 0
+          ? Math.round((currentChapter / chapters.length) * 100)
+          : 0;
+        const payload = JSON.stringify({
+          readingProgress: progressPercent,
+          chapterNumber: currentChapter,
+          paragraphXpath: currentXpathRef.current,
+        });
+        // sendBeacon is reliable even during page unload (sends POST)
+        // Backend accepts both PUT and POST for progress updates
+        navigator.sendBeacon(
+          `/api/book/${bookUuid}/progress`,
+          new Blob([payload], { type: 'application/json' })
+        );
       }
     };
 
@@ -317,7 +393,7 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
         clearTimeout(progressTimerRef.current);
       }
     };
-  }, [currentChapter, saveProgress]);
+  }, [currentChapter, saveProgress, bookUuid, chapters.length]);
 
   const isOwner = !!(user && bookOwnerId && user.id === bookOwnerId);
 

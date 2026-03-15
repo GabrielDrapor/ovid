@@ -111,6 +111,12 @@ export default {
         UNIQUE(user_id, book_uuid)
       )`);
       await runMigration('books_v2_share_token', 'ALTER TABLE books_v2 ADD COLUMN share_token TEXT');
+      await runMigration('progress_chapter_xpath', `
+        ALTER TABLE user_book_progress ADD COLUMN chapter_number INTEGER;
+      `);
+      await runMigration('progress_paragraph_xpath', `
+        ALTER TABLE user_book_progress ADD COLUMN paragraph_xpath TEXT;
+      `);
       migrationsRan = true;
     }
 
@@ -380,7 +386,11 @@ export default {
         }
 
         // Update reading progress for a book (PUT)
-        if (progressMatch && request.method === 'PUT') {
+        // Accept both PUT and POST (POST used by sendBeacon on page unload)
+        const isProgressUpdate = progressMatch && (
+          request.method === 'PUT' || request.method === 'POST'
+        );
+        if (isProgressUpdate) {
           const user = await getCurrentUser(env.DB, request);
           if (!user) {
             return new Response(JSON.stringify({ error: 'Unauthorized' }), {
@@ -388,7 +398,11 @@ export default {
             });
           }
           try {
-            const body = await request.json() as { readingProgress: number };
+            const body = await request.json() as { 
+              readingProgress: number;
+              chapterNumber?: number;
+              paragraphXpath?: string;
+            };
             const bookUuid = progressMatch[1];
             
             if (typeof body.readingProgress !== 'number' || body.readingProgress < 0 || body.readingProgress > 100) {
@@ -396,9 +410,22 @@ export default {
                 status: 400, headers: { 'Content-Type': 'application/json' },
               });
             }
+            if (body.chapterNumber !== undefined && (!Number.isInteger(body.chapterNumber) || body.chapterNumber < 1)) {
+              return new Response(JSON.stringify({ error: 'chapterNumber must be a positive integer' }), {
+                status: 400, headers: { 'Content-Type': 'application/json' },
+              });
+            }
+            if (body.paragraphXpath !== undefined && (typeof body.paragraphXpath !== 'string' || body.paragraphXpath.length > 500)) {
+              return new Response(JSON.stringify({ error: 'paragraphXpath must be a string under 500 chars' }), {
+                status: 400, headers: { 'Content-Type': 'application/json' },
+              });
+            }
             
-            // Update only reading_progress — never touch is_completed or completed_at
-            await updateReadingProgress(env.DB, user.id, bookUuid, body.readingProgress);
+            // Update reading_progress + optional chapter/xpath — never touch is_completed or completed_at
+            await updateReadingProgress(
+              env.DB, user.id, bookUuid, body.readingProgress,
+              body.chapterNumber, body.paragraphXpath
+            );
             const updatedProgress = await getUserBookProgress(env.DB, user.id, bookUuid);
             
             return new Response(JSON.stringify({ success: true, progress: updatedProgress }), {
