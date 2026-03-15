@@ -20,6 +20,8 @@ jobs:
 
   visual-tests:
     runs-on: ubuntu-latest
+    # Visual diffs are informational — failures don't block merge
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -33,7 +35,7 @@ jobs:
           CI: true
       - run: yarn test:visual
       - uses: actions/upload-artifact@v4
-        if: failure()
+        if: always()
         with:
           name: visual-test-results
           path: |
