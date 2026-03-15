@@ -84,6 +84,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
   const [isTypographyOpen, setIsTypographyOpen] = useState(false);
   const [isSharing, setIsSharing] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
+  const [showOnboardingTooltip, setShowOnboardingTooltip] = useState(false);
 
   // Store element references for toggling
   // originalHtml preserves formatting (innerHTML), translated is plain text
@@ -389,6 +390,33 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
     };
   }, [translationsReady]);
 
+  // Show onboarding tooltip for first-time users
+  useEffect(() => {
+    if (!translationsReady || elementsRef.current.size === 0) return;
+    const seen = localStorage.getItem('ovid_onboarding_seen');
+    if (seen) return;
+    // Small delay so the content is rendered
+    const timer = setTimeout(() => setShowOnboardingTooltip(true), 500);
+    return () => clearTimeout(timer);
+  }, [translationsReady]);
+
+  const dismissOnboarding = useCallback(() => {
+    setShowOnboardingTooltip(false);
+    localStorage.setItem('ovid_onboarding_seen', '1');
+  }, []);
+
+  // Dismiss onboarding on any click (acts as a global listener when tooltip is visible)
+  useEffect(() => {
+    if (!showOnboardingTooltip) return;
+    const handler = () => dismissOnboarding();
+    // Delay attaching so the current click doesn't immediately dismiss
+    const timer = setTimeout(() => document.addEventListener('click', handler), 100);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('click', handler);
+    };
+  }, [showOnboardingTooltip, dismissOnboarding]);
+
   // Scroll to initial xpath after translations are applied
   useEffect(() => {
     if (!translationsReady || !initialXpath || elementsRef.current.size === 0) return;
@@ -543,6 +571,15 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
             ref={contentRef}
             dangerouslySetInnerHTML={{ __html: rawHtml }}
           />
+        )}
+
+        {/* Onboarding tooltip for first-time users */}
+        {showOnboardingTooltip && (
+          <div className="onboarding-tooltip" onClick={dismissOnboarding}>
+            <div className="onboarding-tooltip-arrow" />
+            <span>点击段落切换原文/翻译</span>
+            <span className="onboarding-tooltip-en">Click any paragraph to toggle translation</span>
+          </div>
         )}
 
         {/* Next Chapter Button */}

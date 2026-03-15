@@ -367,6 +367,28 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
           };
           return (
             <div style={{ opacity: loading ? 0 : 1, transition: 'opacity 0.5s ease-in-out', position: 'relative', width: '100%', height: '100%' }}>
+              {publicBooks.length === 0 && userBooks.length === 0 && !loading && (
+                <div className="empty-shelf-guide">
+                  <div className="empty-shelf-content">
+                    <h2>Welcome to Ovid</h2>
+                    <p className="empty-shelf-desc">
+                      双语阅读器 — 上传 EPUB，点击段落即可切换原文与翻译
+                    </p>
+                    <p className="empty-shelf-desc-en">
+                      A bilingual reader. Upload any EPUB, tap a paragraph to toggle between original and translation.
+                    </p>
+                    {user ? (
+                      <button className="empty-shelf-upload-btn" onClick={() => setShowUploadModal(true)}>
+                        Upload your first book
+                      </button>
+                    ) : (
+                      <button className="empty-shelf-login-btn" onClick={login}>
+                        Sign in to get started
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
               {publicBooks.length > 0 && (
                 <div className="books-grid books-row-1">
                   {publicBooks.map(renderBook)}
