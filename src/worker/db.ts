@@ -240,7 +240,15 @@ export async function getChapterContentV2(
     rawHtml = translations.results.map((t: any) => {
       const match = t.xpath.match(/\/([a-z0-9]+)\[\d+\]$/i);
       const tagName = match ? match[1] : 'p';
-      const content = t.original_html || t.original_text;
+      let content = t.original_html || t.original_text;
+      // Strip internal <a> links from EPUB content — keep only their inner text
+      // Internal links (non-http) cause unwanted navigation when clicked
+      content = content.replace(
+        /<a\s+[^>]*href\s*=\s*["'](?!https?:\/\/)[^"']*["'][^>]*>([\s\S]*?)<\/a>/gi,
+        '$1'
+      );
+      // Also remove self-closing anchor tags (e.g. <a id="..." class="..."/>)
+      content = content.replace(/<a\s+[^>]*\/>/gi, '');
       return `<${tagName} data-xpath="${t.xpath}">${content}</${tagName}>`;
     }).join('\n');
   }
