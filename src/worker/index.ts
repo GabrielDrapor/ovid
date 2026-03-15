@@ -388,8 +388,7 @@ export default {
         // Update reading progress for a book (PUT)
         // Accept both PUT and POST (POST used by sendBeacon on page unload)
         const isProgressUpdate = progressMatch && (
-          request.method === 'PUT' || 
-          (request.method === 'POST' && url.searchParams.get('_method') === 'PUT')
+          request.method === 'PUT' || request.method === 'POST'
         );
         if (isProgressUpdate) {
           const user = await getCurrentUser(env.DB, request);
@@ -408,6 +407,16 @@ export default {
             
             if (typeof body.readingProgress !== 'number' || body.readingProgress < 0 || body.readingProgress > 100) {
               return new Response(JSON.stringify({ error: 'readingProgress must be a number 0-100' }), {
+                status: 400, headers: { 'Content-Type': 'application/json' },
+              });
+            }
+            if (body.chapterNumber !== undefined && (!Number.isInteger(body.chapterNumber) || body.chapterNumber < 1)) {
+              return new Response(JSON.stringify({ error: 'chapterNumber must be a positive integer' }), {
+                status: 400, headers: { 'Content-Type': 'application/json' },
+              });
+            }
+            if (body.paragraphXpath !== undefined && (typeof body.paragraphXpath !== 'string' || body.paragraphXpath.length > 500)) {
+              return new Response(JSON.stringify({ error: 'paragraphXpath must be a string under 500 chars' }), {
                 status: 400, headers: { 'Content-Type': 'application/json' },
               });
             }

@@ -623,11 +623,13 @@ export async function updateReadingProgress(
   paragraphXpath?: string
 ): Promise<void> {
   // Try to update existing row first
+  // Always overwrite chapter_number and paragraph_xpath (no COALESCE) to avoid
+  // stale xpath data when the user switches chapters before a paragraph is observed.
   const result = await db.prepare(
     `UPDATE user_book_progress 
      SET reading_progress = ?,
-         chapter_number = COALESCE(?, chapter_number),
-         paragraph_xpath = COALESCE(?, paragraph_xpath),
+         chapter_number = ?,
+         paragraph_xpath = ?,
          last_read_at = CURRENT_TIMESTAMP,
          updated_at = CURRENT_TIMESTAMP
      WHERE user_id = ? AND book_uuid = ?`

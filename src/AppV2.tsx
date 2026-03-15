@@ -121,7 +121,7 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
   const initialProgress = useRef(getLocalProgress(bookUuid));
   const [currentChapter, setCurrentChapter] = useState(initialProgress.current.chapter);
   const [targetXpath, setTargetXpath] = useState<string | undefined>(initialProgress.current.xpath);
-  const [progressResolved, setProgressResolved] = useState(false);
+
 
   // Track current visible xpath for saving
   const currentXpathRef = useRef<string | undefined>(undefined);
@@ -350,7 +350,6 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
       }
       
       await loadChapter(merged.chapter, merged.xpath);
-      setProgressResolved(true);
     };
     init();
   }, [bookUuid]);
@@ -373,7 +372,7 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
         // sendBeacon is reliable even during page unload (sends POST)
         // Backend accepts both PUT and POST for progress updates
         navigator.sendBeacon(
-          `/api/book/${bookUuid}/progress?_method=PUT`,
+          `/api/book/${bookUuid}/progress`,
           new Blob([payload], { type: 'application/json' })
         );
       }
