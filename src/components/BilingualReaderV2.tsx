@@ -271,6 +271,32 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
     });
   }, []);
 
+  // Intercept clicks on internal <a> links in the content area
+  // EPUB books often have internal links (TOC anchors, cross-references) that
+  // would cause navigation away from the reader if clicked
+  useEffect(() => {
+    const container = contentRef.current;
+    if (!container) return;
+
+    const handleLinkClick = (e: MouseEvent) => {
+      const target = (e.target as HTMLElement).closest('a');
+      if (!target) return;
+
+      const href = target.getAttribute('href');
+      if (!href) return;
+
+      // Allow external links (http/https) to open normally
+      if (href.startsWith('http://') || href.startsWith('https://')) return;
+
+      // Block all internal links (EPUB cross-references, anchors, etc.)
+      e.preventDefault();
+      e.stopPropagation();
+    };
+
+    container.addEventListener('click', handleLinkClick);
+    return () => container.removeEventListener('click', handleLinkClick);
+  }, [rawHtml]);
+
   // Apply translations when content changes
   useEffect(() => {
     if (rawHtml && translations.length > 0) {
