@@ -68,8 +68,9 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
-      const booksData = (await response.json()) as Book[];
-      setBooks(booksData);
+      const booksData = await response.json();
+      const booksList = Array.isArray(booksData) ? booksData as Book[] : [];
+      setBooks(booksList);
       if (booksData.length > 0 && !hoveredBook) {
         setHoveredBook(booksData[0]);
       }
@@ -122,7 +123,8 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
   const [translationProgress, setTranslationProgress] = useState<Map<string, { phase: string; chaptersCompleted: number; chaptersTotal: number }>>(new Map());
   const translatingRef = useRef<Set<string>>(new Set());
   const pollProcessingBooks = useCallback(async () => {
-    const processingBooks = books.filter(b => b.status === 'processing');
+    const booksList = Array.isArray(books) ? books : [];
+    const processingBooks = booksList.filter(b => b.status === 'processing');
     if (processingBooks.length === 0) return;
 
     let changed = false;
@@ -170,7 +172,8 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
   // Fetch initial translation progress for processing books on mount
   const initialProgressFetched = useRef(false);
   useEffect(() => {
-    const processingBooks = books.filter(b => b.status === 'processing');
+    const booksList = Array.isArray(books) ? books : [];
+    const processingBooks = booksList.filter(b => b.status === 'processing');
     if (processingBooks.length === 0) return;
 
     // Fetch current progress from server only once per processing book
@@ -329,8 +332,9 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
         style={{ backgroundImage: 'url(/bookcase_bg.jpeg)' }}
       >
         {(() => {
-          const publicBooks = books.filter(b => !b.user_id);
-          const userBooks = books.filter(b => !!b.user_id);
+          const safeBooks = Array.isArray(books) ? books : [];
+          const publicBooks = safeBooks.filter(b => !b.user_id);
+          const userBooks = safeBooks.filter(b => !!b.user_id);
           const renderBook = (book: Book) => {
             const isProcessing = book.status === 'processing';
             return (
