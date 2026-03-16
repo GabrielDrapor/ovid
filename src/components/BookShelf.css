@@ -953,10 +953,18 @@
   }
 
   .shelf-actions {
-    left: 222px;
-    top: auto;
-    bottom: calc(52% - 40px);
+    left: 215px;
+    top: 48%;
     gap: 6px;
+  }
+
+  /* PWA standalone mode: no Safari chrome, viewport is taller,
+     background-size:cover scales differently → need separate positioning */
+  @media (display-mode: standalone) {
+    .shelf-actions {
+      top: 46%;
+      left: 215px;
+    }
   }
 
   .shelf-avatar-btn {
