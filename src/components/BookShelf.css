@@ -525,6 +525,57 @@
   opacity: 0.7;
 }
 
+.shelf-help-wrapper {
+  position: relative;
+}
+
+.shelf-help-btn {
+  width: 30px;
+  height: 30px;
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: opacity 0.2s ease;
+  padding: 0;
+}
+
+.shelf-help-btn:hover {
+  opacity: 0.7;
+}
+
+.shelf-help-dropdown {
+  position: absolute;
+  top: 36px;
+  right: 0;
+  background: rgba(30, 30, 30, 0.95);
+  backdrop-filter: blur(10px);
+  border-radius: 8px;
+  padding: 4px;
+  min-width: 140px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  z-index: 100;
+}
+
+.shelf-help-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  color: rgba(255, 255, 255, 0.9);
+  text-decoration: none;
+  font-size: 13px;
+  border-radius: 6px;
+  transition: background 0.15s ease;
+}
+
+.shelf-help-item:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
 .shelf-user-dropdown {
   position: absolute;
   top: 40px;
@@ -988,6 +1039,16 @@
   }
 
   .shelf-github-btn svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  .shelf-help-btn {
+    width: 35px;
+    height: 35px;
+  }
+
+  .shelf-help-btn svg {
     width: 20px;
     height: 20px;
   }
