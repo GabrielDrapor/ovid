@@ -1,6 +1,10 @@
-# Ovid 📖
+<p align="center">
+  <img src="logo.png" alt="Ovid" width="180" />
+</p>
 
-**浏览器里的双语阅读器。** 导入任意 EPUB，点击段落即可在原文和译文之间切换。没有分栏、没有弹窗——点一下就读。
+<h1 align="center">Ovid</h1>
+
+<p align="center"><strong>浏览器里的双语阅读器。</strong> 导入任意 EPUB，点击段落即可在原文和译文之间切换。没有分栏、没有弹窗——点一下就读。</p>
 
 🔗 **[在线体验 → ovid.ink](https://ovid.ink)**
 

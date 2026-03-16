@@ -1,6 +1,10 @@
-# Ovid 📖
+<p align="center">
+  <img src="logo.png" alt="Ovid" width="180" />
+</p>
 
-**A bilingual reader for the browser.** Import any EPUB, click a paragraph, and it flips between the original and its translation. No split screens, no popups — just tap and read.
+<h1 align="center">Ovid</h1>
+
+<p align="center"><strong>A bilingual reader for the browser.</strong> Import any EPUB, click a paragraph, and it flips between the original and its translation. No split screens, no popups — just tap and read.</p>
 
 🔗 **[Try it live → ovid.ink](https://ovid.ink)**
 
