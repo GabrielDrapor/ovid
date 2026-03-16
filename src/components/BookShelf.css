@@ -954,7 +954,8 @@
 
   .shelf-actions {
     left: 215px;
-    top: 48%;
+    top: auto;
+    bottom: 48%;
     gap: 6px;
   }
 
