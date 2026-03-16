@@ -4,7 +4,7 @@
 
 <h1 align="center">Ovid</h1>
 
-<p align="center"><strong>A bilingual reader for the browser.</strong> Import any EPUB, click a paragraph, and it flips between the original and its translation. No split screens, no popups — just tap and read.</p>
+<p align="center"><strong>Two languages, one tap.</strong></p>
 
 🔗 **[Try it live → ovid.ink](https://ovid.ink)**
 
@@ -17,7 +17,6 @@ English | [简体中文](README.zh-CN.md)
 - **Bookshelf UI** — Book spines, AI-generated covers, hover previews — feels like a real shelf
 - **Reading progress** — Picks up where you left off, synced to the cloud
 - **Infinite scroll** — Chapters load seamlessly as you scroll up/down
-- **Multiple languages** — EN ↔ ZH, ES, FR, DE, JA, KO, RU
 - **CJK typography** — LXGW Neo ZhiSong Screen with tuned line height and spacing
 - **Google OAuth** — Login, get your own private library
 - **Credits & payments** — Stripe-powered, pay per book translation
