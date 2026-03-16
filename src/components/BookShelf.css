@@ -953,9 +953,9 @@
   }
 
   .shelf-actions {
-    left: 215px;
+    left: 230px;
     top: auto;
-    bottom: calc(52% - 35px);
+    bottom: calc(52% - 45px);
     gap: 6px;
   }
 
