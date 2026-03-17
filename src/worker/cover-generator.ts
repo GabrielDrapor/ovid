@@ -115,6 +115,7 @@ async function generateImage(apiKey: string, prompt: string, maxRetries = 2): Pr
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
+        signal: AbortSignal.timeout(25000),
       });
 
       if (!resp.ok) {
@@ -135,7 +136,7 @@ async function generateImage(apiKey: string, prompt: string, maxRetries = 2): Pr
             if (bytes.length < 1000) {
               throw new Error(`Image too small (${bytes.length} bytes), likely invalid`);
             }
-            return bytes.buffer;
+            return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
           }
         }
       }
@@ -247,19 +248,20 @@ Design for "${title}" by ${author}:
       }),
     });
 
-    if (!webhookResp.ok) {
+    if (webhookResp.ok) {
+      try {
+        const result = (await webhookResp.json()) as { ok?: boolean; coverUrl?: string; spineUrl?: string };
+        if (result.ok && result.coverUrl && result.spineUrl) {
+          return { coverUrl: result.coverUrl, spineUrl: result.spineUrl };
+        }
+      } catch {
+        // JSON parse failed — fall through to raw URLs
+      }
+    } else {
       console.error('Cover processing webhook failed:', await webhookResp.text());
-      // Fallback: use raw images directly
-      return { coverUrl: rawCoverUrl, spineUrl: rawSpineUrl };
     }
-  } else {
-    // No translator service — use raw images
-    return { coverUrl: rawCoverUrl, spineUrl: rawSpineUrl };
   }
 
-  // Return the final URLs (processor will upload to these keys)
-  return {
-    coverUrl: `${R2_PUBLIC_BASE}/${keyPrefix}_cover.png`,
-    spineUrl: `${R2_PUBLIC_BASE}/${keyPrefix}_spine.png`,
-  };
+  // Fallback: use raw images directly
+  return { coverUrl: rawCoverUrl, spineUrl: rawSpineUrl };
 }

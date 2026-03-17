@@ -144,7 +144,7 @@ Requirements:
   );
   const validRefs = refSpines.filter((r): r is string => r !== null);
 
-  const spinePrompt = `Generate a book spine image for "${title}" by ${author}.
+  const spinePrompt = `Generate a book spine image for "${title}" by ${author} on a bright solid lime green (#00FF00) background. The spine is a narrow vertical rectangle, centered, with green space on all sides.
 
 The LAST image is the book's FRONT COVER — your spine MUST match its exact color palette, typography style, and visual mood.
 
@@ -163,7 +163,8 @@ Generate a spine that:
 - Title: "${title.toUpperCase()}"
 - Author: "${author.toUpperCase()}"
 - A small icon at the top matching the cover's theme
-- The output should be a narrow vertical rectangle, NOT a square`;
+- The output should be a narrow vertical rectangle on bright solid lime green (#00FF00) background, NOT a square
+- Sharp edges, no shadows, no 3D effects, no page edges visible`;
 
   // Build parts: reference spines + cover image + text prompt
   const spineParts: any[] = [];

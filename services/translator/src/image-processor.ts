@@ -62,6 +62,36 @@ function findContentBounds(
   let right = width - 1;
   while (right > left && colIsGreenBg(right)) right--;
 
+  // If green detection didn't trim left/right, use edge-color comparison
+  if (left === 0 && right === width - 1) {
+    function getColEdgeAvg(cols: number[]): { r: number; g: number; b: number } {
+      let tr = 0, tg = 0, tb = 0, count = 0;
+      for (const x of cols) {
+        for (let y = 0; y < height; y += 4) {
+          const p = px(x, y);
+          tr += p.r; tg += p.g; tb += p.b; count++;
+        }
+      }
+      return { r: tr / count, g: tg / count, b: tb / count };
+    }
+
+    function colDiffersFromBg(x: number, bg: { r: number; g: number; b: number }): boolean {
+      let diffCount = 0, total = 0;
+      for (let y = Math.floor(height / 4); y < Math.floor(3 * height / 4); y += 2) {
+        const { r, g, b } = px(x, y);
+        total++;
+        const dist = Math.abs(r - bg.r) + Math.abs(g - bg.g) + Math.abs(b - bg.b);
+        if (dist > 80) diffCount++;
+      }
+      return diffCount / total > 0.15;
+    }
+
+    const bgLeft = getColEdgeAvg([0, 1, 2]);
+    const bgRight = getColEdgeAvg([width - 1, width - 2, width - 3]);
+    while (left < width && !colDiffersFromBg(left, bgLeft)) left++;
+    while (right > left && !colDiffersFromBg(right, bgRight)) right--;
+  }
+
   if (left >= right) { left = 0; right = width - 1; }
 
   // --- Pass 2: find top/bottom ---
@@ -127,21 +157,27 @@ function findContentBounds(
 }
 
 /**
- * Remove green color spill from pixels.
- * Only targets pixels with strong green dominance to avoid
- * damaging intentionally green-tinted design elements.
+ * Remove green color spill from edge pixels only.
+ * Only processes pixels within an edge band (5% of width/height from each
+ * crop boundary) to prevent color damage to legitimate greens in artwork interiors.
  */
-function despillGreen(pixels: Buffer, channels: number): Buffer {
+function despillGreen(pixels: Buffer, channels: number, width: number, height: number): Buffer {
   const result = Buffer.from(pixels);
-  for (let i = 0; i < result.length; i += channels) {
-    const r = result[i];
-    const g = result[i + 1];
-    const b = result[i + 2];
-    const avgRB = Math.floor((r + b) / 2);
-    // Only despill bright pixels with strong green excess —
-    // avoids touching dark pixels or subtle green tints in artwork
-    if (g > 100 && g > avgRB + 20) {
-      result[i + 1] = avgRB + 5;
+  const bandX = Math.max(2, Math.round(width * 0.05));
+  const bandY = Math.max(2, Math.round(height * 0.05));
+
+  for (let y = 0; y < height; y++) {
+    const inYBand = y < bandY || y >= height - bandY;
+    for (let x = 0; x < width; x++) {
+      if (!inYBand && x >= bandX && x < width - bandX) continue;
+      const i = (y * width + x) * channels;
+      const r = result[i];
+      const g = result[i + 1];
+      const b = result[i + 2];
+      const avgRB = Math.floor((r + b) / 2);
+      if (g > 100 && g > avgRB + 20) {
+        result[i + 1] = avgRB + 5;
+      }
     }
   }
   return result;
@@ -181,8 +217,8 @@ export async function processSpine(imageBuffer: Buffer): Promise<Buffer> {
     .raw()
     .toBuffer();
 
-  // Despill green fringe
-  const despilled = despillGreen(cropped, channels);
+  // Despill green fringe (edge-only to preserve interior colors)
+  const despilled = despillGreen(cropped, channels, contentW, contentH);
 
   // Reconstruct image from raw pixels
   let spineImage = sharp(despilled, {
