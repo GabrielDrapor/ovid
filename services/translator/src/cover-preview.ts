@@ -191,18 +191,10 @@ Generate a spine that:
   const coverBuf = await sharp(Buffer.from(coverB64, 'base64')).png().toBuffer();
   const spineBuf = await sharp(Buffer.from(spineB64, 'base64')).png().toBuffer();
 
-  // Gemini returns 1024x1024 with the spine as a narrow rectangle inside.
-  // Auto-crop the surrounding background (trim), then resize to target.
-  const trimmed = await sharp(spineBuf)
-    .trim({ threshold: 30 })  // remove uniform-color borders
-    .png()
-    .toBuffer();
-  const trimMeta = await sharp(trimmed).metadata();
-  console.log(`[cover-preview] spine trimmed: ${trimMeta.width}x${trimMeta.height}`);
-
+  // Use the same processSpine pipeline as production (crop + despill + resize)
   const [finalCover, finalSpine] = await Promise.all([
     processCover(coverBuf),
-    sharp(trimmed).resize(114, 607, { fit: 'fill' }).png().toBuffer(),
+    processSpine(spineBuf),
   ]);
 
   return {

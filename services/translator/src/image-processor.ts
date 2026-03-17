@@ -115,19 +115,21 @@ function findContentBounds(
     while (bottom > top && !rowDiffersFromBg(bottom, bgBottom)) bottom--;
   }
 
-  // Outward padding to avoid clipping content
-  // (the boundary detection may land right on the edge of content)
-  left = Math.max(0, left - 3);
-  right = Math.min(width - 1, right + 3);
-  top = Math.max(0, top - 3);
-  bottom = Math.min(height - 1, bottom + 3);
+  // Outward padding to avoid clipping content — proportional to image size
+  const padX = Math.max(3, Math.round(width * 0.01));
+  const padY = Math.max(3, Math.round(height * 0.01));
+  left = Math.max(0, left - padX);
+  right = Math.min(width - 1, right + padX);
+  top = Math.max(0, top - padY);
+  bottom = Math.min(height - 1, bottom + padY);
 
   return { left, right, top, bottom };
 }
 
 /**
  * Remove green color spill from pixels.
- * If green channel exceeds the average of red and blue, pull it down.
+ * Only targets pixels with strong green dominance to avoid
+ * damaging intentionally green-tinted design elements.
  */
 function despillGreen(pixels: Buffer, channels: number): Buffer {
   const result = Buffer.from(pixels);
@@ -136,8 +138,10 @@ function despillGreen(pixels: Buffer, channels: number): Buffer {
     const g = result[i + 1];
     const b = result[i + 2];
     const avgRB = Math.floor((r + b) / 2);
-    if (g > avgRB + 5) {
-      result[i + 1] = avgRB + 2;
+    // Only despill bright pixels with strong green excess —
+    // avoids touching dark pixels or subtle green tints in artwork
+    if (g > 100 && g > avgRB + 20) {
+      result[i + 1] = avgRB + 5;
     }
   }
   return result;
