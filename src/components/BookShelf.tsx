@@ -45,6 +45,8 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showHelpMenu, setShowHelpMenu] = useState(false);
   const helpRef = useRef<HTMLDivElement>(null);
+  const wallRef = useRef<HTMLDivElement>(null);
+  const [shelfPos, setShelfPos] = useState({ row1Bottom: '52%', row2Bottom: '4%', actionsTop: '48%', actionsLeft: '250px' });
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showCreditsModal, setShowCreditsModal] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -117,6 +119,36 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
     const handleResize = () => setIsMobile(window.innerWidth <= 768);
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  // Dynamically compute shelf positions based on background-size: cover scaling
+  useEffect(() => {
+    const wall = wallRef.current;
+    if (!wall) return;
+    const IMG_W = 1248, IMG_H = 864;
+    // Shelf board positions in image pixel coordinates
+    const ROW1_Y = 411;  // middle board top (where row-1 books sit)
+    const ROW2_Y = 832;  // bottom board top (where row-2 books sit)
+    const ACT_Y = 418;   // actions vertical position
+    const ACT_X = 260;   // actions horizontal position
+    const BOOK_H = 312;  // book height in image coordinates
+    const update = () => {
+      const { width, height } = wall.getBoundingClientRect();
+      if (width === 0 || height === 0) return;
+      const scale = Math.max(width / IMG_W, height / IMG_H);
+      // Set CSS variables for proportional scaling
+      wall.style.setProperty('--book-height', `${BOOK_H * scale}px`);
+      wall.style.setProperty('--shelf-scale', `${scale}`);
+      setShelfPos({
+        row1Bottom: `${(1 - ROW1_Y * scale / height) * 100}%`,
+        row2Bottom: `${(1 - ROW2_Y * scale / height) * 100}%`,
+        actionsTop: `${(ACT_Y * scale / height) * 100}%`,
+        actionsLeft: `${ACT_X * scale}px`,
+      });
+    };
+    const observer = new ResizeObserver(update);
+    observer.observe(wall);
+    return () => observer.disconnect();
   }, []);
 
   useEffect(() => {
@@ -341,7 +373,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
 
   return (
     <div className="bookshelf-container">
-      <div className="bookshelf-wall">
+      <div className="bookshelf-wall" ref={wallRef} style={{ backgroundImage: 'url(/bookcase_bg.jpeg)' }}>
         {(() => {
           const safeBooks = Array.isArray(books) ? books : [];
           const publicBooks = safeBooks.filter(b => !b.user_id);
@@ -381,7 +413,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
             );
           };
           return (
-            <div className="shelf-structure" style={{ opacity: loading ? 0 : 1, transition: 'opacity 0.5s ease-in-out' }}>
+            <div className="shelf-content" style={{ opacity: loading ? 0 : 1, transition: 'opacity 0.5s ease-in-out' }}>
               {publicBooks.length === 0 && userBooks.length === 0 && !loading && (
                 <div className="empty-shelf-guide">
                   <div className="empty-shelf-content">
@@ -404,17 +436,12 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                   </div>
                 </div>
               )}
-              <div className="shelf-board shelf-board-top"></div>
-              <div className="shelf-compartment shelf-compartment-upper" style={{ backgroundImage: 'url(/bookcase_bg.jpeg)', backgroundSize: 'cover', backgroundPosition: 'center' }}>
-                {publicBooks.length > 0 && (
-                  <div className="books-grid books-row-1">
-                    {publicBooks.map(renderBook)}
-                  </div>
-                )}
-              </div>
-              <div className="shelf-board shelf-board-middle">
-                <div className="shelf-label">OVID</div>
-                <div className="shelf-actions">
+              {publicBooks.length > 0 && (
+                <div className="books-grid" style={{ bottom: shelfPos.row1Bottom }}>
+                  {publicBooks.map(renderBook)}
+                </div>
+              )}
+              <div className="shelf-actions" style={{ top: shelfPos.actionsTop, left: shelfPos.actionsLeft }}>
                   {userLoading ? null : user ? (
                     <>
                       <button
@@ -509,16 +536,12 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                       </div>
                     )}
                   </div>
+              </div>
+              {userBooks.length > 0 && (
+                <div className="books-grid" style={{ bottom: shelfPos.row2Bottom }}>
+                  {userBooks.map(renderBook)}
                 </div>
-              </div>
-              <div className="shelf-compartment shelf-compartment-lower" style={{ backgroundImage: 'url(/bookcase_bg.jpeg)', backgroundSize: 'cover', backgroundPosition: 'center' }}>
-                {userBooks.length > 0 && (
-                  <div className="books-grid books-row-2">
-                    {userBooks.map(renderBook)}
-                  </div>
-                )}
-              </div>
-              <div className="shelf-board shelf-board-bottom"></div>
+              )}
             </div>
           );
         })()}
