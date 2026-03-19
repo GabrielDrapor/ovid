@@ -365,76 +365,54 @@
   }
 }
 
-/* The Bookshelf Wall (Background) */
+/* The Bookshelf Wall */
 .bookshelf-wall {
   flex-grow: 1;
-  /* Fill remaining space */
   height: 100%;
-  max-width: none;
-  /* remove width constraint */
-  max-height: none;
-  /* remove height constraint */
   position: relative;
-  box-shadow: inset -20px 0 50px rgba(0, 0, 0, 0.5);
-  /* Shadow on the right edge */
-
-  background-size: 1200px auto;
+  overflow: hidden;
+  background-size: cover;
   background-position: left top;
-  /* Show top of shelf, align left */
   background-repeat: no-repeat;
-
-  display: flex;
-  align-items: flex-start;
-  /* Align contents to top */
-  justify-content: center;
-  /* Center grid horizontally within the wall space if width allows, or flex-start */
+  box-shadow: inset -20px 0 50px rgba(0, 0, 0, 0.5);
 }
 
-/* Grid layout for "Books on Shelves" */
-/* 
-   Since we don't know the exact shelf lines of the image, we can try a few strategies:
-   1. A Grid overlaid on the image.
-   2. Just a wrap container with some top-padding to push books onto the "middle" shelves.
-   Let's assume the Bg image has ~4-5 shelves. We might just center the content and wrap.
-*/
+/* Content overlay on background */
+.shelf-content {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+/* Books grid */
 .books-grid {
+  position: absolute;
+  left: 0;
+  right: 0;
   display: flex;
   flex-wrap: nowrap;
   gap: 0;
-  width: 100%;
-  justify-content: flex-start;
   align-items: flex-end;
-  position: absolute;
   padding-left: 40px;
+  padding-top: 20px;
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;
-}
-
-/* Row 1: Public/library books - top shelf */
-.books-row-1 {
-  padding-top: 95px;
-  max-height: 90%;
-}
-
-/* Row 2: User uploaded books - second shelf */
-.books-row-2 {
-  padding-top: 500px;
 }
 
 .books-grid::-webkit-scrollbar {
   display: none;
 }
 
-/* Shelf action buttons row (avatar, upload, github) */
+/* Shelf action buttons row — position set dynamically via JS */
 .shelf-actions {
   position: absolute;
-  left: 250px;
-  top: 402px;
   display: flex;
   align-items: center;
   gap: 8px;
   z-index: 10;
+  transform: scale(var(--shelf-scale, 1));
+  transform-origin: left top;
 }
 
 .shelf-avatar-btn {
@@ -549,7 +527,7 @@
 
 .shelf-help-dropdown {
   position: absolute;
-  top: 36px;
+  bottom: 36px;
   right: 0;
   background: rgba(30, 30, 30, 0.95);
   backdrop-filter: blur(10px);
@@ -578,7 +556,7 @@
 
 .shelf-user-dropdown {
   position: absolute;
-  top: 40px;
+  bottom: 40px;
   left: 0;
   background: rgba(30, 30, 30, 0.95);
   backdrop-filter: blur(10px);
@@ -656,8 +634,8 @@
 
 /* Individual Book Spine */
 .book-spine-container {
-  height: 300px;
-  width: calc(300px / 5.3);
+  height: var(--book-height, 300px);
+  width: calc(var(--book-height, 300px) / 5.3);
   flex-shrink: 0;
   position: relative;
   cursor: pointer;
@@ -999,23 +977,11 @@
   .bookshelf-wall {
     width: 100%;
     height: 100%;
-    background-size: cover;
     background-position: -30px top;
   }
 
   .shelf-actions {
-    left: 215px;
-    top: 48%;
     gap: 6px;
-  }
-
-  /* PWA standalone mode: no Safari chrome, viewport is taller,
-     background-size:cover scales differently → need separate positioning */
-  @media (display-mode: standalone) {
-    .shelf-actions {
-      top: 46%;
-      left: 215px;
-    }
   }
 
   .shelf-avatar-btn {
@@ -1029,16 +995,6 @@
   }
 
   .shelf-upload-btn svg {
-    width: 20px;
-    height: 20px;
-  }
-
-  .shelf-github-btn {
-    width: 35px;
-    height: 35px;
-  }
-
-  .shelf-github-btn svg {
     width: 20px;
     height: 20px;
   }
@@ -1064,61 +1020,28 @@
   }
 
   .shelf-user-dropdown {
-    left: -20px;
+    right: 0;
+    left: auto;
     top: 36px;
+    bottom: auto;
   }
 
   .books-grid {
     padding-left: 16px;
-    justify-content: flex-start;
-  }
-
-  /* With background-size: cover on mobile, image fills by height.
-     Shelf positions as % of viewport height:
-     Shelf 1 top edge: ~1%, books bottom at ~12.7%
-     Shelf 2 top edge: ~34.5%, books bottom at ~45.7%  
-     Shelf 3 top edge: ~68%, books bottom at ~78.7%
-     Book height should be about 11% of vh */
-  /* Shelf board positions (from image pixel analysis):
-     Shelf 1: top frame ~3vh, board ~45.4vh → compartment ~42vh
-     Shelf 2: board ~45.4vh to bottom ~96.8vh → compartment ~51vh
-     Books fill ~70% of compartment height = ~30vh */
-  .books-row-1 {
-    padding-top: calc(48vh - 30vh);
-    max-height: 90%;
-  }
-
-  .books-row-2 {
-    padding-top: calc(96.8vh - 30vh);
   }
 
   .book-spine-container {
-    height: 30vh;
-    width: calc(30vh / 5.3);
+    height: var(--book-height, 30vh);
+    width: calc(var(--book-height, 30vh) / 5.3);
     min-width: unset;
     max-width: unset;
     touch-action: manipulation;
-  }
-
-  /* Scroll fade hint on right edge */
-  .bookshelf-wall::after {
-    content: '';
-    position: fixed;
-    top: 0;
-    right: 0;
-    width: 40px;
-    height: 100%;
-    background: linear-gradient(to right, transparent, rgba(0,0,0,0.3));
-    pointer-events: none;
-    z-index: 50;
   }
 
   /* Hide desktop sidebar */
   .book-preview-sidebar {
     display: none;
   }
-
-  /* Auth is now in shelf-actions, no separate mobile floating */
 
   /* Mobile bottom sheet */
   .mobile-book-sheet-overlay {
@@ -1532,12 +1455,15 @@
 
 /* Empty shelf guidance */
 .empty-shelf-guide {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 100%;
-  height: 100%;
-  min-height: 300px;
+  z-index: 4;
 }
 
 .empty-shelf-content {
