@@ -223,9 +223,9 @@ async function processUpload(req: UploadAndParseRequest): Promise<void> {
       [requiredCredits, userId]
     );
     await db.run(
-      `INSERT INTO credit_transactions (user_id, amount, type, description, reference_id)
-       VALUES (?, ?, 'deduction', ?, ?)`,
-      [userId, -requiredCredits, `Translation: ${bookData.title || 'Book'}`, bookUuid]
+      `INSERT INTO credit_transactions (user_id, amount, type, description, book_uuid, balance_after)
+       VALUES (?, ?, 'deduction', ?, ?, (SELECT credits FROM users WHERE id = ?))`,
+      [userId, -requiredCredits, `Translation: ${bookData.title || 'Book'}`, bookUuid, userId]
     );
 
     // 4. Upload images to R2
