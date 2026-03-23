@@ -65,7 +65,7 @@ async function r2UploadBuffer(key: string, data: Buffer | Uint8Array, contentTyp
       Authorization: `Bearer ${env.CF_API_TOKEN}`,
       'Content-Type': contentType,
     },
-    body: new Uint8Array(data instanceof Buffer ? data : data),
+    body: data,
   });
   if (!resp.ok) {
     const text = await resp.text();
@@ -185,6 +185,8 @@ async function processUpload(req: UploadAndParseRequest): Promise<void> {
 
   console.log(`[upload] Starting parse for ${bookUuid} (${fileExtension})`);
 
+  let creditsDeducted = 0; // Track for refund on failure
+
   try {
     // 1. Download raw file from R2
     const fileBuffer = await r2Download(fileKey);
@@ -222,6 +224,7 @@ async function processUpload(req: UploadAndParseRequest): Promise<void> {
       'UPDATE users SET credits = credits - ? WHERE id = ?',
       [requiredCredits, userId]
     );
+    creditsDeducted = requiredCredits;
     await db.run(
       `INSERT INTO credit_transactions (user_id, amount, type, description, reference_id)
        VALUES (?, ?, 'deduction', ?, ?)`,
@@ -259,28 +262,39 @@ async function processUpload(req: UploadAndParseRequest): Promise<void> {
     if (!bookRow) throw new Error('Failed to create book');
     const bookId = bookRow.id;
 
-    // Insert chapters
+    // Insert chapters (batched by raw_html storage decision)
+    const chapterRowsWithHtml: unknown[][] = [];
+    const chapterRowsNoHtml: unknown[][] = [];
     for (const chapter of bookData.chapters) {
       const rawHtml = rewriteImgSrc(chapter.rawHtml, imgRewriteMap);
       const rawHtmlSize = new TextEncoder().encode(rawHtml).length;
-      const shouldStoreRawHtml = rawHtmlSize < 50000;
 
-      if (shouldStoreRawHtml) {
-        await db.run(
-          `INSERT INTO chapters_v2 (book_id, chapter_number, title, original_title, raw_html, order_index)
-           VALUES (?, ?, ?, ?, ?, ?)`,
-          [bookId, chapter.number, chapter.title, chapter.originalTitle, rawHtml, chapter.number]
-        );
+      if (rawHtmlSize < 50000) {
+        chapterRowsWithHtml.push([bookId, chapter.number, chapter.title, chapter.originalTitle, rawHtml, chapter.number]);
       } else {
-        await db.run(
-          `INSERT INTO chapters_v2 (book_id, chapter_number, title, original_title, order_index)
-           VALUES (?, ?, ?, ?, ?)`,
-          [bookId, chapter.number, chapter.title, chapter.originalTitle, chapter.number]
-        );
+        chapterRowsNoHtml.push([bookId, chapter.number, chapter.title, chapter.originalTitle, chapter.number]);
       }
     }
+    if (chapterRowsWithHtml.length > 0) {
+      await db.batchInsert(
+        'chapters_v2',
+        ['book_id', 'chapter_number', 'title', 'original_title', 'raw_html', 'order_index'],
+        chapterRowsWithHtml,
+        'ABORT',
+        3 // small batches since raw_html can be up to ~50KB each
+      );
+    }
+    if (chapterRowsNoHtml.length > 0) {
+      await db.batchInsert(
+        'chapters_v2',
+        ['book_id', 'chapter_number', 'title', 'original_title', 'order_index'],
+        chapterRowsNoHtml,
+        'ABORT',
+        10
+      );
+    }
 
-    // Store text nodes per chapter
+    // Store text nodes per chapter (batched)
     for (const chapter of bookData.chapters) {
       await db.run(
         'UPDATE chapters_v2 SET text_nodes_json = ? WHERE book_id = ? AND chapter_number = ?',
@@ -317,11 +331,27 @@ async function processUpload(req: UploadAndParseRequest): Promise<void> {
 
   } catch (err) {
     console.error(`[upload] Error processing ${bookUuid}:`, err);
-    // Try to mark book as error
+    // Try to mark book as error and refund credits
     try {
       const db2 = getDb();
       await db2.run("UPDATE books_v2 SET status = 'error' WHERE uuid = ?", [bookUuid]);
-    } catch { /* ignore */ }
+
+      // Refund credits if they were deducted before the failure
+      if (creditsDeducted > 0) {
+        await db2.run(
+          'UPDATE users SET credits = credits + ? WHERE id = ?',
+          [creditsDeducted, userId]
+        );
+        await db2.run(
+          `INSERT INTO credit_transactions (user_id, amount, type, description, reference_id)
+           VALUES (?, ?, 'refund', ?, ?)`,
+          [userId, creditsDeducted, `Refund: upload failed for ${bookUuid}`, bookUuid]
+        );
+        console.log(`[upload] Refunded ${creditsDeducted} credits to user ${userId} for failed upload ${bookUuid}`);
+      }
+    } catch (refundErr) {
+      console.error(`[upload] Failed to refund credits for ${bookUuid}:`, refundErr);
+    }
   }
 }
 
@@ -682,10 +712,74 @@ async function processCoverImages(req: CoverProcessRequest) {
   console.log(`[cover] Done: ${req.bookUuid} → ${coverUrl}, ${spineUrl}`);
 }
 
+// ---- Job Recovery & Scanning ----
+
+const JOB_SCAN_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+
+/** Query for stalled jobs and resume them. Shared by startup recovery and periodic scanner. */
+async function resumeJobs(label: string, extraWhere = '', extraParams: unknown[] = []): Promise<void> {
+  const db = getDb();
+  const llmConfig = getLlmConfig();
+
+  const jobs = await db.all<{ book_uuid: string; status: string }>(
+    `SELECT book_uuid, status FROM translation_jobs
+     WHERE status IN ('pending', 'translating', 'extracting_glossary')
+     ${extraWhere}
+     ORDER BY updated_at ASC`,
+    extraParams
+  );
+
+  if (jobs.length === 0) return;
+
+  console.log(`[${label}] Found ${jobs.length} job(s) to resume`);
+  for (const job of jobs) {
+    if (activeJobs.has(job.book_uuid)) continue;
+    console.log(`[${label}] Resuming ${job.book_uuid} (status: ${job.status})`);
+    translateBook(db, llmConfig, job.book_uuid).catch((err) => {
+      console.error(`[${label}] Failed to resume ${job.book_uuid}:`, err);
+    });
+  }
+}
+
+/** Scan for stalled translation jobs on startup */
+async function recoverStalledJobs(): Promise<void> {
+  try {
+    await resumeJobs('recovery');
+  } catch (err) {
+    console.error('[recovery] Error scanning for stalled jobs:', err);
+  }
+}
+
+/** Periodically check for stalled jobs (covers webhook failures and restarts) */
+let scannerRunning = false;
+
+function startJobScanner(): void {
+  setInterval(async () => {
+    if (scannerRunning) return;
+    scannerRunning = true;
+    try {
+      const activeKeys = [...activeJobs.keys()];
+      const notInClause = activeKeys.length > 0
+        ? `AND book_uuid NOT IN (${activeKeys.map(() => '?').join(',')})`
+        : '';
+      await resumeJobs('scanner', `AND updated_at < datetime('now', '-5 minutes') ${notInClause}`, activeKeys);
+    } catch (err) {
+      console.error('[scanner] Error:', err);
+    } finally {
+      scannerRunning = false;
+    }
+  }, JOB_SCAN_INTERVAL_MS);
+}
+
 const port = parseInt(process.env.PORT || '3000');
 
 import { serve } from '@hono/node-server';
 
 serve({ fetch: app.fetch, port }, () => {
   console.log(`🚀 Ovid Translator Service running on port ${port}`);
+  // Recover stalled jobs on startup (delay slightly to let server stabilize)
+  setTimeout(() => {
+    recoverStalledJobs();
+    startJobScanner();
+  }, 3000);
 });

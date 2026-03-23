@@ -309,8 +309,9 @@ export async function handleTranslateNext(
       const offset = job.current_item_offset;
       const batch = textNodes.slice(offset, offset + BATCH_SIZE);
 
-      // Translate batch items
+      // Translate batch items, collecting failures for retry
       let translated = 0;
+      const failedNodes: typeof batch = [];
       for (const node of batch) {
         try {
           const translatedText = await translator.translateText(node.text, {
@@ -330,18 +331,31 @@ export async function handleTranslateNext(
           translated++;
         } catch (err) {
           console.warn(`Translation failed for xpath ${node.xpath}:`, err);
-          // Insert placeholder so we don't get stuck
-          await insertTranslationRow(
-            env.DB,
-            chapterId,
-            node.xpath,
-            node.text,
-            node.html,
-            `[Translation pending]`,
-            node.orderIndex
-          );
+          failedNodes.push(node);
           translated++;
         }
+      }
+
+      // Retry failed nodes one at a time
+      for (const node of failedNodes) {
+        let retryText: string;
+        try {
+          retryText = await translator.translateText(node.text, {
+            sourceLanguage: job.source_language,
+            targetLanguage: job.target_language,
+          });
+        } catch {
+          retryText = '[Translation failed]';
+        }
+        await insertTranslationRow(
+          env.DB,
+          chapterId,
+          node.xpath,
+          node.text,
+          node.html,
+          retryText,
+          node.orderIndex
+        );
       }
 
       const newOffset = offset + translated;
