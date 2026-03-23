@@ -775,7 +775,7 @@ const port = parseInt(process.env.PORT || '3000');
 
 import { serve } from '@hono/node-server';
 
-serve({ fetch: app.fetch, port }, () => {
+const server = serve({ fetch: app.fetch, port }, () => {
   console.log(`🚀 Ovid Translator Service running on port ${port}`);
   // Recover stalled jobs on startup (delay slightly to let server stabilize)
   setTimeout(() => {
@@ -783,3 +783,24 @@ serve({ fetch: app.fetch, port }, () => {
     startJobScanner();
   }, 3000);
 });
+
+// Graceful shutdown — let in-progress translations checkpoint before exiting
+function gracefulShutdown(signal: string) {
+  console.log(`[shutdown] Received ${signal}, waiting for active jobs to checkpoint...`);
+  // Stop accepting new connections
+  server.close();
+  // Give active jobs a brief window to finish their current batch and save offset
+  const activeCount = activeJobs.size;
+  if (activeCount === 0) {
+    console.log('[shutdown] No active jobs, exiting immediately');
+    process.exit(0);
+  }
+  console.log(`[shutdown] ${activeCount} active job(s), allowing 10s for checkpoint...`);
+  // Jobs will be resumed on next startup via recoverStalledJobs()
+  setTimeout(() => {
+    console.log('[shutdown] Grace period ended, exiting');
+    process.exit(0);
+  }, 10000);
+}
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
