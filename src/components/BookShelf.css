@@ -984,6 +984,37 @@
   width: 100%;
 }
 
+.safe-to-close-hint {
+  display: block;
+  margin-top: 6px;
+  font-size: 0.8rem;
+  color: #777;
+  font-style: italic;
+}
+
+.upload-toast {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #1a1a2e;
+  color: #4ade80;
+  border: 1px solid #4ade8044;
+  border-radius: 12px;
+  padding: 12px 24px;
+  font-size: 0.9rem;
+  z-index: 10000;
+  cursor: pointer;
+  animation: toast-in 0.3s ease-out;
+  max-width: 90vw;
+  text-align: center;
+}
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(-10px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
 
 /* Responsive adjustments */
 @media (max-width: 768px) {

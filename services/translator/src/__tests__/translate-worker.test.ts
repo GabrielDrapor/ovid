@@ -8,12 +8,13 @@ const llmConfig = {
   model: 'test-model',
 };
 
-function makeMockDb(overrides: Partial<Record<'first' | 'all' | 'run', any>> = {}) {
+function makeMockDb(overrides: Partial<Record<'first' | 'all' | 'run' | 'batchInsert', any>> = {}) {
   return {
     first: vi.fn().mockResolvedValue(null),
     all: vi.fn().mockResolvedValue([]),
     run: vi.fn().mockResolvedValue(undefined),
     query: vi.fn().mockResolvedValue({ results: [], success: true }),
+    batchInsert: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   } as unknown as D1Client;
 }
@@ -206,13 +207,14 @@ describe('translateBook', () => {
 
     await translateBook(db, llmConfig, 'test-uuid');
 
-    // Should have inserted translation — offset=1 means skip first node of ch1,
-    // translate 1 remaining node in ch1, then ch2 has empty text_nodes (same mock returns same nodes
-    // but ch2 also gets translated). Count all translation inserts.
-    const insertCalls = (db.run as any).mock.calls.filter(
-      (c: any[]) => typeof c[0] === 'string' && c[0].includes('INSERT OR REPLACE INTO translations_v2')
+    // Translations now go through batchInsert instead of individual db.run calls
+    const batchCalls = (db.batchInsert as any).mock.calls.filter(
+      (c: any[]) => c[0] === 'translations_v2'
+    );
+    const totalRows = batchCalls.reduce(
+      (sum: number, call: any[]) => sum + (call[2] as unknown[][]).length, 0
     );
     // Ch1: 1 node (skipped offset 0), Ch2: 2 nodes (fresh start) = 3 total
-    expect(insertCalls.length).toBe(3);
+    expect(totalRows).toBe(3);
   });
 });

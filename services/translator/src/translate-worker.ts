@@ -44,7 +44,30 @@ export const activeJobs = new Map<string, {
   chaptersTotal: number;
   currentChapter: number;
   detail?: string;
+  startedAt: number;
 }>();
+
+/** Maximum time a translation job can run before being timed out (4 hours) */
+const JOB_TIMEOUT_MS = 4 * 60 * 60 * 1000;
+
+/** Sentinel value written when a node permanently fails translation after retry */
+const TRANSLATION_FAILED_MARKER = '[Translation failed]';
+
+/** Column list for translations_v2 batch inserts */
+const TRANSLATIONS_V2_COLUMNS = ['chapter_id', 'xpath', 'original_text', 'original_html', 'translated_text', 'order_index'] as const;
+
+/** Language code to display name mapping */
+const LANGUAGE_NAMES: Record<string, string> = {
+  zh: 'Chinese', en: 'English', es: 'Spanish', fr: 'French',
+  de: 'German', ja: 'Japanese', ko: 'Korean', ru: 'Russian',
+};
+
+function checkJobTimeout(bookUuid: string): void {
+  const job = activeJobs.get(bookUuid);
+  if (job && Date.now() - job.startedAt > JOB_TIMEOUT_MS) {
+    throw new Error(`Job timed out after ${JOB_TIMEOUT_MS / 1000 / 60} minutes`);
+  }
+}
 
 /**
  * Simple LLM chat call (replicates LLMClient.chat for essential use)
@@ -116,11 +139,7 @@ async function extractGlossary(
   }
 
   const combinedText = samples.join('\n\n');
-  const targetLangMap: Record<string, string> = {
-    zh: 'Chinese', en: 'English', es: 'Spanish', fr: 'French',
-    de: 'German', ja: 'Japanese', ko: 'Korean', ru: 'Russian',
-  };
-  const targetLang = targetLangMap[targetLanguage] || targetLanguage;
+  const targetLang = LANGUAGE_NAMES[targetLanguage] || targetLanguage;
 
   try {
     const response = await llmChat(config, [
@@ -158,11 +177,7 @@ async function translateText(
   targetLanguage: string,
   context?: string[]
 ): Promise<string> {
-  const targetLangMap: Record<string, string> = {
-    zh: 'Chinese', en: 'English', es: 'Spanish', fr: 'French',
-    de: 'German', ja: 'Japanese', ko: 'Korean', ru: 'Russian',
-  };
-  const targetLang = targetLangMap[targetLanguage] || targetLanguage;
+  const targetLang = LANGUAGE_NAMES[targetLanguage] || targetLanguage;
 
   // Find relevant glossary entries
   const relevant: Record<string, string> = {};
@@ -227,6 +242,7 @@ export async function translateBook(
   if (!job) throw new Error(`No job found for ${bookUuid}`);
   if (job.status === 'completed') return;
 
+  const jobStartedAt = Date.now();
   const setProgress = (phase: string, chaptersCompleted: number, detail?: string) => {
     activeJobs.set(bookUuid, {
       phase,
@@ -234,6 +250,7 @@ export async function translateBook(
       chaptersTotal: job.total_chapters,
       currentChapter: job.current_chapter,
       detail,
+      startedAt: jobStartedAt,
     });
   };
 
@@ -293,6 +310,7 @@ export async function translateBook(
     let completedChapters = job.completed_chapters || 0;
 
     for (let chNum = startChapter; chNum <= job.total_chapters; chNum++) {
+      checkJobTimeout(bookUuid);
       setProgress('translating', completedChapters, `Chapter ${chNum}/${job.total_chapters}`);
 
       const row = await db.first<{ text_nodes_json: string }>(
@@ -325,6 +343,8 @@ export async function translateBook(
 
       // Translate text nodes in parallel batches of CONCURRENCY
       const CONCURRENCY = 5;
+      const failedNodes: TextNode[] = [];
+
       for (let i = startOffset; i < textNodes.length; i += CONCURRENCY) {
         const batch = textNodes.slice(i, i + CONCURRENCY);
         const results = await Promise.allSettled(
@@ -337,18 +357,28 @@ export async function translateBook(
               return { node, translated, ok: true as const };
             } catch (err) {
               console.warn(`[${bookUuid}] Node ${node.xpath} failed:`, err);
-              return { node, translated: '[Translation pending]', ok: false as const };
+              return { node, translated: '', ok: false as const };
             }
           })
         );
 
-        // Write all results to DB
+        // Write successful results to DB in batch, collect failures for retry
+        const successRows: unknown[][] = [];
         for (const result of results) {
-          const { node, translated } = result.status === 'fulfilled' ? result.value : { node: null, translated: '[Translation pending]' };
-          if (!node) continue;
-          await db.run(
-            `INSERT OR REPLACE INTO translations_v2 (chapter_id, xpath, original_text, original_html, translated_text, order_index) VALUES (?, ?, ?, ?, ?, ?)`,
-            [chapterRow.id, node.xpath, node.text, node.html, translated, node.orderIndex]
+          if (result.status !== 'fulfilled') continue;
+          const { node, translated, ok } = result.value;
+          if (!ok) {
+            failedNodes.push(node);
+            continue;
+          }
+          successRows.push([chapterRow.id, node.xpath, node.text, node.html, translated, node.orderIndex]);
+        }
+
+        if (successRows.length > 0) {
+          await db.batchInsert(
+            'translations_v2',
+            [...TRANSLATIONS_V2_COLUMNS],
+            successRows
           );
         }
 
@@ -357,6 +387,32 @@ export async function translateBook(
           'UPDATE translation_jobs SET current_item_offset = ?, updated_at = CURRENT_TIMESTAMP WHERE book_uuid = ?',
           [Math.min(i + CONCURRENCY, textNodes.length), bookUuid]
         );
+      }
+
+      // Retry failed nodes one at a time (more reliable than parallel for flaky APIs)
+      if (failedNodes.length > 0) {
+        console.log(`[${bookUuid}] Retrying ${failedNodes.length} failed node(s) in chapter ${chNum}`);
+        const retryRows: unknown[][] = [];
+        for (const node of failedNodes) {
+          let translated: string;
+          try {
+            translated = await translateText(
+              llmConfig, node.text, glossary,
+              job.source_language, job.target_language
+            );
+          } catch (retryErr) {
+            console.warn(`[${bookUuid}] Retry failed for ${node.xpath}:`, retryErr);
+            translated = TRANSLATION_FAILED_MARKER;
+          }
+          retryRows.push([chapterRow.id, node.xpath, node.text, node.html, translated, node.orderIndex]);
+        }
+        if (retryRows.length > 0) {
+          await db.batchInsert(
+            'translations_v2',
+            [...TRANSLATIONS_V2_COLUMNS],
+            retryRows
+          );
+        }
       }
 
       // Translate chapter title

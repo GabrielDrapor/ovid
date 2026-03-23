@@ -52,6 +52,8 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState('');
   const [uploadError, setUploadError] = useState<{ message: string; required?: number; available?: number } | null>(null);
+  const [uploadToast, setUploadToast] = useState<string | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const [estimating, setEstimating] = useState(false);
   const [estimate, setEstimate] = useState<{
     file: File;
@@ -245,7 +247,10 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
     // Drive translation immediately, then every 3s
     pollProcessingBooks();
     const interval = setInterval(pollProcessingBooks, 3000);
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    };
   }, [books, pollProcessingBooks]);
 
   const handleFileSelect = async (file: File) => {
@@ -333,6 +338,10 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
       setUploading(false);
       setEstimate(null);
 
+      // Show toast notification
+      setUploadToast('Book uploaded! Translation is in progress — you can safely close this page.');
+      toastTimerRef.current = setTimeout(() => setUploadToast(null), 8000);
+
       await fetchBooks();
       await refreshCredits();
     } catch (err) {
@@ -373,6 +382,12 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
 
   return (
     <div className="bookshelf-container">
+      {/* Upload success toast */}
+      {uploadToast && (
+        <div className="upload-toast" onClick={() => setUploadToast(null)}>
+          <span>{uploadToast}</span>
+        </div>
+      )}
       <div className="bookshelf-wall" ref={wallRef} style={{ backgroundImage: 'url(/bookcase_bg.jpeg)' }}>
         {(() => {
           const safeBooks = Array.isArray(books) ? books : [];
@@ -592,6 +607,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                     }
                     return <span>{tp?.phase === 'glossary' ? 'Extracting glossary...' : 'Translating...'}</span>;
                   })()}
+                  <span className="safe-to-close-hint">You can safely close this page — the book will be ready when you return.</span>
                 </div>
               ) : hoveredBook.status === 'error' ? (
                 <div className="book-status-error">
@@ -695,6 +711,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                   }
                   return <span>Translating...</span>;
                 })()}
+                <span className="safe-to-close-hint">You can safely close this page — the book will be ready when you return.</span>
               </div>
             ) : mobileSelectedBook.status === 'error' ? (
               <div className="sheet-status" style={{ color: '#ff6b6b' }}>Translation failed</div>

@@ -80,4 +80,35 @@ export class D1Client {
   async run(sql: string, params: unknown[] = []): Promise<void> {
     await this.query(sql, params);
   }
+
+  /**
+   * Batch insert multiple rows into a table in a single SQL statement.
+   * Much more efficient than individual INSERTs for bulk data.
+   */
+  async batchInsert(
+    table: string,
+    columns: string[],
+    rows: unknown[][],
+    onConflict: 'REPLACE' | 'IGNORE' | 'ABORT' = 'REPLACE',
+    batchSize = 25
+  ): Promise<void> {
+    if (rows.length === 0) return;
+
+    const insertPrefix = onConflict === 'REPLACE'
+      ? `INSERT OR REPLACE INTO ${table}`
+      : onConflict === 'IGNORE'
+        ? `INSERT OR IGNORE INTO ${table}`
+        : `INSERT INTO ${table}`;
+
+    const colList = `(${columns.join(', ')})`;
+    const placeholderRow = `(${columns.map(() => '?').join(', ')})`;
+
+    for (let i = 0; i < rows.length; i += batchSize) {
+      const batch = rows.slice(i, i + batchSize);
+      const placeholders = batch.map(() => placeholderRow).join(', ');
+      const sql = `${insertPrefix} ${colList} VALUES ${placeholders}`;
+      const params = batch.flat();
+      await this.run(sql, params);
+    }
+  }
 }

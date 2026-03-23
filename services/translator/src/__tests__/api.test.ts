@@ -24,6 +24,7 @@ describe('API routes', () => {
         chaptersCompleted: 5,
         chaptersTotal: 10,
         currentChapter: 6,
+        startedAt: Date.now(),
       });
 
       expect(activeJobs.has('running-uuid')).toBe(true);
@@ -42,10 +43,11 @@ describe('API routes', () => {
         chaptersTotal: 10,
         currentChapter: 4,
         detail: 'Chapter 4/10',
+        startedAt: Date.now(),
       });
 
       const progress = activeJobs.get('mem-uuid');
-      expect(progress).toEqual({
+      expect(progress).toMatchObject({
         phase: 'translating',
         chaptersCompleted: 3,
         chaptersTotal: 10,
