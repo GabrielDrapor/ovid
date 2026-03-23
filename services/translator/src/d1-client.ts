@@ -90,9 +90,12 @@ export class D1Client {
     columns: string[],
     rows: unknown[][],
     onConflict: 'REPLACE' | 'IGNORE' | 'ABORT' = 'REPLACE',
-    batchSize = 25
+    batchSize?: number
   ): Promise<void> {
     if (rows.length === 0) return;
+    // D1 REST API limit: 100 bound parameters per query
+    const maxBatchSize = Math.floor(100 / columns.length);
+    batchSize = Math.min(batchSize ?? maxBatchSize, maxBatchSize);
 
     const insertPrefix = onConflict === 'REPLACE'
       ? `INSERT OR REPLACE INTO ${table}`
