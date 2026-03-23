@@ -178,24 +178,7 @@ async function translateText(
   context?: string[]
 ): Promise<string> {
   const targetLang = LANGUAGE_NAMES[targetLanguage] || targetLanguage;
-
-  // Find relevant glossary entries
-  const relevant: Record<string, string> = {};
-  const textLower = text.toLowerCase();
-  for (const [key, value] of Object.entries(glossary)) {
-    if (textLower.includes(key.toLowerCase())) {
-      relevant[key] = value;
-    }
-  }
-
-  let glossaryStr = '';
-  if (Object.keys(relevant).length > 0) {
-    const entries = Object.entries(relevant)
-      .sort((a, b) => b[0].length - a[0].length)
-      .map(([k, v]) => `  "${k}" → "${v}"`)
-      .join('\n');
-    glossaryStr = `\n\n**GLOSSARY (MUST use these exact translations):**\n${entries}\n`;
-  }
+  const glossaryStr = buildGlossaryStr(text, glossary);
 
   const contextStr = context?.length
     ? `\n\n<context>\n${context.join('\n')}\n</context>\n`
@@ -223,6 +206,91 @@ async function translateText(
     .replace(/<\/?translate>/gi, '')
     .replace(/<\/?context>/gi, '')
     .trim();
+}
+
+/** Build glossary string for relevant terms found in text */
+function buildGlossaryStr(text: string, glossary: Record<string, string>): string {
+  const relevant: Record<string, string> = {};
+  const textLower = text.toLowerCase();
+  for (const [key, value] of Object.entries(glossary)) {
+    if (textLower.includes(key.toLowerCase())) {
+      relevant[key] = value;
+    }
+  }
+  if (Object.keys(relevant).length === 0) return '';
+  const entries = Object.entries(relevant)
+    .sort((a, b) => b[0].length - a[0].length)
+    .map(([k, v]) => `  "${k}" → "${v}"`)
+    .join('\n');
+  return `\n\n**GLOSSARY (MUST use these exact translations):**\n${entries}\n`;
+}
+
+/** Rough token estimate: ~4 chars per token for English, ~2 for CJK */
+function estimateTokens(text: string): number {
+  const cjk = text.match(/[\u3000-\u9fff\uac00-\ud7af]/g)?.length ?? 0;
+  return Math.ceil(cjk / 2 + (text.length - cjk) / 4);
+}
+
+/**
+ * Translate multiple text segments in a single LLM call using tagged segments.
+ * Returns a Map from segment index to translated text.
+ * Segments that fail parsing are returned as null so the caller can retry individually.
+ */
+async function translateBatch(
+  config: LLMConfig,
+  segments: { index: number; text: string }[],
+  glossary: Record<string, string>,
+  sourceLanguage: string,
+  targetLanguage: string,
+): Promise<Map<number, string | null>> {
+  const targetLang = LANGUAGE_NAMES[targetLanguage] || targetLanguage;
+
+  // Build combined glossary from all segments
+  const allText = segments.map(s => s.text).join(' ');
+  const glossaryStr = buildGlossaryStr(allText, glossary);
+
+  // Build tagged input
+  const taggedInput = segments
+    .map(s => `<seg id="${s.index}">${s.text}</seg>`)
+    .join('\n');
+
+  const response = await llmChat(config, [
+    {
+      role: 'system',
+      content: `You are a professional literary translator. Translate the following ${sourceLanguage} text segments to ${targetLang}.
+
+**CRITICAL RULES:**
+1. Each segment is wrapped in <seg id="N">...</seg> tags.
+2. Return each translation wrapped in the SAME <seg id="N">...</seg> tags with matching IDs.
+3. Translate EVERY segment. Do not skip or merge segments.
+4. Maintain style, tone, and formatting within each segment.
+5. Do NOT wrap in quotes unless the source has them.
+6. For proper nouns, use exact translations from the Glossary.
+7. Output ONLY the translated segments with their tags, nothing else.${glossaryStr}`,
+    },
+    {
+      role: 'user',
+      content: taggedInput,
+    },
+  ], { maxTokens: 16384 });
+
+  // Parse tagged response
+  const resultMap = new Map<number, string | null>();
+  const segRegex = /<seg\s+id="(\d+)">([\s\S]*?)<\/seg>/g;
+  let match;
+  while ((match = segRegex.exec(response)) !== null) {
+    const id = parseInt(match[1], 10);
+    resultMap.set(id, match[2].trim());
+  }
+
+  // Mark missing segments as null
+  for (const seg of segments) {
+    if (!resultMap.has(seg.index)) {
+      resultMap.set(seg.index, null);
+    }
+  }
+
+  return resultMap;
 }
 
 /**
@@ -341,37 +409,76 @@ export async function translateBook(
       // Resume from offset if partially done
       const startOffset = (chNum === startChapter && job.current_item_offset > 0) ? job.current_item_offset : 0;
 
-      // Translate text nodes in parallel batches of CONCURRENCY
+      // Group text nodes into LLM-sized batches (~2000 tokens each), then run batches concurrently
+      const MAX_BATCH_TOKENS = 2000;
       const CONCURRENCY = 5;
+
+      // Build batches based on token budget
+      const llmBatches: { index: number; text: string; node: TextNode }[][] = [];
+      let currentBatch: { index: number; text: string; node: TextNode }[] = [];
+      let currentTokens = 0;
+
+      for (let i = startOffset; i < textNodes.length; i++) {
+        const node = textNodes[i];
+        const tokens = estimateTokens(node.text);
+        if (currentBatch.length > 0 && currentTokens + tokens > MAX_BATCH_TOKENS) {
+          llmBatches.push(currentBatch);
+          currentBatch = [];
+          currentTokens = 0;
+        }
+        currentBatch.push({ index: i, text: node.text, node });
+        currentTokens += tokens;
+      }
+      if (currentBatch.length > 0) llmBatches.push(currentBatch);
+
+      console.log(`[${bookUuid}] Chapter ${chNum}: ${textNodes.length - startOffset} nodes → ${llmBatches.length} batched LLM calls (concurrency ${CONCURRENCY})`);
+
       const failedNodes: TextNode[] = [];
 
-      for (let i = startOffset; i < textNodes.length; i += CONCURRENCY) {
-        const batch = textNodes.slice(i, i + CONCURRENCY);
-        const results = await Promise.allSettled(
-          batch.map(async (node) => {
-            try {
+      for (let b = 0; b < llmBatches.length; b += CONCURRENCY) {
+        const concurrentBatches = llmBatches.slice(b, b + CONCURRENCY);
+        const batchResults = await Promise.allSettled(
+          concurrentBatches.map(async (batch) => {
+            if (batch.length === 1) {
+              // Single node — use simple translateText (more reliable for short text)
+              const { node } = batch[0];
               const translated = await translateText(
                 llmConfig, node.text, glossary,
                 job.source_language, job.target_language
               );
-              return { node, translated, ok: true as const };
-            } catch (err) {
-              console.warn(`[${bookUuid}] Node ${node.xpath} failed:`, err);
-              return { node, translated: '', ok: false as const };
+              return new Map([[batch[0].index, { node, translated }]]);
             }
+
+            // Multi-node batch translation
+            const segments = batch.map(b => ({ index: b.index, text: b.text }));
+            const resultMap = await translateBatch(
+              llmConfig, segments, glossary,
+              job.source_language, job.target_language
+            );
+            const out = new Map<number, { node: TextNode; translated: string | null }>();
+            for (const item of batch) {
+              out.set(item.index, { node: item.node, translated: resultMap.get(item.index) ?? null });
+            }
+            return out;
           })
         );
 
-        // Write successful results to DB in batch, collect failures for retry
+        // Collect results and failures
         const successRows: unknown[][] = [];
-        for (const result of results) {
-          if (result.status !== 'fulfilled') continue;
-          const { node, translated, ok } = result.value;
-          if (!ok) {
-            failedNodes.push(node);
+        for (let r = 0; r < batchResults.length; r++) {
+          const result = batchResults[r];
+          if (result.status === 'rejected') {
+            // Entire batch failed — collect all nodes for individual retry
+            failedNodes.push(...concurrentBatches[r].map(b => b.node));
             continue;
           }
-          successRows.push([chapterRow.id, node.xpath, node.text, node.html, translated, node.orderIndex]);
+          for (const [, { node, translated }] of result.value) {
+            if (translated === null) {
+              failedNodes.push(node);
+            } else {
+              successRows.push([chapterRow.id, node.xpath, node.text, node.html, translated, node.orderIndex]);
+            }
+          }
         }
 
         if (successRows.length > 0) {
@@ -383,13 +490,15 @@ export async function translateBook(
         }
 
         // Update offset for resume capability
+        const lastBatch = concurrentBatches[concurrentBatches.length - 1];
+        const lastIndex = lastBatch[lastBatch.length - 1].index;
         await db.run(
           'UPDATE translation_jobs SET current_item_offset = ?, updated_at = CURRENT_TIMESTAMP WHERE book_uuid = ?',
-          [Math.min(i + CONCURRENCY, textNodes.length), bookUuid]
+          [lastIndex + 1, bookUuid]
         );
       }
 
-      // Retry failed nodes one at a time (more reliable than parallel for flaky APIs)
+      // Retry failed nodes one at a time
       if (failedNodes.length > 0) {
         console.log(`[${bookUuid}] Retrying ${failedNodes.length} failed node(s) in chapter ${chNum}`);
         const retryRows: unknown[][] = [];
