@@ -65,7 +65,7 @@ async function r2UploadBuffer(key: string, data: Buffer | Uint8Array, contentTyp
       Authorization: `Bearer ${env.CF_API_TOKEN}`,
       'Content-Type': contentType,
     },
-    body: new Blob([data], { type: contentType }),
+    body: data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer,
   });
   if (!resp.ok) {
     const text = await resp.text();
