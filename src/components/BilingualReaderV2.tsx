@@ -43,6 +43,31 @@ interface BilingualReaderV2Props {
 }
 
 /**
+ * Scope EPUB CSS rules under .epub-content to prevent them from
+ * leaking to the reader's own layout elements (nav buttons, menus, etc.)
+ */
+function scopeEpubStyles(css: string): string {
+  return css.replace(
+    /([^{}@]+)\{/g,
+    (match, selectors: string) => {
+      // Don't scope @-rules (media queries, keyframes, etc.)
+      if (selectors.trim().startsWith('@')) return match;
+      const scoped = selectors
+        .split(',')
+        .map((s: string) => {
+          s = s.trim();
+          if (!s) return s;
+          // Skip body/html — remap to .epub-content itself
+          if (/^(body|html)$/i.test(s)) return '.epub-content';
+          return `.epub-content ${s}`;
+        })
+        .join(', ');
+      return `${scoped} {`;
+    }
+  );
+}
+
+/**
  * BilingualReaderV2 - XPath-based bilingual reader
  *
  * This component renders the original EPUB HTML and patches text nodes
@@ -487,8 +512,8 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
 
   return (
     <div className="bilingual-reader">
-      {/* Inject EPUB CSS styles */}
-      {styles && <style dangerouslySetInnerHTML={{ __html: styles }} />}
+      {/* Inject EPUB CSS styles — scoped to .epub-content to prevent leaking */}
+      {styles && <style dangerouslySetInnerHTML={{ __html: scopeEpubStyles(styles) }} />}
 
       {/* Custom styles for V2 reader */}
       <style dangerouslySetInnerHTML={{ __html: `
@@ -581,6 +606,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
         {/* Render the raw HTML */}
         {!isLoading && rawHtml && (
           <div
+            className="epub-content"
             ref={contentRef}
             dangerouslySetInnerHTML={{ __html: rawHtml }}
           />
