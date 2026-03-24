@@ -75,8 +75,9 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
   const [targetXpath, setTargetXpath] = useState<string | undefined>(initialProgress.current.xpath);
 
 
-  // Track current visible xpath for saving
+  // Track current visible xpath and intra-chapter fraction for saving
   const currentXpathRef = useRef<string | undefined>(undefined);
+  const chapterFractionRef = useRef<number>(0);
 
   // Debounce timer for progress API updates
   const progressTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -89,10 +90,12 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
   const [bookOwnerId, setBookOwnerId] = useState<number | null>(null);
   const { user } = useUser();
 
-  // Calculate reading progress percentage
-  const calculateProgress = useCallback(() => {
+  // Calculate reading progress percentage (chapter-granular + intra-chapter fraction)
+  const calculateProgress = useCallback((fraction?: number) => {
     if (chapters.length === 0) return 0;
-    return Math.round((currentChapter / chapters.length) * 100);
+    const f = fraction ?? chapterFractionRef.current;
+    // completedChapters + fraction through current chapter, divided by total
+    return Math.min(100, Math.round(((currentChapter - 1 + f) / chapters.length) * 100));
   }, [currentChapter, chapters.length]);
 
   // Mark book as complete/incomplete and update progress
@@ -148,15 +151,16 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
   }, [bookUuid]);
 
   // Called by reader when visible element changes
-  const handleProgressChange = useCallback((xpath: string) => {
+  const handleProgressChange = useCallback((xpath: string, chapterFraction: number) => {
     currentXpathRef.current = xpath;
+    chapterFractionRef.current = chapterFraction;
     // Save to localStorage immediately
     saveProgress(currentChapter, xpath);
-    
+
     // Debounced API update - save chapter + xpath to backend every 5 seconds
     if (progressTimerRef.current) clearTimeout(progressTimerRef.current);
     progressTimerRef.current = setTimeout(() => {
-      const progressPercent = calculateProgress();
+      const progressPercent = calculateProgress(chapterFraction);
       fetch(`/api/book/${bookUuid}/progress`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -255,8 +259,10 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
 
       // Auto-update reading progress in database (fire-and-forget)
       // Use PUT progress endpoint to avoid resetting completion status
+      // When entering a chapter, fraction is 0 (top of chapter)
+      chapterFractionRef.current = 0;
       if (chapters.length > 0) {
-        const progressPercent = Math.round((chapterNumber / chapters.length) * 100);
+        const progressPercent = Math.min(100, Math.round(((chapterNumber - 1) / chapters.length) * 100));
         fetch(`/api/book/${bookUuid}/progress`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
@@ -320,7 +326,7 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
         
         // Also flush to backend using sendBeacon for reliability
         const progressPercent = chapters.length > 0
-          ? Math.round((currentChapter / chapters.length) * 100)
+          ? Math.min(100, Math.round(((currentChapter - 1 + chapterFractionRef.current) / chapters.length) * 100))
           : 0;
         const payload = JSON.stringify({
           readingProgress: progressPercent,
