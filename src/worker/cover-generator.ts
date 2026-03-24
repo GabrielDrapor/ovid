@@ -8,7 +8,7 @@
  * (crop + despill + resize) is done by the Railway cover-processor service.
  */
 
-const GEMINI_MODEL = 'gemini-2.5-flash-image';
+const GEMINI_MODEL = 'gemini-3.1-flash-image-preview';
 const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
 const R2_PUBLIC_BASE = 'https://assets.ovid.jrd.pub';
@@ -99,38 +99,57 @@ interface CoverResult {
 
 /**
  * Call Gemini API to generate an image (text-only prompt).
+ * Retries up to maxRetries times on failure with exponential backoff.
  */
-async function generateImage(apiKey: string, prompt: string): Promise<ArrayBuffer> {
-  const body = {
-    contents: [{ parts: [{ text: prompt }] }],
-    generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
-  };
+async function generateImage(apiKey: string, prompt: string, maxRetries = 2): Promise<ArrayBuffer> {
+  let lastError: Error | null = null;
 
-  const resp = await fetch(`${GEMINI_API_URL}?key=${apiKey}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const body = {
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
+      };
 
-  if (!resp.ok) {
-    const errText = await resp.text();
-    throw new Error(`Gemini API error ${resp.status}: ${errText.slice(0, 300)}`);
-  }
+      const resp = await fetch(`${GEMINI_API_URL}?key=${apiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(25000),
+      });
 
-  const data = (await resp.json()) as any;
-  for (const candidate of data.candidates || []) {
-    for (const part of candidate.content?.parts || []) {
-      if (part.inlineData?.data) {
-        const binary = atob(part.inlineData.data);
-        const bytes = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i++) {
-          bytes[i] = binary.charCodeAt(i);
+      if (!resp.ok) {
+        const errText = await resp.text();
+        throw new Error(`Gemini API error ${resp.status}: ${errText.slice(0, 300)}`);
+      }
+
+      const data = (await resp.json()) as any;
+      for (const candidate of data.candidates || []) {
+        for (const part of candidate.content?.parts || []) {
+          if (part.inlineData?.data) {
+            const binary = atob(part.inlineData.data);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) {
+              bytes[i] = binary.charCodeAt(i);
+            }
+            // Validate: reject suspiciously small images
+            if (bytes.length < 1000) {
+              throw new Error(`Image too small (${bytes.length} bytes), likely invalid`);
+            }
+            return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+          }
         }
-        return bytes.buffer;
+      }
+      throw new Error('No image in Gemini response');
+    } catch (err) {
+      lastError = err as Error;
+      console.error(`[cover-gen] attempt=${attempt} error: ${lastError.message}`);
+      if (attempt < maxRetries) {
+        await new Promise(r => setTimeout(r, (attempt + 1) * 1500));
       }
     }
   }
-  throw new Error('No image in Gemini response');
+  throw lastError || new Error('Image generation failed after retries');
 }
 
 function slugify(text: string): string {
@@ -229,19 +248,20 @@ Design for "${title}" by ${author}:
       }),
     });
 
-    if (!webhookResp.ok) {
+    if (webhookResp.ok) {
+      try {
+        const result = (await webhookResp.json()) as { ok?: boolean; coverUrl?: string; spineUrl?: string };
+        if (result.ok && result.coverUrl && result.spineUrl) {
+          return { coverUrl: result.coverUrl, spineUrl: result.spineUrl };
+        }
+      } catch {
+        // JSON parse failed — fall through to raw URLs
+      }
+    } else {
       console.error('Cover processing webhook failed:', await webhookResp.text());
-      // Fallback: use raw images directly
-      return { coverUrl: rawCoverUrl, spineUrl: rawSpineUrl };
     }
-  } else {
-    // No translator service — use raw images
-    return { coverUrl: rawCoverUrl, spineUrl: rawSpineUrl };
   }
 
-  // Return the final URLs (processor will upload to these keys)
-  return {
-    coverUrl: `${R2_PUBLIC_BASE}/${keyPrefix}_cover.png`,
-    spineUrl: `${R2_PUBLIC_BASE}/${keyPrefix}_spine.png`,
-  };
+  // Fallback: use raw images directly
+  return { coverUrl: rawCoverUrl, spineUrl: rawSpineUrl };
 }

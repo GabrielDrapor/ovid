@@ -861,15 +861,16 @@ app.post('/process-cover', async (c) => {
 
   console.log(`[cover] Starting: ${body.bookUuid}`);
 
-  // Process in background
-  processCoverImages(body).catch((err) => {
+  try {
+    const result = await processCoverImages(body);
+    return c.json({ ok: true, coverUrl: result.coverUrl, spineUrl: result.spineUrl });
+  } catch (err) {
     console.error(`[cover] Failed for ${body.bookUuid}:`, err);
-  });
-
-  return c.json({ ok: true, message: 'Processing started' });
+    return c.json({ ok: false, error: (err as Error).message }, 500);
+  }
 });
 
-async function processCoverImages(req: CoverProcessRequest) {
+async function processCoverImages(req: CoverProcessRequest): Promise<{ coverUrl: string; spineUrl: string }> {
   const db = getDb();
 
   const [rawCover, rawSpine] = await Promise.all([
@@ -898,6 +899,8 @@ async function processCoverImages(req: CoverProcessRequest) {
   );
 
   console.log(`[cover] Done: ${req.bookUuid} → ${coverUrl}, ${spineUrl}`);
+
+  return { coverUrl, spineUrl };
 }
 
 // ---- Job Recovery & Scanning ----
