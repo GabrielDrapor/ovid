@@ -129,6 +129,16 @@ export async function handleBookUpload(
       });
     }
 
+    // Create a placeholder book record so it appears on the shelf immediately
+    const maxOrderRow = await env.DB.prepare(
+      'SELECT COALESCE(MAX(display_order), 0) as max_order FROM books_v2'
+    ).first<{ max_order: number }>();
+    const nextOrder = ((maxOrderRow?.max_order) || 0) + 1;
+    await env.DB.prepare(
+      `INSERT INTO books_v2 (uuid, title, original_title, author, language_pair, user_id, status, display_order)
+       VALUES (?, 'Processing...', '', '', ?, ?, 'processing', ?)`
+    ).bind(bookUuid, `${sourceLanguage}-${targetLanguage}`, user.id, nextOrder).run();
+
     // Delegate everything to Railway (parsing, DB writes, credits, translation)
     const translatorUrl = env.TRANSLATOR_SERVICE_URL;
     const translatorSecret = env.TRANSLATOR_SECRET;
