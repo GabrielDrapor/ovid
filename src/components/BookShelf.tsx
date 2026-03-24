@@ -447,28 +447,6 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
           };
           return (
             <div className="shelf-content" style={{ opacity: loading ? 0 : 1, transition: 'opacity 0.5s ease-in-out' }}>
-              {publicBooks.length === 0 && userBooks.length === 0 && !loading && (
-                <div className="empty-shelf-guide">
-                  <div className="empty-shelf-content">
-                    <h2>Welcome to Ovid</h2>
-                    <p className="empty-shelf-desc">
-                      双语阅读器 — 上传 EPUB，点击段落即可切换原文与翻译
-                    </p>
-                    <p className="empty-shelf-desc-en">
-                      A bilingual reader. Upload any EPUB, tap a paragraph to toggle between original and translation.
-                    </p>
-                    {user ? (
-                      <button className="empty-shelf-upload-btn" onClick={() => setShowUploadModal(true)}>
-                        Upload your first book
-                      </button>
-                    ) : (
-                      <button className="empty-shelf-login-btn" onClick={login}>
-                        Sign in to get started
-                      </button>
-                    )}
-                  </div>
-                </div>
-              )}
               {publicBooks.length > 0 && (
                 <div className="books-grid" style={{ bottom: shelfPos.row1Bottom }}>
                   {publicBooks.map(renderBook)}
@@ -817,14 +795,6 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                         <span>Chapters:</span>
                         <span>{estimate.chapters}</span>
                       </div>
-                      <div className="estimate-row">
-                        <span>Characters:</span>
-                        <span>{estimate.characters.toLocaleString()}</span>
-                      </div>
-                      <div className="estimate-row">
-                        <span>Estimated tokens:</span>
-                        <span>~{estimate.estimatedTokens.toLocaleString()}</span>
-                      </div>
                       <div className="estimate-row cost">
                         <span>Translation cost:</span>
                         <span className={estimate.canAfford ? 'affordable' : 'not-affordable'}>
@@ -905,7 +875,6 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                   </svg>
                   <span>Click to select EPUB file</span>
                   <span className="upload-hint">The book will be automatically translated to Chinese</span>
-                  <span className="upload-hint">1 credit = 100 tokens</span>
                 </label>
                 <button
                   className="cancel-upload-btn"
@@ -938,7 +907,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                 </button>
               ))}
             </div>
-            <p className="credits-info">Credits are used for book translations. 1 credit = 100 tokens.</p>
+            <p className="credits-info">Credits are used for book translations.</p>
             <button
               className="cancel-upload-btn"
               onClick={() => setShowCreditsModal(false)}
