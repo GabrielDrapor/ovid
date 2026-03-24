@@ -223,16 +223,14 @@ export async function processSpine(imageBuffer: Buffer): Promise<Buffer> {
     raw: { width: contentW, height: contentH, channels: channels as 3 | 4 },
   });
 
-  // Resize to fill target: scale to cover the 114×607 target, then center-crop.
-  // This ensures the spine fills the full area with no padding.
-  // 'cover' scales up to fill both dimensions and crops the excess from center.
+  // Resize to exact target dimensions using 'fill' (stretch).
+  // The spine rectangle from Gemini is typically wider than the 114:607 target,
+  // so this stretches it taller. The distortion is minimal and acceptable —
+  // far better than padding artifacts or text clipping from contain/cover.
   const step1Buf = await spineImage.png().toBuffer();
 
   return sharp(step1Buf)
-    .resize(SPINE_WIDTH, SPINE_HEIGHT, {
-      fit: 'cover',
-      position: 'centre',
-    })
+    .resize(SPINE_WIDTH, SPINE_HEIGHT, { fit: 'fill' })
     .png()
     .toBuffer();
 }
