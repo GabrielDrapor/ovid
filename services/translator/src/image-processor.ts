@@ -223,44 +223,18 @@ export async function processSpine(imageBuffer: Buffer): Promise<Buffer> {
     raw: { width: contentW, height: contentH, channels: channels as 3 | 4 },
   });
 
-  // Two-step resize to avoid color padding artifacts:
-  // 1. Resize to target width (114px), preserving aspect ratio
-  // 2. If height > target: crop from center. If height < target: pad with spine bg color.
+  // Resize to fill target: scale to cover the 114×607 target, then center-crop.
+  // This ensures the spine fills the full area with no padding.
+  // 'cover' scales up to fill both dimensions and crops the excess from center.
   const step1Buf = await spineImage.png().toBuffer();
-  const widthResized = await sharp(step1Buf)
-    .resize(SPINE_WIDTH, null) // resize width to 114, height auto
+
+  return sharp(step1Buf)
+    .resize(SPINE_WIDTH, SPINE_HEIGHT, {
+      fit: 'cover',
+      position: 'centre',
+    })
     .png()
     .toBuffer();
-
-  const wrMeta = await sharp(widthResized).metadata();
-  const wrH = wrMeta.height || SPINE_HEIGHT;
-
-  if (wrH >= SPINE_HEIGHT) {
-    // Taller than target: crop from center vertically
-    const cropY = Math.round((wrH - SPINE_HEIGHT) / 2);
-    return sharp(widthResized)
-      .extract({ left: 0, top: cropY, width: SPINE_WIDTH, height: SPINE_HEIGHT })
-      .png()
-      .toBuffer();
-  } else {
-    // Shorter than target: pad top/bottom with spine's interior background color
-    const wrRaw = await sharp(widthResized).raw().toBuffer();
-    const wrCh = wrMeta.channels || 3;
-    const centerX = Math.floor(SPINE_WIDTH / 2);
-    let sr = 0, sg = 0, sb = 0, cnt = 0;
-    for (let sy = Math.floor(wrH * 0.3); sy < Math.floor(wrH * 0.7); sy += 4) {
-      const si = (sy * SPINE_WIDTH + centerX) * wrCh;
-      sr += wrRaw[si]; sg += wrRaw[si + 1]; sb += wrRaw[si + 2]; cnt++;
-    }
-    const bg = cnt > 0
-      ? { r: Math.round(sr / cnt), g: Math.round(sg / cnt), b: Math.round(sb / cnt) }
-      : { r: 255, g: 255, b: 255 };
-
-    return sharp(widthResized)
-      .resize(SPINE_WIDTH, SPINE_HEIGHT, { fit: 'contain', background: bg })
-      .png()
-      .toBuffer();
-  }
 }
 
 /**
