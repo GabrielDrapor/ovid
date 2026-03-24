@@ -41,29 +41,6 @@ export async function handleBookUpload(
   }
 
   try {
-    const formData = await request.formData();
-    const file = formData.get('file') as File;
-    const targetLanguage = formData.get('targetLanguage') as string || 'zh';
-    const sourceLanguage = formData.get('sourceLanguage') as string || 'en';
-
-    if (!file) {
-      return new Response(JSON.stringify({ error: 'No file provided' }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
-
-    const fileName = file.name.toLowerCase();
-    const supportedExtensions = ['.epub', '.mobi', '.azw3'];
-    const fileExtension = supportedExtensions.find(ext => fileName.endsWith(ext));
-
-    if (!fileExtension) {
-      return new Response(
-        JSON.stringify({ error: 'Only EPUB, MOBI, and AZW3 files are supported' }),
-        { status: 400, headers: { 'Content-Type': 'application/json' } }
-      );
-    }
-
     // Require Railway translator service for upload
     if (!env.TRANSLATOR_SERVICE_URL || !env.TRANSLATOR_SECRET) {
       return new Response(
@@ -72,15 +49,85 @@ export async function handleBookUpload(
       );
     }
 
-    const buffer = await file.arrayBuffer();
+    const contentType = request.headers.get('content-type') || '';
+    let fileExtension: string;
+    let r2Key: string;
+    let targetLanguage = 'zh';
+    let sourceLanguage = 'en';
     const bookUuid = crypto.randomUUID();
 
-    // Store raw file to R2 — this is lightweight, no CPU-heavy parsing
-    const r2Key = `uploads/${bookUuid}/original${fileExtension}`;
-    await env.ASSETS_BUCKET.put(r2Key, buffer, {
-      httpMetadata: { contentType: file.type || 'application/octet-stream' },
-      customMetadata: { originalName: file.name },
-    });
+    if (contentType.includes('application/json')) {
+      // Fast path: file already in R2 from estimate phase — just copy it
+      const body = await request.json() as { fileKey?: string; targetLanguage?: string; sourceLanguage?: string };
+
+      if (!body.fileKey) {
+        return new Response(JSON.stringify({ error: 'Missing fileKey' }), {
+          status: 400, headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      targetLanguage = body.targetLanguage || 'zh';
+      sourceLanguage = body.sourceLanguage || 'en';
+
+      // Derive extension from the temp key
+      const supportedExtensions = ['.epub', '.mobi', '.azw3'];
+      const ext = supportedExtensions.find(e => body.fileKey!.endsWith(e));
+      if (!ext) {
+        return new Response(
+          JSON.stringify({ error: 'Invalid fileKey extension' }),
+          { status: 400, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      fileExtension = ext;
+
+      // Copy from temp estimate path to permanent path
+      const tempObject = await env.ASSETS_BUCKET.get(body.fileKey);
+      if (!tempObject) {
+        return new Response(
+          JSON.stringify({ error: 'Estimated file not found — please re-upload' }),
+          { status: 404, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+
+      r2Key = `uploads/${bookUuid}/original${fileExtension}`;
+      await env.ASSETS_BUCKET.put(r2Key, tempObject.body, {
+        httpMetadata: tempObject.httpMetadata,
+        customMetadata: tempObject.customMetadata,
+      });
+
+      // Delete the temp estimate file
+      await env.ASSETS_BUCKET.delete(body.fileKey);
+    } else {
+      // Legacy path: file sent via FormData
+      const formData = await request.formData();
+      const file = formData.get('file') as File;
+      targetLanguage = (formData.get('targetLanguage') as string) || 'zh';
+      sourceLanguage = (formData.get('sourceLanguage') as string) || 'en';
+
+      if (!file) {
+        return new Response(JSON.stringify({ error: 'No file provided' }), {
+          status: 400, headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      const fileName = file.name.toLowerCase();
+      const supportedExtensions = ['.epub', '.mobi', '.azw3'];
+      const ext = supportedExtensions.find(e => fileName.endsWith(e));
+      if (!ext) {
+        return new Response(
+          JSON.stringify({ error: 'Only EPUB, MOBI, and AZW3 files are supported' }),
+          { status: 400, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      fileExtension = ext;
+
+      const buffer = await file.arrayBuffer();
+      r2Key = `uploads/${bookUuid}/original${fileExtension}`;
+      await env.ASSETS_BUCKET.put(r2Key, buffer, {
+        httpMetadata: { contentType: file.type || 'application/octet-stream' },
+        customMetadata: { originalName: file.name },
+      });
+    }
 
     // Delegate everything to Railway (parsing, DB writes, credits, translation)
     const translatorUrl = env.TRANSLATOR_SERVICE_URL;

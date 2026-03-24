@@ -65,6 +65,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
     requiredCredits: number;
     availableCredits: number;
     canAfford: boolean;
+    fileKey?: string;
   } | null>(null);
   const { user, loading: userLoading, login, logout, credits, creditPackages, purchaseCredits, refreshCredits } = useUser();
 
@@ -286,6 +287,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
         requiredCredits: number;
         availableCredits: number;
         canAfford: boolean;
+        fileKey?: string;
       };
 
       setEstimate({ ...estimateData, file });
@@ -300,19 +302,35 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
     if (!estimate) return;
 
     setUploading(true);
-    setUploadProgress('Uploading...');
+    setUploadProgress(estimate.fileKey ? 'Starting translation...' : 'Uploading...');
     setUploadError(null);
 
     try {
-      const formData = new FormData();
-      formData.append('file', estimate.file);
-      formData.append('targetLanguage', 'zh');
-      formData.append('sourceLanguage', 'en');
+      let response: Response;
 
-      const response = await fetch('/api/books/upload', {
-        method: 'POST',
-        body: formData,
-      });
+      if (estimate.fileKey) {
+        // Fast path: file already in R2 from estimate — send fileKey only
+        response = await fetch('/api/books/upload', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            fileKey: estimate.fileKey,
+            targetLanguage: 'zh',
+            sourceLanguage: 'en',
+          }),
+        });
+      } else {
+        // Fallback: re-upload file via FormData
+        const formData = new FormData();
+        formData.append('file', estimate.file);
+        formData.append('targetLanguage', 'zh');
+        formData.append('sourceLanguage', 'en');
+
+        response = await fetch('/api/books/upload', {
+          method: 'POST',
+          body: formData,
+        });
+      }
 
       if (!response.ok) {
         const errorData = await response.json() as { error?: string; required?: number; available?: number; message?: string };
