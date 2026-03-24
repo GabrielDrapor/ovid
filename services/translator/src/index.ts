@@ -719,17 +719,20 @@ app.post('/admin/regenerate-cover', async (c) => {
   }
 
   const db = getDb();
-  const book = await db.first<{ title: string; author: string }>(
-    'SELECT title, author FROM books_v2 WHERE uuid = ?',
+  const book = await db.first<{ title: string; original_title: string; author: string }>(
+    'SELECT title, original_title, author FROM books_v2 WHERE uuid = ?',
     [body.bookUuid]
   );
   if (!book) {
     return c.json({ error: 'Book not found' }, 404);
   }
 
+  // Use original_title for cover/spine generation (not the translated title)
+  const coverTitle = book.original_title || book.title;
+
   // Run synchronously so caller gets the result
   try {
-    await generateCoversForBook(apiKey, book.title, book.author, body.bookUuid);
+    await generateCoversForBook(apiKey, coverTitle, book.author, body.bookUuid);
     const updated = await db.first<{ book_cover_img_url: string; book_spine_img_url: string }>(
       'SELECT book_cover_img_url, book_spine_img_url FROM books_v2 WHERE uuid = ?',
       [body.bookUuid]
