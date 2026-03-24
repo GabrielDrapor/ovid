@@ -247,11 +247,35 @@ export async function processSpine(imageBuffer: Buffer): Promise<Buffer> {
     ? { r: Math.round(sr / sCount), g: Math.round(sg / sCount), b: Math.round(sb / sCount) }
     : { r: 255, g: 255, b: 255 };
 
-  return sharp(resizedBuf)
+  const finalBuf = await sharp(resizedBuf)
     .resize(SPINE_WIDTH, SPINE_HEIGHT, {
       fit: 'contain',
       background: bgColor,
     })
+    .raw()
+    .toBuffer();
+
+  // Clean up edges: replace outer 3px on each side with bgColor.
+  // This removes any green/gray artifacts from imprecise crop boundaries
+  // or antialiasing at the contain padding boundary.
+  const fW = SPINE_WIDTH;
+  const fH = SPINE_HEIGHT;
+  const fCh = channels as number;
+  const edgePx = 3;
+  for (let y = 0; y < fH; y++) {
+    for (let x = 0; x < fW; x++) {
+      if (x < edgePx || x >= fW - edgePx || y < edgePx || y >= fH - edgePx) {
+        const idx = (y * fW + x) * fCh;
+        finalBuf[idx] = bgColor.r;
+        finalBuf[idx + 1] = bgColor.g;
+        finalBuf[idx + 2] = bgColor.b;
+      }
+    }
+  }
+
+  return sharp(finalBuf, {
+    raw: { width: fW, height: fH, channels: fCh as 3 | 4 },
+  })
     .png()
     .toBuffer();
 }
