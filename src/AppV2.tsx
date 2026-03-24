@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import BilingualReaderV2 from './components/BilingualReaderV2';
 import { useUser } from './contexts/UserContext';
 import { fetchWithRetry } from './utils/fetchWithRetry';
+import { getLocalProgress, mergeProgress, PROGRESS_KEY, type ReadingProgress, type CloudProgress } from './utils/reading-progress';
 import './App.css';
 
 interface Chapter {
@@ -40,72 +41,23 @@ interface AppV2Props {
   onBackToShelf: () => void;
 }
 
-// Granular reading progress: chapter + xpath position
-interface ReadingProgress {
-  chapter: number;
-  xpath?: string;  // XPath of the element in view
-  timestamp: number;
-}
-
-// Cloud progress from backend
-interface CloudProgress {
-  chapter_number: number | null;
-  paragraph_xpath: string | null;
-  updated_at: string | null;
-}
-
-const PROGRESS_KEY = (uuid: string) => `ovid_progress_v2_${uuid}`;
-
-// Get initial progress from localStorage
-const getLocalProgress = (uuid: string): ReadingProgress => {
-  // Check localStorage (new format)
-  const saved = localStorage.getItem(PROGRESS_KEY(uuid));
-  if (saved) {
-    try {
-      const progress = JSON.parse(saved) as ReadingProgress;
-      if (progress.chapter >= 1) return progress;
-    } catch {
-      // Ignore parse errors
-    }
-  }
-
-  // Fall back to old format for migration
-  const oldSaved = localStorage.getItem(`ovid_progress_${uuid}`);
-  if (oldSaved) {
-    const chapter = parseInt(oldSaved, 10);
-    if (chapter >= 1) return { chapter, timestamp: Date.now() };
-  }
-
-  return { chapter: 1, timestamp: Date.now() };
-};
-
 // Fetch cloud progress and merge with local — cloud wins if newer
 const fetchAndMergeProgress = async (uuid: string): Promise<ReadingProgress> => {
   const local = getLocalProgress(uuid);
-  
+
   try {
     const response = await fetch(`/api/book/${uuid}/progress`);
     if (!response.ok) return local;
-    
+
     const data = await response.json() as { progress: CloudProgress | null };
-    if (!data.progress?.chapter_number) return local;
-    
-    const cloud = data.progress;
-    const cloudTimestamp = cloud.updated_at ? new Date(cloud.updated_at).getTime() : 0;
-    
-    // Use whichever is more recent
-    if (cloudTimestamp > local.timestamp) {
-      const merged: ReadingProgress = {
-        chapter: cloud.chapter_number!,
-        xpath: cloud.paragraph_xpath || undefined,
-        timestamp: cloudTimestamp,
-      };
-      // Update localStorage with cloud data
+    const { merged, source } = mergeProgress(local, data.progress);
+
+    // Update localStorage if cloud won
+    if (source === 'cloud') {
       localStorage.setItem(PROGRESS_KEY(uuid), JSON.stringify(merged));
-      return merged;
     }
-    
-    return local;
+
+    return merged;
   } catch {
     return local;
   }
@@ -285,6 +237,12 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
 
   // Load chapter content
   const loadChapter = async (chapterNumber: number, scrollToXpath?: string) => {
+    // Cancel any pending progress save from the previous chapter
+    // to prevent stale chapter data from overwriting the new chapter
+    if (progressTimerRef.current) {
+      clearTimeout(progressTimerRef.current);
+      progressTimerRef.current = null;
+    }
     setLoading(true);
     try {
       const response = await fetchWithRetry(`/api/v2/book/${bookUuid}/chapter/${chapterNumber}`);
