@@ -458,8 +458,8 @@ app.post('/estimate', async (c) => {
     );
     const userCredits = userRow?.credits ?? 0;
 
-    // Clean up temp file
-    await r2Delete(body.fileKey);
+    // Keep temp file in R2 — reused during upload to skip a second file transfer.
+    // The upload handler cleans it up after copying to the permanent path.
 
     return c.json({
       title: bookData.title || 'Unknown',
@@ -470,6 +470,7 @@ app.post('/estimate', async (c) => {
       requiredCredits,
       availableCredits: userCredits,
       canAfford: userCredits >= requiredCredits,
+      fileKey: body.fileKey,
     });
   } catch (err) {
     // Clean up on error
