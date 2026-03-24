@@ -245,18 +245,28 @@ async function processUpload(req: UploadAndParseRequest): Promise<void> {
       console.log(`[upload] Uploaded ${bookData.images.length} images to R2`);
     }
 
-    // 5. Insert book shell into D1
-    const maxOrderRow = await db.first<{ max_order: number }>(
-      'SELECT COALESCE(MAX(display_order), 0) as max_order FROM books_v2'
-    );
-    const nextOrder = ((maxOrderRow?.max_order) || 0) + 1;
-
+    // 5. Update placeholder book record with parsed metadata (Worker pre-created it)
     await db.run(
-      `INSERT INTO books_v2 (uuid, title, original_title, author, language_pair, styles, user_id, status, display_order)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'processing', ?)`,
-      [bookUuid, bookData.title, bookData.title, bookData.author,
-       `${sourceLanguage}-${targetLanguage}`, bookData.styles || '', userId, nextOrder]
+      `UPDATE books_v2 SET title = ?, original_title = ?, author = ?, language_pair = ?, styles = ?, user_id = ?
+       WHERE uuid = ?`,
+      [bookData.title, bookData.title, bookData.author,
+       `${sourceLanguage}-${targetLanguage}`, bookData.styles || '', userId, bookUuid]
     );
+
+    // Fallback: if Worker didn't pre-create the record (e.g. old deploy), insert it
+    const existsCheck = await db.first<{ id: number }>('SELECT id FROM books_v2 WHERE uuid = ?', [bookUuid]);
+    if (!existsCheck) {
+      const maxOrderRow = await db.first<{ max_order: number }>(
+        'SELECT COALESCE(MAX(display_order), 0) as max_order FROM books_v2'
+      );
+      const nextOrder = ((maxOrderRow?.max_order) || 0) + 1;
+      await db.run(
+        `INSERT INTO books_v2 (uuid, title, original_title, author, language_pair, styles, user_id, status, display_order)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'processing', ?)`,
+        [bookUuid, bookData.title, bookData.title, bookData.author,
+         `${sourceLanguage}-${targetLanguage}`, bookData.styles || '', userId, nextOrder]
+      );
+    }
 
     const bookRow = await db.first<{ id: number }>('SELECT id FROM books_v2 WHERE uuid = ?', [bookUuid]);
     if (!bookRow) throw new Error('Failed to create book');
