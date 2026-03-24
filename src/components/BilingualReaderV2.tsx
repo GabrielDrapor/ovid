@@ -39,7 +39,7 @@ interface BilingualReaderV2Props {
   onRevokeShare?: () => Promise<void>;
   // Granular progress tracking
   initialXpath?: string;  // XPath to scroll to on initial load
-  onProgressChange?: (xpath: string) => void;  // Called when visible element changes
+  onProgressChange?: (xpath: string, chapterFraction: number) => void;  // Called when visible element changes; chapterFraction is 0–1
 }
 
 /**
@@ -386,13 +386,21 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
         if (topmostXpath && topmostXpath !== visibleXpathRef.current) {
           visibleXpathRef.current = topmostXpath;
 
+          // Compute chapter fraction: position of this element among all tracked elements
+          const totalElements = elementsRef.current.size;
+          const elementIndex = Array.from(elementsRef.current.keys()).indexOf(topmostXpath);
+          const chapterFraction = totalElements > 1
+            ? elementIndex / (totalElements - 1)
+            : 0;
+
           // Debounced callback - wait 1s of stability before reporting
           if (progressTimerRef.current) {
             clearTimeout(progressTimerRef.current);
           }
+          const capturedFraction = chapterFraction;
           progressTimerRef.current = setTimeout(() => {
             if (progressCallbackRef.current && visibleXpathRef.current) {
-              progressCallbackRef.current(visibleXpathRef.current);
+              progressCallbackRef.current(visibleXpathRef.current, capturedFraction);
             }
           }, 1000);
         }
