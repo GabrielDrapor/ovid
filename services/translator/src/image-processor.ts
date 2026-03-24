@@ -147,15 +147,9 @@ function findContentBounds(
     while (bottom > top && !rowDiffersFromBg(bottom, bgBottom)) bottom--;
   }
 
-  // Inward padding: shrink bounds slightly to cut off any green fringe
-  // at the edge of content. Better to lose a pixel of content than keep
-  // green/gray artifacts that ruin the spine appearance.
-  const padX = Math.max(2, Math.round(width * 0.005));
-  const padY = Math.max(2, Math.round(height * 0.005));
-  left = Math.min(right, left + padX);
-  right = Math.max(left, right - padX);
-  top = Math.min(bottom, top + padY);
-  bottom = Math.max(top, bottom - padY);
+  // No padding adjustment — use the exact detected bounds.
+  // The resize step uses 'contain' which won't clip content,
+  // and background fill uses the spine's interior color.
 
   return { left, right, top, bottom };
 }
@@ -229,36 +223,9 @@ export async function processSpine(imageBuffer: Buffer): Promise<Buffer> {
     raw: { width: contentW, height: contentH, channels: channels as 3 | 4 },
   });
 
-  // Crop to target aspect ratio (114:607 ≈ 0.188) before resizing
-  // This avoids distortion from 'fill' and clipping from 'cover'
-  const targetRatio = SPINE_WIDTH / SPINE_HEIGHT; // ~0.188
-  const currentRatio = contentW / contentH;
-
-  if (currentRatio > targetRatio * 1.5) {
-    // Too wide: crop sides — only if significantly off, keep 10% extra to avoid clipping text
-    const newW = Math.min(contentW, Math.round(contentH * targetRatio * 1.1));
-    const cropX = Math.round((contentW - newW) / 2);
-    spineImage = spineImage.extract({
-      left: cropX,
-      top: 0,
-      width: newW,
-      height: contentH,
-    });
-  } else if (currentRatio < targetRatio * 0.6) {
-    // Too tall: crop top/bottom — only if significantly off
-    const newH = Math.round(contentW / targetRatio);
-    const cropY = Math.round((contentH - newH) / 2);
-    spineImage = spineImage.extract({
-      left: 0,
-      top: cropY,
-      width: contentW,
-      height: newH,
-    });
-  }
-
-  // Resize to target with padding to prevent text clipping.
-  // Use 'contain' to fit the content, then extend with the dominant
-  // background color to fill the exact target dimensions.
+  // Resize to target using 'contain' — no aspect ratio cropping.
+  // 'contain' fits the content within the target dimensions without clipping,
+  // then fills remaining space with the spine's background color.
   // Must encode to PNG first — spineImage is constructed from raw pixels,
   // and .toBuffer() without format returns raw data that sharp can't re-read.
   const resizedBuf = await spineImage.png().toBuffer();
