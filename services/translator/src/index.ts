@@ -545,7 +545,7 @@ Requirements:
     const coverBuf = await generateImageWithRetry(GEMINI_API_URL, coverPrompt);
 
     // --- Generate spine on green screen ---
-    const spinePrompt = `A flat front-facing book spine on bright solid lime green (#00FF00) background. The spine is a narrow vertical rectangle, centered, with green space on all sides.
+    const spinePrompt = `A flat front-facing book spine on a PURE BRIGHT GREEN (#00FF00) background. The background MUST be exactly #00FF00 pure green, not yellow-green or olive. The spine is a narrow vertical rectangle, centered, with solid #00FF00 green space on all sides.
 
 Design for "${title}" by ${author}:
 - Visual style: ${style.name}
@@ -557,7 +557,7 @@ Design for "${title}" by ${author}:
 - Keep decoration MINIMAL — prioritize text legibility
 - The rectangle should be about 1/6 the width of the total image
 - Sharp edges, no shadows, no 3D effects, no page edges visible
-- CRITICAL: All text must be FULLY CONTAINED within the spine rectangle with generous margins on ALL sides. Leave at least 10% padding on left and right sides.`;
+- CRITICAL: All text and decorative elements must be FULLY CONTAINED within the spine rectangle. Leave at least 15% padding on left and right sides, and 5% on top and bottom. NO text or design elements should touch or come close to the edges of the spine rectangle. Scale text DOWN if needed to ensure generous margins.`;
 
     const spineBuf = await generateImageWithRetry(GEMINI_API_URL, spinePrompt);
 

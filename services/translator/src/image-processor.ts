@@ -23,8 +23,10 @@ const COVER_HEIGHT = 606;
 function isGreenBg(r: number, g: number, b: number): boolean {
   // Pure green: g dominates both r and b
   if (g > 60 && (g - r) > 25 && (g - b) > 25) return true;
-  // Yellow-green variants
-  if (g > 100 && r > 80 && b < 100 && (g + r) > 250 && (g - b) > 40) return true;
+  // Yellow-green / chartreuse variants (Gemini sometimes uses these instead of pure #00FF00)
+  if (g > 100 && r > 80 && b < 120 && (g + r) > 220 && (g - b) > 30) return true;
+  // Bright lime: high saturation green-ish
+  if (g > 150 && b < 100 && g > r * 0.8) return true;
   return false;
 }
 
