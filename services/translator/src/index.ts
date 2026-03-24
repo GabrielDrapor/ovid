@@ -702,6 +702,44 @@ app.get('/status/:uuid', async (c) => {
   }
 });
 
+// --- Admin: Regenerate covers for existing books ---
+
+app.post('/admin/regenerate-cover', async (c) => {
+  const body = await c.req.json<{ secret: string; bookUuid: string }>();
+  if (body.secret !== env.TRANSLATOR_SECRET) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+  if (!body.bookUuid) {
+    return c.json({ error: 'Missing bookUuid' }, 400);
+  }
+
+  const apiKey = process.env.GEMINI_API_KEY || '';
+  if (!apiKey) {
+    return c.json({ error: 'GEMINI_API_KEY not configured' }, 500);
+  }
+
+  const db = getDb();
+  const book = await db.first<{ title: string; author: string }>(
+    'SELECT title, author FROM books_v2 WHERE uuid = ?',
+    [body.bookUuid]
+  );
+  if (!book) {
+    return c.json({ error: 'Book not found' }, 404);
+  }
+
+  // Run synchronously so caller gets the result
+  try {
+    await generateCoversForBook(apiKey, book.title, book.author, body.bookUuid);
+    const updated = await db.first<{ book_cover_img_url: string; book_spine_img_url: string }>(
+      'SELECT book_cover_img_url, book_spine_img_url FROM books_v2 WHERE uuid = ?',
+      [body.bookUuid]
+    );
+    return c.json({ ok: true, coverUrl: updated?.book_cover_img_url, spineUrl: updated?.book_spine_img_url });
+  } catch (err) {
+    return c.json({ ok: false, error: (err as Error).message }, 500);
+  }
+});
+
 // --- Cover Preview (debug UI) ---
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
