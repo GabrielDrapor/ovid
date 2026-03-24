@@ -147,14 +147,15 @@ function findContentBounds(
     while (bottom > top && !rowDiffersFromBg(bottom, bgBottom)) bottom--;
   }
 
-  // Outward padding to avoid clipping content — proportional to image size
-  // Use 3% to be generous; spine text often has decorative elements near edges
-  const padX = Math.max(5, Math.round(width * 0.03));
-  const padY = Math.max(5, Math.round(height * 0.03));
-  left = Math.max(0, left - padX);
-  right = Math.min(width - 1, right + padX);
-  top = Math.max(0, top - padY);
-  bottom = Math.min(height - 1, bottom + padY);
+  // Inward padding: shrink bounds slightly to cut off any green fringe
+  // at the edge of content. Better to lose a pixel of content than keep
+  // green/gray artifacts that ruin the spine appearance.
+  const padX = Math.max(2, Math.round(width * 0.005));
+  const padY = Math.max(2, Math.round(height * 0.005));
+  left = Math.min(right, left + padX);
+  right = Math.max(left, right - padX);
+  top = Math.min(bottom, top + padY);
+  bottom = Math.max(top, bottom - padY);
 
   return { left, right, top, bottom };
 }
@@ -261,8 +262,23 @@ export async function processSpine(imageBuffer: Buffer): Promise<Buffer> {
   // Must encode to PNG first — spineImage is constructed from raw pixels,
   // and .toBuffer() without format returns raw data that sharp can't re-read.
   const resizedBuf = await spineImage.png().toBuffer();
-  const { dominant } = await sharp(resizedBuf).stats();
-  const bgColor = { r: dominant.r, g: dominant.g, b: dominant.b };
+
+  // Sample the center column of the spine to get the actual spine background color
+  // (not dominant of the whole image which may be polluted by green fringe)
+  const spMeta = await sharp(resizedBuf).metadata();
+  const spRaw = await sharp(resizedBuf).raw().toBuffer();
+  const spCh = spMeta.channels || 3;
+  const spW = spMeta.width || 1;
+  const spH = spMeta.height || 1;
+  const centerX = Math.floor(spW / 2);
+  let sr = 0, sg = 0, sb = 0, sCount = 0;
+  for (let sy = Math.floor(spH * 0.3); sy < Math.floor(spH * 0.7); sy += 4) {
+    const si = (sy * spW + centerX) * spCh;
+    sr += spRaw[si]; sg += spRaw[si + 1]; sb += spRaw[si + 2]; sCount++;
+  }
+  const bgColor = sCount > 0
+    ? { r: Math.round(sr / sCount), g: Math.round(sg / sCount), b: Math.round(sb / sCount) }
+    : { r: 255, g: 255, b: 255 };
 
   return sharp(resizedBuf)
     .resize(SPINE_WIDTH, SPINE_HEIGHT, {
