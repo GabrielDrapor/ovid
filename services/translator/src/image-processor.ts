@@ -146,8 +146,9 @@ function findContentBounds(
   }
 
   // Outward padding to avoid clipping content — proportional to image size
-  const padX = Math.max(3, Math.round(width * 0.01));
-  const padY = Math.max(3, Math.round(height * 0.01));
+  // Use 3% to be generous; spine text often has decorative elements near edges
+  const padX = Math.max(5, Math.round(width * 0.03));
+  const padY = Math.max(5, Math.round(height * 0.03));
   left = Math.max(0, left - padX);
   right = Math.min(width - 1, right + padX);
   top = Math.max(0, top - padY);
@@ -230,9 +231,9 @@ export async function processSpine(imageBuffer: Buffer): Promise<Buffer> {
   const targetRatio = SPINE_WIDTH / SPINE_HEIGHT; // ~0.188
   const currentRatio = contentW / contentH;
 
-  if (currentRatio > targetRatio * 1.2) {
-    // Too wide: crop sides to match target ratio
-    const newW = Math.round(contentH * targetRatio);
+  if (currentRatio > targetRatio * 1.5) {
+    // Too wide: crop sides — only if significantly off, keep 10% extra to avoid clipping text
+    const newW = Math.min(contentW, Math.round(contentH * targetRatio * 1.1));
     const cropX = Math.round((contentW - newW) / 2);
     spineImage = spineImage.extract({
       left: cropX,
@@ -240,8 +241,8 @@ export async function processSpine(imageBuffer: Buffer): Promise<Buffer> {
       width: newW,
       height: contentH,
     });
-  } else if (currentRatio < targetRatio * 0.8) {
-    // Too tall: crop top/bottom to match target ratio
+  } else if (currentRatio < targetRatio * 0.6) {
+    // Too tall: crop top/bottom — only if significantly off
     const newH = Math.round(contentW / targetRatio);
     const cropY = Math.round((contentH - newH) / 2);
     spineImage = spineImage.extract({
