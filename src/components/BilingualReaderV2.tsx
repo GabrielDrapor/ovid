@@ -97,6 +97,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
 }) => {
   const contentRef = useRef<HTMLDivElement>(null);
   const [showOriginal, setShowOriginal] = useState(true);
+  const showOriginalRef = useRef(showOriginal);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isChaptersOpen, setIsChaptersOpen] = useState(false);
   const [paragraphSpacing, setParagraphSpacing] = useState(0);
@@ -180,7 +181,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
       });
 
       // Set initial state and return early
-      updateAllElements(true);
+      updateAllElements(showOriginalRef.current);
       return;
     }
 
@@ -258,8 +259,8 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
       }
     }
 
-    // Always initialize showing original; the separate showOriginal useEffect handles state sync
-    updateAllElements(true);
+    // Initialize elements to match the current showOriginal state
+    updateAllElements(showOriginalRef.current);
   }, [translations]);
 
   /**
@@ -338,6 +339,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
 
   // Update text when showOriginal changes
   useEffect(() => {
+    showOriginalRef.current = showOriginal;
     updateAllElements(showOriginal);
   }, [showOriginal, updateAllElements]);
 
@@ -761,7 +763,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
             {isTypographyOpen && (
               <div className="fab-typography-panel">
                 <div className="fab-typo-row">
-                  <span className="fab-typo-label">Paragraph</span>
+                  <span className="fab-typo-label">Paragraph Gap</span>
                   <div className="fab-menu-controls">
                     <button className="fab-control-btn" onClick={() => adjustParagraphSpacing(-5)}>-</button>
                     <span className="fab-typo-value">{paragraphSpacing}</span>
@@ -777,7 +779,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
                   </div>
                 </div>
                 <div className="fab-typo-row">
-                  <span className="fab-typo-label">Letter</span>
+                  <span className="fab-typo-label">Letter Spacing</span>
                   <div className="fab-menu-controls">
                     <button className="fab-control-btn" onClick={() => adjustLetterSpacing(-0.01)}>-</button>
                     <span className="fab-typo-value">{letterSpacing.toFixed(2)}</span>
@@ -785,7 +787,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
                   </div>
                 </div>
                 <div className="fab-typo-row">
-                  <span className="fab-typo-label">Word</span>
+                  <span className="fab-typo-label">Word Spacing</span>
                   <div className="fab-menu-controls">
                     <button className="fab-control-btn" onClick={() => adjustWordSpacing(-0.01)}>-</button>
                     <span className="fab-typo-value">{wordSpacing.toFixed(2)}</span>
@@ -793,7 +795,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
                   </div>
                 </div>
                 <div className="fab-typo-row">
-                  <span className="fab-typo-label">Weight</span>
+                  <span className="fab-typo-label">Font Weight</span>
                   <div className="fab-menu-controls">
                     <button className="fab-control-btn" onClick={() => adjustFontWeight(-10)}>-</button>
                     <span className="fab-typo-value">{fontWeight}</span>

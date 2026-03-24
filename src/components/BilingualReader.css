@@ -230,7 +230,7 @@
   font-size: 13px;
   color: #555;
   flex-shrink: 0;
-  min-width: 70px;
+  min-width: 100px;
 }
 
 .fab-typo-value {
