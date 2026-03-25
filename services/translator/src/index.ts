@@ -511,12 +511,27 @@ function slugify(text: string): string {
  * Generate cover and spine for a book, upload to R2, post-process, and update D1.
  * Full logic ported from src/worker/cover-generator.ts.
  */
+/**
+ * Normalize "Last, First" author format to "First Last" for display on covers/spines.
+ */
+function normalizeAuthorName(author: string): string {
+  // Handle "Last, First" or "Last, First Middle" format
+  const parts = author.split(',').map(s => s.trim());
+  if (parts.length === 2 && parts[0] && parts[1]) {
+    return `${parts[1]} ${parts[0]}`;
+  }
+  return author;
+}
+
 async function generateCoversForBook(
   geminiApiKey: string,
   title: string,
   author: string,
   bookUuid: string,
 ): Promise<void> {
+  // Normalize author name from catalog format ("Allen, David") to natural ("David Allen")
+  author = normalizeAuthorName(author);
+
   const GEMINI_MODEL = 'gemini-2.5-flash-image';
   const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${geminiApiKey}`;
 
