@@ -246,10 +246,80 @@ export async function processSpine(imageBuffer: Buffer): Promise<Buffer> {
 
 /**
  * Resize cover to target dimensions (437×606).
- * Uses 'cover' to crop-to-fill without distortion.
+ * First trims any uniform-color border (white, green, etc.) from Gemini output,
+ * then uses 'cover' to crop-to-fill without distortion.
  */
 export async function processCover(imageBuffer: Buffer): Promise<Buffer> {
-  return sharp(imageBuffer)
+  const metadata = await sharp(imageBuffer).metadata();
+  const width = metadata.width || 1024;
+  const height = metadata.height || 1024;
+  const channels = metadata.channels || 3;
+  const raw = await sharp(imageBuffer).raw().toBuffer();
+
+  // Find content bounds by scanning from each edge inward.
+  // A pixel is "background" if it's white-ish (>240 all channels),
+  // green-ish (g > r+20 && g > b+20), or very uniform with its neighbors.
+  const isBg = (x: number, y: number): boolean => {
+    const i = (y * width + x) * channels;
+    const r = raw[i], g = raw[i + 1], b = raw[i + 2];
+    // White/near-white
+    if (r > 240 && g > 240 && b > 240) return true;
+    // Green background (Gemini's green screen)
+    if (g > r + 20 && g > b + 20) return true;
+    return false;
+  };
+
+  // Scan columns from left/right, rows from top/bottom
+  // Use middle 60% of the perpendicular axis for sampling
+  const sampleYs = Array.from({ length: 20 }, (_, i) =>
+    Math.floor(height * 0.2) + Math.floor((height * 0.6 * i) / 19)
+  );
+  const sampleXs = Array.from({ length: 20 }, (_, i) =>
+    Math.floor(width * 0.2) + Math.floor((width * 0.6 * i) / 19)
+  );
+
+  let left = 0, right = width - 1, top = 0, bottom = height - 1;
+
+  // Scan left
+  for (let x = 0; x < Math.floor(width * 0.3); x++) {
+    const bgCount = sampleYs.filter(y => isBg(x, y)).length;
+    if (bgCount > sampleYs.length * 0.8) left = x + 1;
+    else break;
+  }
+  // Scan right
+  for (let x = width - 1; x > Math.floor(width * 0.7); x--) {
+    const bgCount = sampleYs.filter(y => isBg(x, y)).length;
+    if (bgCount > sampleYs.length * 0.8) right = x - 1;
+    else break;
+  }
+  // Scan top
+  for (let y = 0; y < Math.floor(height * 0.3); y++) {
+    const bgCount = sampleXs.filter(x => isBg(x, y)).length;
+    if (bgCount > sampleXs.length * 0.8) top = y + 1;
+    else break;
+  }
+  // Scan bottom
+  for (let y = height - 1; y > Math.floor(height * 0.7); y--) {
+    const bgCount = sampleXs.filter(x => isBg(x, y)).length;
+    if (bgCount > sampleXs.length * 0.8) bottom = y - 1;
+    else break;
+  }
+
+  const cropW = right - left + 1;
+  const cropH = bottom - top + 1;
+
+  let cropped: Buffer;
+  if (cropW < width * 0.95 || cropH < height * 0.95) {
+    // Significant border detected — crop it
+    cropped = await sharp(imageBuffer)
+      .extract({ left, top, width: cropW, height: cropH })
+      .png()
+      .toBuffer();
+  } else {
+    cropped = imageBuffer;
+  }
+
+  return sharp(cropped)
     .resize(COVER_WIDTH, COVER_HEIGHT, { fit: 'cover', position: 'centre' })
     .png()
     .toBuffer();
