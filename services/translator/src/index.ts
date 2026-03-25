@@ -560,9 +560,10 @@ Requirements:
     const coverBuf = await generateImageWithRetry(GEMINI_API_URL, coverPrompt);
 
     // --- Generate spine ---
-    // Generate a complete book spine image directly — no green screen, no post-processing.
-    // The image should be the spine itself, filling the entire canvas.
-    const spinePrompt = `Generate a book spine image. The ENTIRE image IS the spine — there is NO background, NO border, NO frame around it. The spine design must fill every pixel of the image from edge to edge.
+    // Generate a HORIZONTAL banner that will be rotated 90° CW in post-processing.
+    // Gemini can't generate rotated text, so we ask for a horizontal design
+    // and rotate it ourselves to create a vertical book spine.
+    const spinePrompt = `Generate a wide horizontal banner image for a book. The ENTIRE image IS the design — no background, no border, no frame. The design fills every pixel edge-to-edge.
 
 Book: "${title}" by ${author}
 Visual style: ${style.name}
@@ -570,14 +571,15 @@ Color palette: ${style.palette}
 Typography: ${style.textStyle}
 
 CRITICAL REQUIREMENTS:
-- The image IS the spine. The spine's color/texture/design fills the ENTIRE canvas edge-to-edge. No margins, no borders, no background color showing.
-- Text MUST be rotated 90° clockwise — like a real physical book spine where you tilt your head right to read it
-- Title "${title.toUpperCase()}" as a single rotated line, reading top-to-bottom
-- Author "${author.toUpperCase()}" as a smaller rotated line below the title
-- A small decorative motif (optional)
+- This is a HORIZONTAL LANDSCAPE image (wider than tall)
+- The design/color/texture fills the ENTIRE canvas edge-to-edge with NO margins or borders
+- Title "${title.toUpperCase()}" as a single horizontal line in LARGE BOLD capitals, centered
+- Author "${author.toUpperCase()}" in smaller text to the right of the title
+- A small decorative motif (optional, on the left side)
 - Keep decoration MINIMAL — prioritize text legibility
-- The spine's own background color/texture must extend to ALL edges of the image
-- Sharp, clean design. No 3D effects, no shadows, no page edges.`;
+- The background color/texture of the design extends to ALL edges
+- Sharp, clean design. No 3D effects, no shadows.
+- This will be rotated 90° to become a vertical book spine, so design accordingly`;
 
     const spineBuf = await generateImageWithRetry(GEMINI_API_URL, spinePrompt);
 
