@@ -238,19 +238,10 @@ export async function processSpine(imageBuffer: Buffer): Promise<Buffer> {
     trimmed = imageBuffer;
   }
 
-  // Detect orientation — if landscape (wider than tall), rotate 90° CW
-  // so horizontal text becomes vertical like a real book spine
-  const trimMeta = await sharp(trimmed).metadata();
-  const trimW = trimMeta.width || 1;
-  const trimH = trimMeta.height || 1;
-
-  let oriented: Buffer;
-  if (trimW > trimH * 1.2) {
-    // Landscape: rotate 90° clockwise
-    oriented = await sharp(trimmed).rotate(90).png().toBuffer();
-  } else {
-    oriented = trimmed;
-  }
+  // Always rotate 90° CW — the prompt generates horizontal text,
+  // rotation makes it vertical like a real book spine.
+  // This is unconditional because the prompt explicitly asks for horizontal text.
+  const oriented = await sharp(trimmed).rotate(90).png().toBuffer();
 
   // Resize to target using 'cover' + centre — fills the full area, crops excess
   return sharp(oriented)
