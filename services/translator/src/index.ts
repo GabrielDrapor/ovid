@@ -566,8 +566,9 @@ Design for "${title}" by ${author}:
 - Visual style: ${style.name}
 - Color palette: ${style.palette}
 - Typography: ${style.textStyle}
-- Title "${title.toUpperCase()}" running vertically in LARGE BOLD capitals — must be readable at thumbnail size
-- Author "${author.toUpperCase()}" at the bottom, also reasonably large
+- Title "${title.toUpperCase()}" ROTATED 90 DEGREES CLOCKWISE — the text should be printed as a single horizontal line, then the entire line rotated 90° so it reads from top to bottom when you tilt your head right. This is how real book spines work.
+- Author "${author.toUpperCase()}" also rotated 90° clockwise, positioned below the title
+- DO NOT stack words horizontally one per line. The text must be a single rotated line, like a real physical book spine.
 - A small decorative motif at the top
 - Keep decoration MINIMAL — prioritize text legibility
 - The rectangle should be about 1/6 the width of the total image
