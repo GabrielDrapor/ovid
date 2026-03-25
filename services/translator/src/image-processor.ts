@@ -223,13 +223,22 @@ export async function processSpine(imageBuffer: Buffer): Promise<Buffer> {
     raw: { width: contentW, height: contentH, channels: channels as 3 | 4 },
   });
 
-  // Resize to exact target dimensions using 'fill' (stretch).
-  // The spine rectangle from Gemini is typically wider than the 114:607 target,
-  // so this stretches it taller. The distortion is minimal and acceptable —
-  // far better than padding artifacts or text clipping from contain/cover.
+  // The spine from Gemini may be horizontal (landscape) — we asked for horizontal text
+  // that we'll rotate in post-processing. Detect orientation and rotate if needed.
   const step1Buf = await spineImage.png().toBuffer();
+  const step1Meta = await sharp(step1Buf).metadata();
+  const isLandscape = (step1Meta.width || 0) > (step1Meta.height || 0);
 
-  return sharp(step1Buf)
+  let oriented: Buffer;
+  if (isLandscape) {
+    // Rotate 90° clockwise so horizontal text becomes vertical (like real book spines)
+    oriented = await sharp(step1Buf).rotate(90).png().toBuffer();
+  } else {
+    oriented = step1Buf;
+  }
+
+  // Resize to target using 'fill' (stretch to exact dimensions).
+  return sharp(oriented)
     .resize(SPINE_WIDTH, SPINE_HEIGHT, { fit: 'fill' })
     .png()
     .toBuffer();
