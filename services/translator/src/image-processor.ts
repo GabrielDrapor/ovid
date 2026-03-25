@@ -218,9 +218,21 @@ export async function processSpine(imageBuffer: Buffer): Promise<Buffer> {
   // Despill green fringe (edge-only to preserve interior colors)
   const despilled = despillGreen(cropped, channels, contentW, contentH);
 
+  // Trim green edge residue: crop inward by 2% on each side.
+  // findContentBounds sometimes includes green transition pixels at the boundary.
+  const trimPx = Math.max(2, Math.round(contentW * 0.02));
+  const trimTop = Math.max(2, Math.round(contentH * 0.01));
+  const trimmedW = contentW - trimPx * 2;
+  const trimmedH = contentH - trimTop * 2;
+
   // Reconstruct image from raw pixels
   let spineImage = sharp(despilled, {
     raw: { width: contentW, height: contentH, channels: channels as 3 | 4 },
+  }).extract({
+    left: trimPx,
+    top: trimTop,
+    width: Math.max(1, trimmedW),
+    height: Math.max(1, trimmedH),
   });
 
   // The spine from Gemini may be horizontal (landscape) — we asked for horizontal text
