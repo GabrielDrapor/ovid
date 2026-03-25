@@ -186,104 +186,61 @@ function despillGreen(pixels: Buffer, channels: number, width: number, height: n
  * crop background → despill → resize to 114×607.
  */
 export async function processSpine(imageBuffer: Buffer): Promise<Buffer> {
-  const image = sharp(imageBuffer);
-  const metadata = await image.metadata();
-  const { width, height, channels } = metadata;
+  // No more green-screen extraction — the prompt now generates the spine directly
+  // filling the entire canvas. Just trim any accidental white/green border and resize.
 
-  if (!width || !height || !channels) {
-    throw new Error('Cannot read image metadata');
+  const metadata = await sharp(imageBuffer).metadata();
+  const width = metadata.width || 1024;
+  const height = metadata.height || 1024;
+  const channels = metadata.channels || 3;
+
+  // Trim any uniform-color border (white, green) that Gemini might still add
+  const raw = await sharp(imageBuffer).raw().toBuffer();
+  const isBg = (x: number, y: number): boolean => {
+    const idx = (y * width + x) * channels;
+    const r = raw[idx], g = raw[idx + 1], b = raw[idx + 2];
+    if (r > 240 && g > 240 && b > 240) return true;
+    if (g > 60 && (g - r) > 15 && (g - b) > 15) return true;
+    return false;
+  };
+
+  const sampleYs = Array.from({ length: 30 }, (_, i) =>
+    Math.floor(height * 0.1) + Math.floor((height * 0.8 * i) / 29)
+  );
+  const sampleXs = Array.from({ length: 30 }, (_, i) =>
+    Math.floor(width * 0.1) + Math.floor((width * 0.8 * i) / 29)
+  );
+
+  let left = 0, right = width - 1, top = 0, bottom = height - 1;
+  for (let x = 0; x < Math.floor(width * 0.4); x++) {
+    if (sampleYs.filter(y => isBg(x, y)).length > sampleYs.length * 0.7) left = x + 1; else break;
+  }
+  for (let x = width - 1; x > Math.floor(width * 0.6); x--) {
+    if (sampleYs.filter(y => isBg(x, y)).length > sampleYs.length * 0.7) right = x - 1; else break;
+  }
+  for (let y = 0; y < Math.floor(height * 0.4); y++) {
+    if (sampleXs.filter(x => isBg(x, y)).length > sampleXs.length * 0.7) top = y + 1; else break;
+  }
+  for (let y = height - 1; y > Math.floor(height * 0.6); y--) {
+    if (sampleXs.filter(x => isBg(x, y)).length > sampleXs.length * 0.7) bottom = y - 1; else break;
   }
 
-  const rawPixels = await image.raw().toBuffer();
+  const cropW = Math.max(1, right - left + 1);
+  const cropH = Math.max(1, bottom - top + 1);
 
-  // Find content bounds — try green detection first, fall back to general bg detection
-  let bounds = findContentBounds(rawPixels, width, height, channels);
-  let contentW = bounds.right - bounds.left + 1;
-  let contentH = bounds.bottom - bounds.top + 1;
-
-  // If findContentBounds returned nearly the full image, it likely failed.
-  // Fall back to the more robust bg-scanning approach (same as processCover).
-  if (contentW > width * 0.95 && contentH > height * 0.95) {
-    const isBg = (x: number, y: number): boolean => {
-      const idx = (y * width + x) * channels;
-      const r = rawPixels[idx], g = rawPixels[idx + 1], b = rawPixels[idx + 2];
-      if (r > 240 && g > 240 && b > 240) return true; // white
-      if (g > 60 && (g - r) > 15 && (g - b) > 15) return true; // green (loose)
-      return false;
-    };
-
-    const sampleYs = Array.from({ length: 30 }, (_, i) =>
-      Math.floor(height * 0.1) + Math.floor((height * 0.8 * i) / 29)
-    );
-    const sampleXs = Array.from({ length: 30 }, (_, i) =>
-      Math.floor(width * 0.1) + Math.floor((width * 0.8 * i) / 29)
-    );
-
-    let left = 0, right = width - 1, top = 0, bottom = height - 1;
-    for (let x = 0; x < Math.floor(width * 0.4); x++) {
-      const bgCount = sampleYs.filter(y => isBg(x, y)).length;
-      if (bgCount > sampleYs.length * 0.7) left = x + 1; else break;
-    }
-    for (let x = width - 1; x > Math.floor(width * 0.6); x--) {
-      const bgCount = sampleYs.filter(y => isBg(x, y)).length;
-      if (bgCount > sampleYs.length * 0.7) right = x - 1; else break;
-    }
-    for (let y = 0; y < Math.floor(height * 0.4); y++) {
-      const bgCount = sampleXs.filter(x => isBg(x, y)).length;
-      if (bgCount > sampleXs.length * 0.7) top = y + 1; else break;
-    }
-    for (let y = height - 1; y > Math.floor(height * 0.6); y--) {
-      const bgCount = sampleXs.filter(x => isBg(x, y)).length;
-      if (bgCount > sampleXs.length * 0.7) bottom = y - 1; else break;
-    }
-
-    bounds = { left, right, top, bottom };
-    contentW = right - left + 1;
-    contentH = bottom - top + 1;
-  }
-
-  if (contentW <= 0 || contentH <= 0) {
-    throw new Error(`Invalid content bounds: ${JSON.stringify(bounds)}`);
-  }
-
-  // Extract the content region + trim 2% inward to remove boundary artifacts
-  const trimPxX = Math.max(2, Math.round(contentW * 0.02));
-  const trimPxY = Math.max(2, Math.round(contentH * 0.02));
-  const extractLeft = Math.min(bounds.left + trimPxX, bounds.left + contentW - 1);
-  const extractTop = Math.min(bounds.top + trimPxY, bounds.top + contentH - 1);
-  const extractW = Math.max(1, contentW - trimPxX * 2);
-  const extractH = Math.max(1, contentH - trimPxY * 2);
-
-  const cropped = await sharp(imageBuffer)
-    .extract({ left: extractLeft, top: extractTop, width: extractW, height: extractH })
-    .raw()
-    .toBuffer();
-
-  // Despill green fringe (edge-only to preserve interior colors)
-  const despilled = despillGreen(cropped, channels, extractW, extractH);
-
-  // Reconstruct image from raw pixels
-  let spineImage = sharp(despilled, {
-    raw: { width: extractW, height: extractH, channels: channels as 3 | 4 },
-  });
-
-  // The spine from Gemini may be horizontal (landscape) — we asked for horizontal text
-  // that we'll rotate in post-processing. Detect orientation and rotate if needed.
-  const step1Buf = await spineImage.png().toBuffer();
-  const step1Meta = await sharp(step1Buf).metadata();
-  const isLandscape = (step1Meta.width || 0) > (step1Meta.height || 0);
-
-  let oriented: Buffer;
-  if (isLandscape) {
-    // Rotate 90° clockwise so horizontal text becomes vertical (like real book spines)
-    oriented = await sharp(step1Buf).rotate(90).png().toBuffer();
+  let trimmed: Buffer;
+  if (cropW < width * 0.95 || cropH < height * 0.95) {
+    trimmed = await sharp(imageBuffer)
+      .extract({ left, top, width: cropW, height: cropH })
+      .png()
+      .toBuffer();
   } else {
-    oriented = step1Buf;
+    trimmed = imageBuffer;
   }
 
-  // Resize to target using 'fill' (stretch to exact dimensions).
-  return sharp(oriented)
-    .resize(SPINE_WIDTH, SPINE_HEIGHT, { fit: 'fill' })
+  // Resize to target using 'cover' + centre — fills the full area, crops excess
+  return sharp(trimmed)
+    .resize(SPINE_WIDTH, SPINE_HEIGHT, { fit: 'cover', position: 'centre' })
     .png()
     .toBuffer();
 }

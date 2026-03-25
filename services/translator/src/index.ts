@@ -559,23 +559,25 @@ Requirements:
 
     const coverBuf = await generateImageWithRetry(GEMINI_API_URL, coverPrompt);
 
-    // --- Generate spine on green screen ---
-    const spinePrompt = `A flat front-facing book spine on a PURE BRIGHT GREEN (#00FF00) background. The background MUST be exactly #00FF00 pure green, not yellow-green or olive. The spine is a narrow vertical rectangle, centered, with solid #00FF00 green space on all sides.
+    // --- Generate spine ---
+    // Generate a complete book spine image directly — no green screen, no post-processing.
+    // The image should be the spine itself, filling the entire canvas.
+    const spinePrompt = `Generate a book spine image. The ENTIRE image IS the spine — there is NO background, NO border, NO frame around it. The spine design must fill every pixel of the image from edge to edge.
 
-Design for "${title}" by ${author}:
-- Visual style: ${style.name}
-- Color palette: ${style.palette}
-- Typography: ${style.textStyle}
-- Title "${title.toUpperCase()}" written as a SINGLE HORIZONTAL LINE from left to right in LARGE BOLD capitals
-- Author "${author.toUpperCase()}" written as a single horizontal line, to the right of the title, separated by a decorative element
-- The spine rectangle should be oriented HORIZONTALLY (landscape) — wide and short, like a banner
-- ALL text on one or two horizontal lines. No stacking words vertically.
-- The final image will be rotated 90° in post-processing to create the vertical spine
-- A small decorative motif at the top
+Book: "${title}" by ${author}
+Visual style: ${style.name}
+Color palette: ${style.palette}
+Typography: ${style.textStyle}
+
+CRITICAL REQUIREMENTS:
+- The image IS the spine. The spine's color/texture/design fills the ENTIRE canvas edge-to-edge. No margins, no borders, no background color showing.
+- Text MUST be rotated 90° clockwise — like a real physical book spine where you tilt your head right to read it
+- Title "${title.toUpperCase()}" as a single rotated line, reading top-to-bottom
+- Author "${author.toUpperCase()}" as a smaller rotated line below the title
+- A small decorative motif (optional)
 - Keep decoration MINIMAL — prioritize text legibility
-- The rectangle should be about 1/6 the width of the total image
-- Sharp edges, no shadows, no 3D effects, no page edges visible
-- CRITICAL: All text and decorative elements must be FULLY CONTAINED within the spine rectangle. Leave at least 15% padding on left and right sides, and 5% on top and bottom. NO text or design elements should touch or come close to the edges of the spine rectangle. Scale text DOWN if needed to ensure generous margins.`;
+- The spine's own background color/texture must extend to ALL edges of the image
+- Sharp, clean design. No 3D effects, no shadows, no page edges.`;
 
     const spineBuf = await generateImageWithRetry(GEMINI_API_URL, spinePrompt);
 
