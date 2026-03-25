@@ -196,43 +196,75 @@ export async function processSpine(imageBuffer: Buffer): Promise<Buffer> {
 
   const rawPixels = await image.raw().toBuffer();
 
-  const bounds = findContentBounds(rawPixels, width, height, channels);
-  const contentW = bounds.right - bounds.left + 1;
-  const contentH = bounds.bottom - bounds.top + 1;
+  // Find content bounds — try green detection first, fall back to general bg detection
+  let bounds = findContentBounds(rawPixels, width, height, channels);
+  let contentW = bounds.right - bounds.left + 1;
+  let contentH = bounds.bottom - bounds.top + 1;
+
+  // If findContentBounds returned nearly the full image, it likely failed.
+  // Fall back to the more robust bg-scanning approach (same as processCover).
+  if (contentW > width * 0.95 && contentH > height * 0.95) {
+    const isBg = (x: number, y: number): boolean => {
+      const idx = (y * width + x) * channels;
+      const r = rawPixels[idx], g = rawPixels[idx + 1], b = rawPixels[idx + 2];
+      if (r > 240 && g > 240 && b > 240) return true; // white
+      if (g > 60 && (g - r) > 15 && (g - b) > 15) return true; // green (loose)
+      return false;
+    };
+
+    const sampleYs = Array.from({ length: 30 }, (_, i) =>
+      Math.floor(height * 0.1) + Math.floor((height * 0.8 * i) / 29)
+    );
+    const sampleXs = Array.from({ length: 30 }, (_, i) =>
+      Math.floor(width * 0.1) + Math.floor((width * 0.8 * i) / 29)
+    );
+
+    let left = 0, right = width - 1, top = 0, bottom = height - 1;
+    for (let x = 0; x < Math.floor(width * 0.4); x++) {
+      const bgCount = sampleYs.filter(y => isBg(x, y)).length;
+      if (bgCount > sampleYs.length * 0.7) left = x + 1; else break;
+    }
+    for (let x = width - 1; x > Math.floor(width * 0.6); x--) {
+      const bgCount = sampleYs.filter(y => isBg(x, y)).length;
+      if (bgCount > sampleYs.length * 0.7) right = x - 1; else break;
+    }
+    for (let y = 0; y < Math.floor(height * 0.4); y++) {
+      const bgCount = sampleXs.filter(x => isBg(x, y)).length;
+      if (bgCount > sampleXs.length * 0.7) top = y + 1; else break;
+    }
+    for (let y = height - 1; y > Math.floor(height * 0.6); y--) {
+      const bgCount = sampleXs.filter(x => isBg(x, y)).length;
+      if (bgCount > sampleXs.length * 0.7) bottom = y - 1; else break;
+    }
+
+    bounds = { left, right, top, bottom };
+    contentW = right - left + 1;
+    contentH = bottom - top + 1;
+  }
 
   if (contentW <= 0 || contentH <= 0) {
     throw new Error(`Invalid content bounds: ${JSON.stringify(bounds)}`);
   }
 
-  // Extract the content region
+  // Extract the content region + trim 2% inward to remove boundary artifacts
+  const trimPxX = Math.max(2, Math.round(contentW * 0.02));
+  const trimPxY = Math.max(2, Math.round(contentH * 0.02));
+  const extractLeft = Math.min(bounds.left + trimPxX, bounds.left + contentW - 1);
+  const extractTop = Math.min(bounds.top + trimPxY, bounds.top + contentH - 1);
+  const extractW = Math.max(1, contentW - trimPxX * 2);
+  const extractH = Math.max(1, contentH - trimPxY * 2);
+
   const cropped = await sharp(imageBuffer)
-    .extract({
-      left: bounds.left,
-      top: bounds.top,
-      width: contentW,
-      height: contentH,
-    })
+    .extract({ left: extractLeft, top: extractTop, width: extractW, height: extractH })
     .raw()
     .toBuffer();
 
   // Despill green fringe (edge-only to preserve interior colors)
-  const despilled = despillGreen(cropped, channels, contentW, contentH);
-
-  // Trim green edge residue: crop inward by 2% on each side.
-  // findContentBounds sometimes includes green transition pixels at the boundary.
-  const trimPx = Math.max(2, Math.round(contentW * 0.02));
-  const trimTop = Math.max(2, Math.round(contentH * 0.01));
-  const trimmedW = contentW - trimPx * 2;
-  const trimmedH = contentH - trimTop * 2;
+  const despilled = despillGreen(cropped, channels, extractW, extractH);
 
   // Reconstruct image from raw pixels
   let spineImage = sharp(despilled, {
-    raw: { width: contentW, height: contentH, channels: channels as 3 | 4 },
-  }).extract({
-    left: trimPx,
-    top: trimTop,
-    width: Math.max(1, trimmedW),
-    height: Math.max(1, trimmedH),
+    raw: { width: extractW, height: extractH, channels: channels as 3 | 4 },
   });
 
   // The spine from Gemini may be horizontal (landscape) — we asked for horizontal text
