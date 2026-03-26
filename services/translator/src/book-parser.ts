@@ -253,6 +253,100 @@ function parseHTMLChapter(
   return { title: chapterTitle, originalTitle: chapterTitle, rawHtml, textNodes };
 }
 
+// ---- TOC parsing ----
+
+interface TocEntry {
+  title: string;
+  src: string; // file path (without fragment)
+  fragment: string | null; // fragment identifier after #
+}
+
+/**
+ * Parse toc.ncx to extract TOC entries.
+ */
+function parseNCX(ncxContent: string): TocEntry[] {
+  const doc = new DOMParser().parseFromString(ncxContent, 'text/xml');
+  const entries: TocEntry[] = [];
+
+  const navPoints = doc.getElementsByTagName('navPoint');
+  for (let i = 0; i < navPoints.length; i++) {
+    const navPoint = navPoints[i];
+
+    // Get navLabel > text
+    const navLabels = navPoint.getElementsByTagName('navLabel');
+    if (!navLabels.length) continue;
+    const textEl = navLabels[0].getElementsByTagName('text')[0];
+    if (!textEl?.textContent?.trim()) continue;
+    const title = textEl.textContent.trim();
+
+    // Get content@src
+    const contentEl = navPoint.getElementsByTagName('content')[0];
+    if (!contentEl) continue;
+    const srcAttr = contentEl.getAttribute('src');
+    if (!srcAttr) continue;
+
+    const [src, fragment] = srcAttr.split('#', 2);
+    entries.push({ title, src, fragment: fragment || null });
+  }
+
+  return entries;
+}
+
+/**
+ * Parse nav.xhtml to extract TOC entries.
+ */
+function parseNavXhtml(navContent: string): TocEntry[] {
+  const doc = new DOMParser().parseFromString(navContent, 'application/xhtml+xml');
+  const entries: TocEntry[] = [];
+
+  // Find nav element with epub:type="toc"
+  const navElements = doc.getElementsByTagName('nav');
+  let tocNav: any = null;
+  for (let i = 0; i < navElements.length; i++) {
+    const nav = navElements[i];
+    // Check both epub:type and plain type attribute
+    const epubType = nav.getAttribute('epub:type') || nav.getAttributeNS('http://www.idpf.org/2007/ops', 'type');
+    if (epubType === 'toc') {
+      tocNav = nav;
+      break;
+    }
+  }
+  if (!tocNav) {
+    // Fallback: use first nav element
+    if (navElements.length > 0) tocNav = navElements[0];
+    else return entries;
+  }
+
+  // Walk ol > li > a elements
+  const links = tocNav.getElementsByTagName('a');
+  for (let i = 0; i < links.length; i++) {
+    const a = links[i];
+    const href = a.getAttribute('href');
+    const title = getFullTextContent(a).replace(/\s+/g, ' ').trim();
+    if (!href || !title) continue;
+
+    const [src, fragment] = href.split('#', 2);
+    entries.push({ title, src, fragment: fragment || null });
+  }
+
+  return entries;
+}
+
+/**
+ * Build a map from spine file path (without fragment) to TOC entry title.
+ * If multiple TOC entries point to the same file, use the first one.
+ */
+function buildTocTitleMap(tocEntries: TocEntry[], basePath: string): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const entry of tocEntries) {
+    const fullPath = entry.src.startsWith('/') ? entry.src.substring(1) : basePath + entry.src;
+    if (!map.has(fullPath)) {
+      map.set(fullPath, entry.title);
+    }
+  }
+  return map;
+}
+
 // ---- Public API ----
 
 /**
@@ -269,10 +363,12 @@ export async function parseEPUB(buffer: ArrayBuffer | Buffer): Promise<BookDataV
   let htmlFiles: string[] = [];
   let globalStyles = '';
   let imageManifestEntries: { href: string; mediaType: string }[] = [];
+  let tocTitleMap = new Map<string, string>();
 
   if (opfFile) {
     const opfContent = await zipContent.files[opfFile].async('text');
     const doc = new DOMParser().parseFromString(opfContent, 'text/xml');
+    const basePath = opfFile.substring(0, opfFile.lastIndexOf('/') + 1);
 
     const titleElement = doc.getElementsByTagName('dc:title')[0];
     const authorElement = doc.getElementsByTagName('dc:creator')[0];
@@ -283,16 +379,29 @@ export async function parseEPUB(buffer: ArrayBuffer | Buffer): Promise<BookDataV
     const manifestMap = new Map<string, string>();
     imageManifestEntries = [];
 
+    let ncxHref: string | null = null;
+    let navHref: string | null = null;
+
     for (let i = 0; i < manifestElements.length; i++) {
       const item = manifestElements[i];
       const mediaType = item.getAttribute('media-type');
       const href = item.getAttribute('href');
       const id = item.getAttribute('id');
+      const properties = item.getAttribute('properties');
+
+      // Detect NCX
+      if (mediaType === 'application/x-dtbncx+xml' && href) {
+        ncxHref = href;
+      }
+
+      // Detect nav.xhtml
+      if (properties && properties.split(/\s+/).includes('nav') && href) {
+        navHref = href;
+      }
 
       // CSS
       if (mediaType === 'text/css' && href) {
         try {
-          const basePath = opfFile.substring(0, opfFile.lastIndexOf('/') + 1);
           const cssPath = basePath + href;
           const cssFile = zipContent.files[cssPath];
           if (cssFile) {
@@ -313,13 +422,38 @@ export async function parseEPUB(buffer: ArrayBuffer | Buffer): Promise<BookDataV
       }
     }
 
+    // Parse TOC: prefer nav.xhtml, fall back to NCX
+    let tocEntries: TocEntry[] = [];
+    if (navHref) {
+      const navPath = navHref.startsWith('/') ? navHref.substring(1) : basePath + navHref;
+      const navFile = zipContent.files[navPath];
+      if (navFile) {
+        try {
+          const navContent = await navFile.async('text');
+          tocEntries = parseNavXhtml(navContent);
+        } catch { /* skip */ }
+      }
+    }
+    if (tocEntries.length === 0 && ncxHref) {
+      const ncxPath = ncxHref.startsWith('/') ? ncxHref.substring(1) : basePath + ncxHref;
+      const ncxFile = zipContent.files[ncxPath];
+      if (ncxFile) {
+        try {
+          const ncxContent = await ncxFile.async('text');
+          tocEntries = parseNCX(ncxContent);
+        } catch { /* skip */ }
+      }
+    }
+    if (tocEntries.length > 0) {
+      tocTitleMap = buildTocTitleMap(tocEntries, basePath);
+    }
+
     // Spine order
     const spineItems = doc.getElementsByTagName('itemref');
     for (let i = 0; i < spineItems.length; i++) {
       const idref = spineItems[i].getAttribute('idref');
       if (idref && manifestMap.has(idref)) {
         const href = manifestMap.get(idref)!;
-        const basePath = opfFile.substring(0, opfFile.lastIndexOf('/') + 1);
         const fullPath = href.startsWith('/') ? href.substring(1) : basePath + href;
         htmlFiles.push(fullPath);
       }
@@ -346,6 +480,12 @@ export async function parseEPUB(buffer: ArrayBuffer | Buffer): Promise<BookDataV
     }
 
     if (chapterData && chapterData.textNodes.length > 0) {
+      // Override title with TOC entry if available
+      const tocTitle = tocTitleMap.get(htmlPath);
+      if (tocTitle) {
+        chapterData.title = tocTitle;
+        chapterData.originalTitle = tocTitle;
+      }
       chapters.push({ ...chapterData, number: chapterNumber++ });
     }
   }
