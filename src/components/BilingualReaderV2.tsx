@@ -105,6 +105,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
   const [letterSpacing, setLetterSpacing] = useState(-0.03);
   const [wordSpacing, setWordSpacing] = useState(0);
   const [fontWeight, setFontWeight] = useState(450);
+  const [fontSize, setFontSize] = useState(19);
   const [isMarkingComplete, setIsMarkingComplete] = useState(false);
   const [markCompleteError, setMarkCompleteError] = useState<string | null>(null);
   const [isTypographyOpen, setIsTypographyOpen] = useState(false);
@@ -502,6 +503,19 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
     setFontWeight((prev) => Math.max(200, Math.min(900, prev + delta)));
   };
 
+  const adjustFontSize = (delta: number) => {
+    setFontSize((prev) => Math.max(14, Math.min(24, prev + delta)));
+  };
+
+  const resetTypography = () => {
+    setFontSize(19);
+    setParagraphSpacing(0);
+    setLineHeight(1.6);
+    setLetterSpacing(-0.03);
+    setWordSpacing(0);
+    setFontWeight(450);
+  };
+
   const goToPreviousChapter = () => {
     if (currentChapter > 1 && !isLoading) {
       onLoadChapter(currentChapter - 1);
@@ -536,7 +550,6 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
           font-optical-sizing: auto;
         }
         .reader-content-v2 {
-          font-size: 19px;
           line-height: 1.8;
           text-align: justify;
           -webkit-hyphens: auto;
@@ -546,7 +559,6 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
         }
         @media (max-width: 768px) {
           .reader-content-v2 {
-            font-size: 17px;
             text-align: left;
           }
         }
@@ -588,6 +600,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
       <main
         className="reader-content reader-content-v2"
         style={{
+          fontSize: `${fontSize}px`,
           lineHeight: lineHeight,
           letterSpacing: `${letterSpacing}em`,
           wordSpacing: `${wordSpacing}em`,
@@ -771,6 +784,14 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
             {isTypographyOpen && (
               <div className="fab-typography-panel">
                 <div className="fab-typo-row">
+                  <span className="fab-typo-label">Font Size</span>
+                  <div className="fab-menu-controls">
+                    <button className="fab-control-btn" onClick={() => adjustFontSize(-1)}>-</button>
+                    <span className="fab-typo-value">{fontSize}</span>
+                    <button className="fab-control-btn" onClick={() => adjustFontSize(1)}>+</button>
+                  </div>
+                </div>
+                <div className="fab-typo-row">
                   <span className="fab-typo-label">Paragraph Gap</span>
                   <div className="fab-menu-controls">
                     <button className="fab-control-btn" onClick={() => adjustParagraphSpacing(-5)}>-</button>
@@ -810,6 +831,12 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
                     <button className="fab-control-btn" onClick={() => adjustFontWeight(10)}>+</button>
                   </div>
                 </div>
+                <button
+                  className="fab-reset-btn"
+                  onClick={resetTypography}
+                >
+                  Reset to Default
+                </button>
               </div>
             )}
           </div>
