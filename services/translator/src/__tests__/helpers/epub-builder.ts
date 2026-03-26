@@ -25,6 +25,12 @@ export interface TestEpubOptions {
   withEntities?: boolean;
   /** Include nested block elements */
   nestedBlocks?: boolean;
+  /** Include toc.ncx with custom titles */
+  ncxTitles?: string[];
+  /** Include nav.xhtml with custom titles */
+  navTitles?: string[];
+  /** Use fragment identifiers in TOC entries */
+  tocFragments?: Record<number, string>;
 }
 
 const DEFAULT_CHAPTERS: TestChapter[] = [
@@ -58,6 +64,9 @@ export async function buildTestEpub(options: TestEpubOptions = {}): Promise<Buff
     largeChapter = false,
     withEntities = false,
     nestedBlocks = false,
+    ncxTitles,
+    navTitles,
+    tocFragments = {},
   } = options;
 
   const zip = new JSZip();
@@ -165,7 +174,56 @@ export async function buildTestEpub(options: TestEpubOptions = {}): Promise<Buff
     zip.file('OEBPS/images/test.png', pngData);
   }
 
-  // 7. content.opf
+  // 7. Generate toc.ncx if requested
+  if (ncxTitles) {
+    const navPoints = chapterFiles
+      .map((f, i) => {
+        const tocTitle = ncxTitles[i] || actualChapters[i]?.title || `Chapter ${i + 1}`;
+        const fragment = tocFragments[i] ? `#${tocFragments[i]}` : '';
+        return `    <navPoint id="np${i + 1}" playOrder="${i + 1}">
+      <navLabel><text>${tocTitle}</text></navLabel>
+      <content src="${f}${fragment}"/>
+    </navPoint>`;
+      })
+      .join('\n');
+
+    const ncx = `<?xml version="1.0" encoding="UTF-8"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+  <head><meta name="dtb:uid" content="test-uid"/></head>
+  <docTitle><text>${title}</text></docTitle>
+  <navMap>
+${navPoints}
+  </navMap>
+</ncx>`;
+    zip.file('OEBPS/toc.ncx', ncx);
+  }
+
+  // 7b. Generate nav.xhtml if requested
+  if (navTitles) {
+    const listItems = chapterFiles
+      .map((f, i) => {
+        const tocTitle = navTitles[i] || actualChapters[i]?.title || `Chapter ${i + 1}`;
+        const fragment = tocFragments[i] ? `#${tocFragments[i]}` : '';
+        return `        <li><a href="${f}${fragment}">${tocTitle}</a></li>`;
+      })
+      .join('\n');
+
+    const navXhtml = `<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+<head><title>Table of Contents</title></head>
+<body>
+  <nav epub:type="toc">
+    <h1>Table of Contents</h1>
+    <ol>
+${listItems}
+    </ol>
+  </nav>
+</body>
+</html>`;
+    zip.file('OEBPS/nav.xhtml', navXhtml);
+  }
+
+  // 8. content.opf
   const manifestItems = chapterFiles
     .map(
       (f, i) =>
@@ -185,6 +243,14 @@ export async function buildTestEpub(options: TestEpubOptions = {}): Promise<Buff
     ? '    <item id="css1" href="styles.css" media-type="text/css"/>'
     : '';
 
+  const ncxManifest = ncxTitles
+    ? '    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>'
+    : '';
+
+  const navManifest = navTitles
+    ? '    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>'
+    : '';
+
   const opf = `<?xml version="1.0" encoding="UTF-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0">
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
@@ -194,6 +260,8 @@ export async function buildTestEpub(options: TestEpubOptions = {}): Promise<Buff
   </metadata>
   <manifest>
 ${manifestItems}
+${ncxManifest}
+${navManifest}
 ${imageManifest}
 ${styleManifest}
   </manifest>
