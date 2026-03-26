@@ -271,6 +271,28 @@
   transform: scale(0.9);
 }
 
+.fab-reset-btn {
+  width: 100%;
+  padding: 6px 0;
+  margin-top: 8px;
+  border: 1px solid #d0d0d0;
+  border-radius: 6px;
+  background: transparent;
+  color: #666;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.fab-reset-btn:hover {
+  background-color: #f0f0f0;
+  color: #333;
+}
+
+.fab-reset-btn:active {
+  transform: scale(0.97);
+}
+
 .chinese-text {
   font-weight: 400;
 }

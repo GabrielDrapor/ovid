@@ -507,6 +507,15 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
     setFontSize((prev) => Math.max(14, Math.min(24, prev + delta)));
   };
 
+  const resetTypography = () => {
+    setFontSize(19);
+    setParagraphSpacing(0);
+    setLineHeight(1.6);
+    setLetterSpacing(-0.03);
+    setWordSpacing(0);
+    setFontWeight(450);
+  };
+
   const goToPreviousChapter = () => {
     if (currentChapter > 1 && !isLoading) {
       onLoadChapter(currentChapter - 1);
@@ -822,6 +831,12 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
                     <button className="fab-control-btn" onClick={() => adjustFontWeight(10)}>+</button>
                   </div>
                 </div>
+                <button
+                  className="fab-reset-btn"
+                  onClick={resetTypography}
+                >
+                  Reset to Default
+                </button>
               </div>
             )}
           </div>
