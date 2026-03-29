@@ -272,35 +272,19 @@ async function processUpload(req: UploadAndParseRequest): Promise<void> {
     if (!bookRow) throw new Error('Failed to create book');
     const bookId = bookRow.id;
 
-    // Insert chapters (batched by raw_html storage decision)
-    const chapterRowsWithHtml: unknown[][] = [];
-    const chapterRowsNoHtml: unknown[][] = [];
+    // Insert chapters (always store raw_html)
+    const chapterRows: unknown[][] = [];
     for (const chapter of bookData.chapters) {
       const rawHtml = rewriteImgSrc(chapter.rawHtml, imgRewriteMap);
-      const rawHtmlSize = new TextEncoder().encode(rawHtml).length;
-
-      if (rawHtmlSize < 50000) {
-        chapterRowsWithHtml.push([bookId, chapter.number, chapter.title, chapter.originalTitle, rawHtml, chapter.number]);
-      } else {
-        chapterRowsNoHtml.push([bookId, chapter.number, chapter.title, chapter.originalTitle, chapter.number]);
-      }
+      chapterRows.push([bookId, chapter.number, chapter.title, chapter.originalTitle, rawHtml, chapter.number]);
     }
-    if (chapterRowsWithHtml.length > 0) {
+    if (chapterRows.length > 0) {
       await db.batchInsert(
         'chapters_v2',
         ['book_id', 'chapter_number', 'title', 'original_title', 'raw_html', 'order_index'],
-        chapterRowsWithHtml,
+        chapterRows,
         'ABORT',
-        3 // small batches since raw_html can be up to ~50KB each
-      );
-    }
-    if (chapterRowsNoHtml.length > 0) {
-      await db.batchInsert(
-        'chapters_v2',
-        ['book_id', 'chapter_number', 'title', 'original_title', 'order_index'],
-        chapterRowsNoHtml,
-        'ABORT',
-        10
+        2 // small batches since raw_html can be large
       );
     }
 

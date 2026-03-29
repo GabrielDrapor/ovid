@@ -87,20 +87,10 @@ export async function insertBookShellV2(
   const bookId = book.id as number;
 
   for (const chapter of bookData.chapters) {
-    const rawHtmlSize = chapter.rawHtml ? new TextEncoder().encode(chapter.rawHtml).length : 0;
-    const shouldStoreRawHtml = rawHtmlSize < 50000;
-
-    if (shouldStoreRawHtml) {
-      await db.prepare(
-        `INSERT INTO chapters_v2 (book_id, chapter_number, title, original_title, raw_html, order_index)
-         VALUES (?, ?, ?, ?, ?, ?)`
-      ).bind(bookId, chapter.number, chapter.title, chapter.originalTitle, chapter.rawHtml, chapter.number).run();
-    } else {
-      await db.prepare(
-        `INSERT INTO chapters_v2 (book_id, chapter_number, title, original_title, order_index)
-         VALUES (?, ?, ?, ?, ?)`
-      ).bind(bookId, chapter.number, chapter.title, chapter.originalTitle, chapter.number).run();
-    }
+    await db.prepare(
+      `INSERT INTO chapters_v2 (book_id, chapter_number, title, original_title, raw_html, order_index)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    ).bind(bookId, chapter.number, chapter.title, chapter.originalTitle, chapter.rawHtml, chapter.number).run();
   }
 
   return bookId;
@@ -363,39 +353,20 @@ export async function insertProcessedBookV2(
 
   // Insert chapters and translations
   for (const chapter of processedBook.chapters) {
-    // Insert chapter into chapters_v2
-    // Skip rawHtml if too large (D1 has statement size limits)
-    const rawHtmlSize = chapter.rawHtml ? new TextEncoder().encode(chapter.rawHtml).length : 0;
-    const shouldStoreRawHtml = rawHtmlSize < 50000; // 50KB limit
-
-    if (shouldStoreRawHtml) {
-      await db.prepare(
-        `INSERT INTO chapters_v2 (book_id, chapter_number, title, original_title, raw_html, order_index)
-         VALUES (?, ?, ?, ?, ?, ?)`
+    // Insert chapter into chapters_v2 (always store raw_html)
+    await db.prepare(
+      `INSERT INTO chapters_v2 (book_id, chapter_number, title, original_title, raw_html, order_index)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    )
+      .bind(
+        bookId,
+        chapter.number,
+        chapter.translatedTitle,
+        chapter.originalTitle,
+        chapter.rawHtml,
+        chapter.number
       )
-        .bind(
-          bookId,
-          chapter.number,
-          chapter.translatedTitle,
-          chapter.originalTitle,
-          chapter.rawHtml,
-          chapter.number
-        )
-        .run();
-    } else {
-      await db.prepare(
-        `INSERT INTO chapters_v2 (book_id, chapter_number, title, original_title, order_index)
-         VALUES (?, ?, ?, ?, ?)`
-      )
-        .bind(
-          bookId,
-          chapter.number,
-          chapter.translatedTitle,
-          chapter.originalTitle,
-          chapter.number
-        )
-        .run();
-    }
+      .run();
 
     // Get chapter ID
     const chapterRow = await db.prepare(
