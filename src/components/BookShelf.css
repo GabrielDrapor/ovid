@@ -410,7 +410,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  z-index: 60;
+  z-index: 10;
   transform: scale(var(--shelf-scale, 1));
   transform-origin: left top;
 }
