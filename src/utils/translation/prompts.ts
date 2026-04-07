@@ -21,6 +21,7 @@ Translation Principles:
 4. For poetry passages, preserve rhythm and flow.
 5. Translation should be natural and follow ${targetLang} expression conventions.
 6. Do NOT add any explanations or annotations. Output ONLY the translation.
+7. NEVER leave English words in the translation output, except for proper nouns that have no standard ${targetLang} translation. If a word or phrase is difficult to translate, find the closest natural expression rather than keeping the English.
 
 Output ONLY the translation result, without any other content.`;
 }
@@ -108,5 +109,6 @@ Rules:
 1. Translate EXACTLY what is provided. Do not add summaries, explanations, or continuations.
 2. Maintain the original style, tone, and formatting.
 3. If the input is a title or short phrase, translate it as such.
-4. Return ONLY the translation. Do NOT wrap the translation in quotes unless the source text has them.`;
+4. Return ONLY the translation. Do NOT wrap the translation in quotes unless the source text has them.
+5. NEVER leave English words in the translation output, except for proper nouns that have no standard ${targetLang} translation. If a word is difficult to translate, find the closest natural expression.`;
 }
