@@ -194,7 +194,8 @@ async function translateText(
 2. Do NOT wrap in quotes unless the source has them.
 3. Maintain style, tone, and formatting.
 4. For proper nouns, use exact translations from the Glossary.
-5. Output ONLY the translated text.${glossaryStr}`,
+5. Output ONLY the translated text.
+6. NEVER leave English words in the output, except for proper nouns with no standard ${targetLang} translation. If a word is difficult to translate, find the closest natural expression.${glossaryStr}`,
     },
     {
       role: 'user',
@@ -202,10 +203,46 @@ async function translateText(
     },
   ]);
 
-  return translation
+  let result = translation
     .replace(/<\/?translate>/gi, '')
     .replace(/<\/?context>/gi, '')
     .trim();
+
+  // Step 2: Detect English residue and retry once with stronger prompt
+  const residue = detectEnglishResidue(result, glossary);
+  if (residue.length > 0) {
+    console.warn(`[translation] English residue detected: [${residue.join(', ')}] — retrying with stronger prompt`);
+
+    const retryTranslation = await llmChat(config, [
+      {
+        role: 'system',
+        content: `You are a professional literary translator. Translate the following ${sourceLanguage} text to ${targetLang}.
+
+**ABSOLUTE REQUIREMENT:** The output must be ENTIRELY in ${targetLang}. Do NOT leave ANY English words in the translation. The previous attempt incorrectly left these English words untranslated: ${residue.join(', ')}. You MUST translate every single word.
+
+${glossaryStr}`,
+      },
+      {
+        role: 'user',
+        content: `${contextStr}\n<translate>\n${text}\n</translate>`,
+      },
+    ], { temperature: 0.1 });
+
+    const retryResult = retryTranslation
+      .replace(/<\/?translate>/gi, '')
+      .replace(/<\/?context>/gi, '')
+      .trim();
+
+    const retryResidue = detectEnglishResidue(retryResult, glossary);
+    if (retryResidue.length < residue.length) {
+      result = retryResult;
+    }
+    if (retryResidue.length > 0) {
+      console.warn(`[translation] Retry still has residue: [${retryResidue.join(', ')}] — using ${retryResidue.length < residue.length ? 'retry' : 'original'}`);
+    }
+  }
+
+  return result;
 }
 
 /** Build glossary string for relevant terms found in text */
@@ -223,6 +260,42 @@ function buildGlossaryStr(text: string, glossary: Record<string, string>): strin
     .map(([k, v]) => `  "${k}" → "${v}"`)
     .join('\n');
   return `\n\n**GLOSSARY (MUST use these exact translations):**\n${entries}\n`;
+}
+
+/**
+ * Detect non-proper-noun English words left in a translation.
+ * Returns the offending words, or an empty array if clean.
+ */
+function detectEnglishResidue(text: string, glossary: Record<string, string>): string[] {
+  // Match sequences of 3+ ASCII letters (skip short ones like "OK", "vs")
+  const englishWords = text.match(/[a-zA-Z]{3,}/g);
+  if (!englishWords) return [];
+
+  // Build set of allowed English words from glossary keys + values
+  const allowed = new Set<string>();
+  for (const [key, val] of Object.entries(glossary)) {
+    for (const word of key.split(/\s+/)) {
+      if (word.length >= 3) allowed.add(word.toLowerCase());
+    }
+    // Also allow English in glossary values (e.g. transliterated names)
+    for (const word of val.split(/\s+/)) {
+      if (/^[a-zA-Z]{3,}$/.test(word)) allowed.add(word.toLowerCase());
+    }
+  }
+
+  // Common acceptable English tokens in translated text
+  const commonAllowed = new Set([
+    'the', 'and', 'for', 'with', 'from', 'that', 'this', 'not', 'but',
+    'are', 'was', 'were', 'has', 'had', 'have', 'will', 'can', 'may',
+    'app', 'web', 'api', 'url', 'http', 'https', 'www', 'html', 'css',
+    'pdf', 'jpg', 'png', 'gif', 'xml', 'json', 'sql',
+    'seg', 'translate', 'context',  // XML tag residue from prompt
+  ]);
+
+  return englishWords.filter(w => {
+    const lower = w.toLowerCase();
+    return !allowed.has(lower) && !commonAllowed.has(lower);
+  });
 }
 
 /** Rough token estimate: ~4 chars per token for English, ~2 for CJK */
@@ -266,7 +339,8 @@ async function translateBatch(
 4. Maintain style, tone, and formatting within each segment.
 5. Do NOT wrap in quotes unless the source has them.
 6. For proper nouns, use exact translations from the Glossary.
-7. Output ONLY the translated segments with their tags, nothing else.${glossaryStr}`,
+7. Output ONLY the translated segments with their tags, nothing else.
+8. NEVER leave English words in the output, except for proper nouns with no standard ${targetLang} translation. Translate every word into ${targetLang}.${glossaryStr}`,
     },
     {
       role: 'user',
@@ -457,7 +531,17 @@ export async function translateBook(
             );
             const out = new Map<number, { node: TextNode; translated: string | null }>();
             for (const item of batch) {
-              out.set(item.index, { node: item.node, translated: resultMap.get(item.index) ?? null });
+              const translated = resultMap.get(item.index) ?? null;
+              // Check for English residue — if found, mark as null to trigger individual retry with stronger prompt
+              if (translated !== null) {
+                const residue = detectEnglishResidue(translated, glossary);
+                if (residue.length > 0) {
+                  console.warn(`[${bookUuid}] Batch seg ${item.index} has English residue: [${residue.join(', ')}] — will retry individually`);
+                  out.set(item.index, { node: item.node, translated: null });
+                  continue;
+                }
+              }
+              out.set(item.index, { node: item.node, translated });
             }
             return out;
           })
