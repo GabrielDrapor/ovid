@@ -72,10 +72,16 @@ export async function processSpine(imageBuffer: Buffer): Promise<Buffer> {
     trimmed = imageBuffer;
   }
 
-  // Always rotate 90° CW — the prompt generates horizontal text,
-  // rotation makes it vertical like a real book spine.
-  // This is unconditional because the prompt explicitly asks for horizontal text.
-  const oriented = await sharp(trimmed).rotate(90).png().toBuffer();
+  // Conditionally rotate: only if the trimmed image is landscape (wider than tall).
+  // The prompt asks for a vertical spine rectangle, so if Gemini followed instructions
+  // the image is already portrait after trimming. But sometimes Gemini generates
+  // a horizontal banner instead — rotate only in that case.
+  const trimMeta = await sharp(trimmed).metadata();
+  const trimW = trimMeta.width || 1;
+  const trimH = trimMeta.height || 1;
+  const oriented = trimW > trimH
+    ? await sharp(trimmed).rotate(90).png().toBuffer()
+    : trimmed;
 
   // Resize to target using 'cover' + centre — fills the full area, crops excess
   return sharp(oriented)
