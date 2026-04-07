@@ -83,6 +83,7 @@ export async function handleBookUpload(
       // Copy from temp estimate path to permanent path
       const tempObject = await env.ASSETS_BUCKET.get(body.fileKey);
       if (!tempObject) {
+        console.warn(`Upload: estimate file not found at ${body.fileKey}`);
         return new Response(
           JSON.stringify({ error: 'Estimated file not found — please re-upload' }),
           { status: 404, headers: { 'Content-Type': 'application/json' } }
@@ -564,6 +565,7 @@ export async function handleBookEstimate(
       httpMetadata: { contentType: file.type || 'application/octet-stream' },
       customMetadata: { originalName: file.name },
     });
+    console.log(`Estimate: stored temp file at ${tempKey}`);
 
     // Ask Railway to parse and estimate
     const resp = await fetch(`${env.TRANSLATOR_SERVICE_URL}/estimate`, {

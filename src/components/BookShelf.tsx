@@ -319,6 +319,20 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
             sourceLanguage: 'en',
           }),
         });
+
+        // If estimate file not found in R2, silently retry with FormData
+        if (response.status === 404) {
+          setUploadProgress('Uploading...');
+          const formData = new FormData();
+          formData.append('file', estimate.file);
+          formData.append('targetLanguage', 'zh');
+          formData.append('sourceLanguage', 'en');
+
+          response = await fetch('/api/books/upload', {
+            method: 'POST',
+            body: formData,
+          });
+        }
       } else {
         // Fallback: re-upload file via FormData
         const formData = new FormData();
@@ -819,6 +833,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                         <button
                           className="confirm-upload-btn"
                           onClick={handleConfirmUpload}
+                          disabled={uploading}
                         >
                           Confirm & Translate
                         </button>
