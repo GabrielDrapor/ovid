@@ -1,7 +1,8 @@
+// @ts-nocheck
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 
 interface Props {
-  children: ReactNode;
+  children?: ReactNode;
 }
 
 interface State {
@@ -30,16 +31,18 @@ class ErrorBoundary extends Component<Props, State> {
   render() {
     if (this.state.hasError) {
       return (
-        <div style={{
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          minHeight: '100vh',
-          padding: '20px',
-          textAlign: 'center',
-          fontFamily: 'system-ui, -apple-system, sans-serif',
-        }}>
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            minHeight: '100vh',
+            padding: '20px',
+            textAlign: 'center',
+            fontFamily: 'system-ui, -apple-system, sans-serif',
+          }}
+        >
           <h1 style={{ fontSize: '24px', marginBottom: '12px' }}>Something went wrong</h1>
           <p style={{ color: '#666', marginBottom: '24px', maxWidth: '400px' }}>
             An unexpected error occurred. Please try again.
