@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { SUPPORTED_LANGUAGES } from '../utils/translator';
 import { useUser } from '../contexts/UserContext';
 import './BookShelf.css';
 
@@ -55,6 +56,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
   const [uploadToast, setUploadToast] = useState<string | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const [estimating, setEstimating] = useState(false);
+  const [selectedTargetLanguage, setSelectedTargetLanguage] = useState('zh');
   const [estimate, setEstimate] = useState<{
     file: File;
     title: string;
@@ -66,6 +68,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
     availableCredits: number;
     canAfford: boolean;
     fileKey?: string;
+    targetLanguage: string;
   } | null>(null);
   const { user, loading: userLoading, login, logout, credits, creditPackages, purchaseCredits, refreshCredits } = useUser();
 
@@ -266,7 +269,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
     try {
       const formData = new FormData();
       formData.append('file', file);
-      formData.append('targetLanguage', 'zh');
+      formData.append('targetLanguage', selectedTargetLanguage);
 
       const response = await fetch('/api/books/estimate', {
         method: 'POST',
@@ -290,7 +293,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
         fileKey?: string;
       };
 
-      setEstimate({ ...estimateData, file });
+      setEstimate({ ...estimateData, file, targetLanguage: selectedTargetLanguage });
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to estimate book');
     } finally {
@@ -315,8 +318,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             fileKey: estimate.fileKey,
-            targetLanguage: 'zh',
-            sourceLanguage: 'en',
+            targetLanguage: estimate.targetLanguage,
           }),
         });
 
@@ -325,8 +327,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
           setUploadProgress('Uploading...');
           const formData = new FormData();
           formData.append('file', estimate.file);
-          formData.append('targetLanguage', 'zh');
-          formData.append('sourceLanguage', 'en');
+          formData.append('targetLanguage', estimate.targetLanguage);
 
           response = await fetch('/api/books/upload', {
             method: 'POST',
@@ -337,8 +338,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
         // Fallback: re-upload file via FormData
         const formData = new FormData();
         formData.append('file', estimate.file);
-        formData.append('targetLanguage', 'zh');
-        formData.append('sourceLanguage', 'en');
+        formData.append('targetLanguage', estimate.targetLanguage);
 
         response = await fetch('/api/books/upload', {
           method: 'POST',
@@ -387,6 +387,9 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
     setEstimate(null);
     setUploadError(null);
   };
+
+  const targetLanguageLabel = SUPPORTED_LANGUAGES[selectedTargetLanguage] || selectedTargetLanguage;
+  const estimatedTargetLanguageLabel = estimate ? (SUPPORTED_LANGUAGES[estimate.targetLanguage] || estimate.targetLanguage) : targetLanguageLabel;
 
   const handleDeleteBook = async (bookUuid: string) => {
     if (!confirm('Are you sure you want to remove this book?')) return;
@@ -858,7 +861,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
             ) : estimating ? (
               <div className="upload-progress">
                 <div className="spinner"></div>
-                <p>Analyzing book...</p>
+                <p>Analyzing book for {targetLanguageLabel}...</p>
               </div>
             ) : uploading ? (
               <div className="upload-progress">
@@ -869,6 +872,21 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
               <div className="upload-area">
                 <div className="current-credits">
                   Your credits: <strong>{credits?.toLocaleString() ?? '...'}</strong>
+                </div>
+                <div className="upload-language-picker">
+                  <label htmlFor="target-language-select">Target language</label>
+                  <select
+                    id="target-language-select"
+                    value={selectedTargetLanguage}
+                    onChange={(e) => setSelectedTargetLanguage(e.target.value)}
+                  >
+                    {Object.entries(SUPPORTED_LANGUAGES).map(([code, label]) => (
+                      <option key={code} value={code}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="upload-hint">Source language will be detected automatically</span>
                 </div>
                 <input
                   type="file"
@@ -889,7 +907,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                     <line x1="12" y1="3" x2="12" y2="15" />
                   </svg>
                   <span>Click to select EPUB file</span>
-                  <span className="upload-hint">The book will be automatically translated to Chinese</span>
+                  <span className="upload-hint">The book will be translated to {targetLanguageLabel}</span>
                 </label>
                 <button
                   className="cancel-upload-btn"

@@ -53,7 +53,7 @@ export async function handleBookUpload(
     let fileExtension: string;
     let r2Key: string;
     let targetLanguage = 'zh';
-    let sourceLanguage = 'en';
+    let sourceLanguage = 'auto';
     const bookUuid = crypto.randomUUID();
 
     if (contentType.includes('application/json')) {
@@ -67,7 +67,7 @@ export async function handleBookUpload(
       }
 
       targetLanguage = body.targetLanguage || 'zh';
-      sourceLanguage = body.sourceLanguage || 'en';
+      sourceLanguage = body.sourceLanguage || 'auto';
 
       // Derive extension from the temp key
       const supportedExtensions = ['.epub', '.mobi', '.azw3'];
@@ -103,7 +103,7 @@ export async function handleBookUpload(
       const formData = await request.formData();
       const file = formData.get('file') as File;
       targetLanguage = (formData.get('targetLanguage') as string) || 'zh';
-      sourceLanguage = (formData.get('sourceLanguage') as string) || 'en';
+      sourceLanguage = (formData.get('sourceLanguage') as string) || 'auto';
 
       if (!file) {
         return new Response(JSON.stringify({ error: 'No file provided' }), {
