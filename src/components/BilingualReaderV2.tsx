@@ -674,7 +674,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
         }
         ::view-transition-old(epub-page),
         ::view-transition-new(epub-page) {
-          animation-duration: 320ms;
+          animation-duration: 220ms;
           animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
           animation-fill-mode: both;
           mix-blend-mode: normal;
