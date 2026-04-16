@@ -1630,15 +1630,17 @@
   z-index: 4;
 }
 
+/* Empty-shelf card — a physical paper note pinned to the shelf.
+   Stays cream regardless of theme because it's an object, not chrome. */
 .empty-shelf-content {
   text-align: center;
   padding: var(--space-xl) var(--space-lg);
-  background: var(--paper);
-  color: var(--ink);
-  border: 1px solid var(--rule);
+  background: oklch(94% 0.015 75);
+  color: oklch(22% 0.014 50);
+  border: 1px solid oklch(86% 0.012 70);
   border-radius: var(--radius-lg);
   max-width: 440px;
-  box-shadow: var(--shadow-lg);
+  box-shadow: 0 20px 60px oklch(0% 0 0 / 0.35);
   animation: empty-shelf-fade-in var(--duration-slow) var(--ease-out);
 }
 
@@ -1647,14 +1649,14 @@
   font-size: var(--text-xl);
   font-weight: var(--weight-regular);
   letter-spacing: var(--tracking-tight);
-  color: var(--ink);
+  color: oklch(22% 0.014 50);
   margin: 0 0 var(--space-sm);
 }
 
 .empty-shelf-desc {
   font-family: var(--font-body);
   font-size: var(--text-base);
-  color: var(--ink-soft);
+  color: oklch(40% 0.018 55);
   margin: 0 0 var(--space-3xs);
   line-height: var(--lh-body);
 }
@@ -1663,7 +1665,7 @@
   font-family: var(--font-body);
   font-size: var(--text-sm);
   font-style: italic;
-  color: var(--ink-faint);
+  color: oklch(58% 0.014 60);
   margin: 0 0 var(--space-md);
   line-height: var(--lh-snug);
 }
