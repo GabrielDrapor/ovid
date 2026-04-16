@@ -516,11 +516,10 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
     setFontWeight(450);
   };
 
-  // View-transition wrapper: animates a "page turn" between chapters using
-  // the browser's View Transitions API when available. Direction controls the
-  // slide: "forward" = old slides left / new enters from right, "back" reversed.
+  // View-transition wrapper: crossfades chapters using the browser's View
+  // Transitions API when available, falling back to a plain load otherwise.
   const navigateWithTransition = useCallback(
-    (chapterNumber: number, direction: 'forward' | 'back') => {
+    (chapterNumber: number) => {
       const run = () => onLoadChapter(chapterNumber);
       const doc = document as Document & {
         startViewTransition?: (cb: () => void | Promise<void>) => { finished: Promise<void> };
@@ -530,33 +529,25 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
         run();
         return;
       }
-      const root = document.documentElement;
-      root.classList.remove('page-turn-forward', 'page-turn-back');
-      root.classList.add(direction === 'forward' ? 'page-turn-forward' : 'page-turn-back');
-      const t = doc.startViewTransition(() => Promise.resolve(run()));
-      t.finished.finally(() => {
-        root.classList.remove('page-turn-forward', 'page-turn-back');
-      });
+      doc.startViewTransition(() => Promise.resolve(run()));
     },
     [onLoadChapter]
   );
 
   const goToPreviousChapter = useCallback(() => {
     if (currentChapter > 1 && !isLoading) {
-      navigateWithTransition(currentChapter - 1, 'back');
+      navigateWithTransition(currentChapter - 1);
     }
   }, [currentChapter, isLoading, navigateWithTransition]);
 
   const goToNextChapter = useCallback(() => {
     if (currentChapter < totalChapters && !isLoading) {
-      navigateWithTransition(currentChapter + 1, 'forward');
+      navigateWithTransition(currentChapter + 1);
     }
   }, [currentChapter, isLoading, totalChapters, navigateWithTransition]);
 
   const scrollToChapter = (chapterNumber: number) => {
-    const direction: 'forward' | 'back' =
-      chapterNumber >= currentChapter ? 'forward' : 'back';
-    navigateWithTransition(chapterNumber, direction);
+    navigateWithTransition(chapterNumber);
     setIsChaptersOpen(false);
     setIsMenuOpen(false);
   };
@@ -650,54 +641,30 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
           height: auto;
         }
 
-        /* Page-turn animation via View Transitions API. The .epub-content
-           element is tagged so the browser snapshots old and new between
-           chapter loads. Direction is driven by a class on <html>. */
+        /* Sequential fade between chapters via View Transitions API:
+           old fades out, then new fades in — no overlap, so no ghosting. */
         .epub-content {
           view-transition-name: epub-page;
         }
-        @keyframes page-turn-in-right {
-          from { transform: translate3d(100%, 0, 0); }
-          to   { transform: translate3d(0, 0, 0); }
+        @keyframes page-fade-out {
+          from { opacity: 1; }
+          to   { opacity: 0; }
         }
-        @keyframes page-turn-out-left {
-          from { transform: translate3d(0, 0, 0); }
-          to   { transform: translate3d(-100%, 0, 0); }
+        @keyframes page-fade-in {
+          from { opacity: 0; }
+          to   { opacity: 1; }
         }
-        @keyframes page-turn-in-left {
-          from { transform: translate3d(-100%, 0, 0); }
-          to   { transform: translate3d(0, 0, 0); }
+        ::view-transition-old(epub-page) {
+          animation: page-fade-out 200ms ease-out both;
         }
-        @keyframes page-turn-out-right {
-          from { transform: translate3d(0, 0, 0); }
-          to   { transform: translate3d(100%, 0, 0); }
-        }
-        ::view-transition-group(epub-page) {
-          overflow: hidden;
-        }
-        ::view-transition-old(epub-page),
         ::view-transition-new(epub-page) {
-          animation-duration: 320ms;
-          animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
-          animation-fill-mode: both;
-          mix-blend-mode: normal;
-        }
-        html.page-turn-forward::view-transition-old(epub-page) {
-          animation-name: page-turn-out-left;
-        }
-        html.page-turn-forward::view-transition-new(epub-page) {
-          animation-name: page-turn-in-right;
-        }
-        html.page-turn-back::view-transition-old(epub-page) {
-          animation-name: page-turn-out-right;
-        }
-        html.page-turn-back::view-transition-new(epub-page) {
-          animation-name: page-turn-in-left;
+          animation: page-fade-in 240ms ease-in 200ms both;
         }
         @media (prefers-reduced-motion: reduce) {
           ::view-transition-old(epub-page),
           ::view-transition-new(epub-page) {
             animation-duration: 1ms;
+            animation-delay: 0s;
           }
         }
       `}} />
