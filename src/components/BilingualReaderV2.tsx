@@ -680,7 +680,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
         }}
       >
         {isLoading && (
-          <div style={{ textAlign: 'center', padding: '20px', color: '#666' }}>
+          <div style={{ textAlign: 'center', padding: 'var(--space-sm)', color: 'var(--ink-faint)', fontStyle: 'italic' }}>
             Loading chapter...
           </div>
         )}

@@ -38,24 +38,30 @@ class ErrorBoundary extends Component<Props, State> {
             alignItems: 'center',
             justifyContent: 'center',
             minHeight: '100vh',
-            padding: '20px',
+            padding: 'var(--space-lg)',
             textAlign: 'center',
-            fontFamily: 'system-ui, -apple-system, sans-serif',
+            fontFamily: 'var(--font-display)',
+            background: 'var(--paper)',
+            color: 'var(--ink)',
           }}
         >
-          <h1 style={{ fontSize: '24px', marginBottom: '12px' }}>Something went wrong</h1>
-          <p style={{ color: '#666', marginBottom: '24px', maxWidth: '400px' }}>
+          <h1 style={{ fontSize: 'var(--text-xl)', fontWeight: 400, margin: '0 0 var(--space-xs)', letterSpacing: '-0.01em' }}>
+            Something went wrong
+          </h1>
+          <p style={{ color: 'var(--ink-soft)', fontFamily: 'var(--font-body)', margin: '0 0 var(--space-md)', maxWidth: '420px', lineHeight: 1.6 }}>
             An unexpected error occurred. Please try again.
           </p>
           <button
             onClick={this.handleRetry}
             style={{
-              padding: '10px 24px',
-              fontSize: '16px',
-              borderRadius: '8px',
-              border: 'none',
-              background: '#4f46e5',
-              color: 'white',
+              padding: 'var(--space-2xs) var(--space-md)',
+              fontFamily: 'var(--font-display)',
+              fontSize: 'var(--text-base)',
+              letterSpacing: '-0.01em',
+              borderRadius: 'var(--radius-sm)',
+              border: '1px solid var(--ink)',
+              background: 'var(--ink)',
+              color: 'var(--paper)',
               cursor: 'pointer',
             }}
           >

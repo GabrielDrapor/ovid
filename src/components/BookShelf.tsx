@@ -575,11 +575,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
           <span>{uploadToast}</span>
         </div>
       )}
-      <div
-        className="bookshelf-wall"
-        ref={wallRef}
-        style={{ backgroundImage: 'url(/bookcase_bg.jpeg)' }}
-      >
+      <div className="bookshelf-wall" ref={wallRef}>
         {(() => {
           const safeBooks = Array.isArray(books) ? books : [];
           const publicBooks = safeBooks.filter((b) => !b.user_id);
@@ -1026,7 +1022,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                 </span>
               </div>
             ) : mobileSelectedBook.status === 'error' ? (
-              <div className="sheet-status" style={{ color: '#ff6b6b' }}>
+              <div className="sheet-status" style={{ color: 'var(--danger)' }}>
                 Translation failed
               </div>
             ) : (
@@ -1094,8 +1090,9 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                   height="48"
                   viewBox="0 0 24 24"
                   fill="none"
-                  stroke="#ff6b6b"
+                  stroke="currentColor"
                   strokeWidth="2"
+                  style={{ color: 'var(--danger)' }}
                 >
                   <circle cx="12" cy="12" r="10" />
                   <line x1="12" y1="8" x2="12" y2="12" />
