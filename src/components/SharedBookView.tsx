@@ -86,7 +86,7 @@ function SharedBookView({ shareToken }: SharedBookViewProps) {
   }, [shareToken]);
 
   const handleLoadChapter = useCallback((chapterNumber: number) => {
-    loadChapter(chapterNumber);
+    return loadChapter(chapterNumber);
   }, [shareToken]);
 
   if (error) {

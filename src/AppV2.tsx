@@ -384,9 +384,10 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
     }
   }, [bookUuid]);
 
-  // Wrapper for manual chapter navigation (no xpath) - must be before early returns
+  // Wrapper for manual chapter navigation (no xpath) - must be before early returns.
+  // Returns the Promise so the reader can await it inside document.startViewTransition().
   const handleLoadChapter = useCallback((chapterNumber: number) => {
-    loadChapter(chapterNumber);
+    return loadChapter(chapterNumber);
   }, [bookUuid]);
 
   if (error) {
