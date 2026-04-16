@@ -588,7 +588,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
       <style dangerouslySetInnerHTML={{ __html: `
         .reader-content-v2,
         .reader-content-v2 * {
-          font-family: "LXGW Neo ZhiSong Screen", "Literata", "New York", ui-serif, "Times New Roman", Times, serif !important;
+          font-family: "EB Garamond", "LXGW Neo ZhiSong Screen", "New York", ui-serif, "Times New Roman", Times, serif !important;
           -webkit-font-smoothing: antialiased;
           -moz-osx-font-smoothing: grayscale;
           text-rendering: optimizeLegibility;
@@ -612,7 +612,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
           transition: background-color 0.2s;
         }
         .reader-content-v2 [data-bilingual]:hover {
-          background-color: rgba(0, 0, 0, 0.02);
+          background-color: var(--paper-soft);
         }
         .reader-content-v2 p {
           margin: 0 0 0.8em 0;
