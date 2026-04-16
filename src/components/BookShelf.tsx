@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { SUPPORTED_LANGUAGES } from '../utils/translator';
 import { useUser } from '../contexts/UserContext';
 import './BookShelf.css';
+
+const DEFAULT_TARGET_LANGUAGE = 'zh';
 
 interface Book {
   id: number;
@@ -35,26 +38,40 @@ interface BookShelfProps {
 
 const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
   const [books, setBooks] = useState<Book[]>([]);
-  const [bookProgressMap, setBookProgressMap] = useState<Map<string, UserBookProgress>>(new Map());
+  const [bookProgressMap, setBookProgressMap] = useState<
+    Map<string, UserBookProgress>
+  >(new Map());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [hoveredBook, setHoveredBook] = useState<Book | null>(null);
   const [coverLoaded, setCoverLoaded] = useState(false);
-  const [mobileSelectedBook, setMobileSelectedBook] = useState<Book | null>(null);
+  const [mobileSelectedBook, setMobileSelectedBook] = useState<Book | null>(
+    null
+  );
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showHelpMenu, setShowHelpMenu] = useState(false);
   const helpRef = useRef<HTMLDivElement>(null);
   const wallRef = useRef<HTMLDivElement>(null);
-  const [shelfPos, setShelfPos] = useState({ row1Bottom: '52%', row2Bottom: '4%', actionsTop: '48%', actionsLeft: '250px' });
+  const [shelfPos, setShelfPos] = useState({
+    row1Bottom: '52%',
+    row2Bottom: '4%',
+    actionsTop: '48%',
+    actionsLeft: '250px',
+  });
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showCreditsModal, setShowCreditsModal] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState('');
-  const [uploadError, setUploadError] = useState<{ message: string; required?: number; available?: number } | null>(null);
+  const [uploadError, setUploadError] = useState<{
+    message: string;
+    required?: number;
+    available?: number;
+  } | null>(null);
   const [uploadToast, setUploadToast] = useState<string | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const [estimating, setEstimating] = useState(false);
+  const [reEstimating, setReEstimating] = useState(false);
   const [estimate, setEstimate] = useState<{
     file: File;
     title: string;
@@ -66,8 +83,20 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
     availableCredits: number;
     canAfford: boolean;
     fileKey?: string;
+    targetLanguage: string;
+    detectedSourceLanguage: string;
+    sourceLanguage: string;
   } | null>(null);
-  const { user, loading: userLoading, login, logout, credits, creditPackages, purchaseCredits, refreshCredits } = useUser();
+  const {
+    user,
+    loading: userLoading,
+    login,
+    logout,
+    credits,
+    creditPackages,
+    purchaseCredits,
+    refreshCredits,
+  } = useUser();
 
   const fetchBooks = async () => {
     try {
@@ -76,7 +105,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
       const booksData = await response.json();
-      const booksList = Array.isArray(booksData) ? booksData as Book[] : [];
+      const booksList = Array.isArray(booksData) ? (booksData as Book[]) : [];
       setBooks(booksList);
       if (booksData.length > 0 && !hoveredBook) {
         setHoveredBook(booksData[0]);
@@ -96,7 +125,9 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
         try {
           const progressResponse = await fetch('/api/progress');
           if (progressResponse.ok) {
-            const data = await progressResponse.json() as { progress: Record<string, UserBookProgress> };
+            const data = (await progressResponse.json()) as {
+              progress: Record<string, UserBookProgress>;
+            };
             const progressMap = new Map<string, UserBookProgress>();
             for (const [uuid, p] of Object.entries(data.progress)) {
               progressMap.set(uuid, p);
@@ -128,13 +159,14 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
   useEffect(() => {
     const wall = wallRef.current;
     if (!wall) return;
-    const IMG_W = 1248, IMG_H = 864;
+    const IMG_W = 1248,
+      IMG_H = 864;
     // Shelf board positions in image pixel coordinates
-    const ROW1_Y = 411;  // middle board top (where row-1 books sit)
-    const ROW2_Y = 832;  // bottom board top (where row-2 books sit)
-    const ACT_Y = 418;   // actions vertical position
-    const ACT_X = 260;   // actions horizontal position
-    const BOOK_H = 312;  // book height in image coordinates
+    const ROW1_Y = 411; // middle board top (where row-1 books sit)
+    const ROW2_Y = 832; // bottom board top (where row-2 books sit)
+    const ACT_Y = 418; // actions vertical position
+    const ACT_X = 260; // actions horizontal position
+    const BOOK_H = 312; // book height in image coordinates
     const update = () => {
       const { width, height } = wall.getBoundingClientRect();
       if (width === 0 || height === 0) return;
@@ -143,9 +175,9 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
       wall.style.setProperty('--book-height', `${BOOK_H * scale}px`);
       wall.style.setProperty('--shelf-scale', `${scale}`);
       setShelfPos({
-        row1Bottom: `${(1 - ROW1_Y * scale / height) * 100}%`,
-        row2Bottom: `${(1 - ROW2_Y * scale / height) * 100}%`,
-        actionsTop: `${(ACT_Y * scale / height) * 100}%`,
+        row1Bottom: `${(1 - (ROW1_Y * scale) / height) * 100}%`,
+        row2Bottom: `${(1 - (ROW2_Y * scale) / height) * 100}%`,
+        actionsTop: `${((ACT_Y * scale) / height) * 100}%`,
         actionsLeft: `${ACT_X * scale}px`,
       });
     };
@@ -169,11 +201,16 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
   // Drive translation for books that are still processing.
   // Each call to /translate-next translates a chunk of ~25 paragraphs,
   // staying within Cloudflare Workers' 50 subrequest limit.
-  const [translationProgress, setTranslationProgress] = useState<Map<string, { phase: string; chaptersCompleted: number; chaptersTotal: number }>>(new Map());
+  const [translationProgress, setTranslationProgress] = useState<
+    Map<
+      string,
+      { phase: string; chaptersCompleted: number; chaptersTotal: number }
+    >
+  >(new Map());
   const translatingRef = useRef<Set<string>>(new Set());
   const pollProcessingBooks = useCallback(async () => {
     const booksList = Array.isArray(books) ? books : [];
-    const processingBooks = booksList.filter(b => b.status === 'processing');
+    const processingBooks = booksList.filter((b) => b.status === 'processing');
     if (processingBooks.length === 0) return;
 
     let changed = false;
@@ -191,9 +228,17 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
         });
         clearTimeout(timeout);
         if (res.ok) {
-          const data = await res.json() as { done?: boolean; error?: string; progress?: { phase: string; chaptersCompleted: number; chaptersTotal: number } };
+          const data = (await res.json()) as {
+            done?: boolean;
+            error?: string;
+            progress?: {
+              phase: string;
+              chaptersCompleted: number;
+              chaptersTotal: number;
+            };
+          };
           if (data.progress) {
-            setTranslationProgress(prev => {
+            setTranslationProgress((prev) => {
               const next = new Map(prev);
               next.set(book.uuid, data.progress!);
               return next;
@@ -201,15 +246,16 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
           }
           if (data.done) {
             changed = true;
-            setTranslationProgress(prev => {
+            setTranslationProgress((prev) => {
               const next = new Map(prev);
               next.delete(book.uuid);
               return next;
             });
           }
         }
-      } catch { /* ignore, will retry on next poll */ }
-      finally {
+      } catch {
+        /* ignore, will retry on next poll */
+      } finally {
         translatingRef.current.delete(book.uuid);
       }
     }
@@ -222,7 +268,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
   const initialProgressFetched = useRef(false);
   useEffect(() => {
     const booksList = Array.isArray(books) ? books : [];
-    const processingBooks = booksList.filter(b => b.status === 'processing');
+    const processingBooks = booksList.filter((b) => b.status === 'processing');
     if (processingBooks.length === 0) return;
 
     // Fetch current progress from server only once per processing book
@@ -232,16 +278,25 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
         try {
           const res = await fetch(`/api/book/${book.uuid}/status`);
           if (res.ok) {
-            const data = await res.json() as { status: string; progress?: { phase: string; chaptersCompleted: number; chaptersTotal: number } };
+            const data = (await res.json()) as {
+              status: string;
+              progress?: {
+                phase: string;
+                chaptersCompleted: number;
+                chaptersTotal: number;
+              };
+            };
             if (data.progress) {
-              setTranslationProgress(prev => {
+              setTranslationProgress((prev) => {
                 const next = new Map(prev);
                 next.set(book.uuid, data.progress!);
                 return next;
               });
             }
           }
-        } catch { /* ignore */ }
+        } catch {
+          /* ignore */
+        }
       });
     }
 
@@ -266,7 +321,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
     try {
       const formData = new FormData();
       formData.append('file', file);
-      formData.append('targetLanguage', 'zh');
+      formData.append('targetLanguage', DEFAULT_TARGET_LANGUAGE);
 
       const response = await fetch('/api/books/estimate', {
         method: 'POST',
@@ -274,11 +329,14 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
       });
 
       if (!response.ok) {
-        const errorData = await response.json() as { error?: string; details?: string };
+        const errorData = (await response.json()) as {
+          error?: string;
+          details?: string;
+        };
         throw new Error(errorData.error || 'Failed to estimate');
       }
 
-      const estimateData = await response.json() as {
+      const estimateData = (await response.json()) as {
         title: string;
         author: string;
         chapters: number;
@@ -288,9 +346,18 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
         availableCredits: number;
         canAfford: boolean;
         fileKey?: string;
+        detectedSourceLanguage?: string;
       };
 
-      setEstimate({ ...estimateData, file });
+      const raw = estimateData.detectedSourceLanguage || 'en';
+      const detected = SUPPORTED_LANGUAGES[raw] ? raw : 'en';
+      setEstimate({
+        ...estimateData,
+        file,
+        targetLanguage: DEFAULT_TARGET_LANGUAGE,
+        detectedSourceLanguage: detected,
+        sourceLanguage: detected,
+      });
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to estimate book');
     } finally {
@@ -298,11 +365,90 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
     }
   };
 
+  const handleChangeTargetLanguage = async (newTarget: string) => {
+    if (!estimate || newTarget === estimate.targetLanguage) return;
+
+    setReEstimating(true);
+    try {
+      let response: Response;
+      if (estimate.fileKey) {
+        response = await fetch('/api/books/estimate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            fileKey: estimate.fileKey,
+            targetLanguage: newTarget,
+          }),
+        });
+        if (response.status === 404) {
+          const formData = new FormData();
+          formData.append('file', estimate.file);
+          formData.append('targetLanguage', newTarget);
+          response = await fetch('/api/books/estimate', {
+            method: 'POST',
+            body: formData,
+          });
+        }
+      } else {
+        const formData = new FormData();
+        formData.append('file', estimate.file);
+        formData.append('targetLanguage', newTarget);
+        response = await fetch('/api/books/estimate', {
+          method: 'POST',
+          body: formData,
+        });
+      }
+
+      if (!response.ok) {
+        const errorData = (await response.json()) as { error?: string };
+        throw new Error(errorData.error || 'Failed to re-estimate');
+      }
+
+      const estimateData = (await response.json()) as {
+        title: string;
+        author: string;
+        chapters: number;
+        characters: number;
+        estimatedTokens: number;
+        requiredCredits: number;
+        availableCredits: number;
+        canAfford: boolean;
+        fileKey?: string;
+        detectedSourceLanguage?: string;
+      };
+
+      setEstimate((prev) =>
+        prev
+          ? {
+              ...prev,
+              ...estimateData,
+              targetLanguage: newTarget,
+              detectedSourceLanguage:
+                estimateData.detectedSourceLanguage ||
+                prev.detectedSourceLanguage,
+            }
+          : prev
+      );
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to re-estimate');
+    } finally {
+      setReEstimating(false);
+    }
+  };
+
+  const handleChangeSourceLanguage = (newSource: string) => {
+    setEstimate((prev) =>
+      prev ? { ...prev, sourceLanguage: newSource } : prev
+    );
+  };
+
   const handleConfirmUpload = async () => {
     if (!estimate) return;
 
     setUploading(true);
-    setUploadProgress(estimate.fileKey ? 'Starting translation...' : 'Uploading...');
+    setUploadProgress(
+      estimate.fileKey ? 'Starting translation...' : 'Uploading...'
+    );
     setUploadError(null);
 
     try {
@@ -315,8 +461,8 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             fileKey: estimate.fileKey,
-            targetLanguage: 'zh',
-            sourceLanguage: 'en',
+            targetLanguage: estimate.targetLanguage,
+            sourceLanguage: estimate.sourceLanguage,
           }),
         });
 
@@ -325,8 +471,8 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
           setUploadProgress('Uploading...');
           const formData = new FormData();
           formData.append('file', estimate.file);
-          formData.append('targetLanguage', 'zh');
-          formData.append('sourceLanguage', 'en');
+          formData.append('targetLanguage', estimate.targetLanguage);
+          formData.append('sourceLanguage', estimate.sourceLanguage);
 
           response = await fetch('/api/books/upload', {
             method: 'POST',
@@ -337,8 +483,8 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
         // Fallback: re-upload file via FormData
         const formData = new FormData();
         formData.append('file', estimate.file);
-        formData.append('targetLanguage', 'zh');
-        formData.append('sourceLanguage', 'en');
+        formData.append('targetLanguage', estimate.targetLanguage);
+        formData.append('sourceLanguage', estimate.sourceLanguage);
 
         response = await fetch('/api/books/upload', {
           method: 'POST',
@@ -347,7 +493,12 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
       }
 
       if (!response.ok) {
-        const errorData = await response.json() as { error?: string; required?: number; available?: number; message?: string };
+        const errorData = (await response.json()) as {
+          error?: string;
+          required?: number;
+          available?: number;
+          message?: string;
+        };
 
         if (response.status === 402) {
           setUploadError({
@@ -371,7 +522,9 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
       setEstimate(null);
 
       // Show toast notification
-      setUploadToast('Book uploaded! Translation is in progress — you can safely close this page.');
+      setUploadToast(
+        'Book uploaded! Translation is in progress — you can safely close this page.'
+      );
       toastTimerRef.current = setTimeout(() => setUploadToast(null), 8000);
 
       await fetchBooks();
@@ -391,9 +544,11 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
   const handleDeleteBook = async (bookUuid: string) => {
     if (!confirm('Are you sure you want to remove this book?')) return;
     try {
-      const response = await fetch(`/api/book/${bookUuid}`, { method: 'DELETE' });
+      const response = await fetch(`/api/book/${bookUuid}`, {
+        method: 'DELETE',
+      });
       if (!response.ok) {
-        const data = await response.json() as { error?: string };
+        const data = (await response.json()) as { error?: string };
         throw new Error(data.error || 'Failed to delete');
       }
       setHoveredBook(null);
@@ -420,18 +575,27 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
           <span>{uploadToast}</span>
         </div>
       )}
-      <div className="bookshelf-wall" ref={wallRef} style={{ backgroundImage: 'url(/bookcase_bg.jpeg)' }}>
+      <div
+        className="bookshelf-wall"
+        ref={wallRef}
+        style={{ backgroundImage: 'url(/bookcase_bg.jpeg)' }}
+      >
         {(() => {
           const safeBooks = Array.isArray(books) ? books : [];
-          const publicBooks = safeBooks.filter(b => !b.user_id);
-          const userBooks = safeBooks.filter(b => !!b.user_id);
+          const publicBooks = safeBooks.filter((b) => !b.user_id);
+          const userBooks = safeBooks.filter((b) => !!b.user_id);
           const renderBook = (book: Book) => {
             const isProcessing = book.status === 'processing';
             return (
               <div
                 key={book.uuid}
                 className={`book-spine-wrapper ${isProcessing ? 'processing' : ''}`}
-                onMouseEnter={() => { if (!isMobile) { setCoverLoaded(false); setHoveredBook(book); } }}
+                onMouseEnter={() => {
+                  if (!isMobile) {
+                    setCoverLoaded(false);
+                    setHoveredBook(book);
+                  }
+                }}
                 onMouseLeave={() => {}}
                 onClick={() => {
                   if (isProcessing) return;
@@ -450,120 +614,197 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                       className="book-spine-img"
                     />
                   ) : (
-                    <div className="book-spine-default" style={{ backgroundColor: stringToColor(book.title) }}>
-                      <span className="spine-title">{book.original_title || book.title}</span>
+                    <div
+                      className="book-spine-default"
+                      style={{ backgroundColor: stringToColor(book.title) }}
+                    >
+                      <span className="spine-title">
+                        {book.original_title || book.title}
+                      </span>
                     </div>
                   )}
                 </div>
-                {isProcessing && <div className="book-processing-overlay"><div className="processing-spinner"></div></div>}
+                {isProcessing && (
+                  <div className="book-processing-overlay">
+                    <div className="processing-spinner"></div>
+                  </div>
+                )}
               </div>
             );
           };
           return (
-            <div className="shelf-content" style={{ opacity: loading ? 0 : 1, transition: 'opacity 0.5s ease-in-out' }}>
+            <div
+              className="shelf-content"
+              style={{
+                opacity: loading ? 0 : 1,
+                transition: 'opacity 0.5s ease-in-out',
+              }}
+            >
               {publicBooks.length > 0 && (
-                <div className="books-grid" style={{ bottom: shelfPos.row1Bottom }}>
+                <div
+                  className="books-grid"
+                  style={{ bottom: shelfPos.row1Bottom }}
+                >
                   {publicBooks.map(renderBook)}
                 </div>
               )}
-              <div className="shelf-actions" style={{ top: shelfPos.actionsTop, left: shelfPos.actionsLeft }}>
-                  {userLoading ? null : user ? (
-                    <>
-                      <button
-                        className="shelf-avatar-btn"
-                        onClick={() => setShowUserMenu(!showUserMenu)}
-                      >
-                        {user.picture ? (
-                          <img src={user.picture} alt={user.name} className="user-avatar" />
-                        ) : (
-                          <div className="user-avatar-placeholder">
-                            {user.name?.charAt(0) || user.email.charAt(0)}
-                          </div>
-                        )}
-                      </button>
-                      <button
-                        className="shelf-upload-btn"
-                        onClick={() => setShowUploadModal(true)}
-                        title="Upload Book"
-                      >
-                        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                          <polyline points="17 8 12 3 7 8"/>
-                          <line x1="12" y1="3" x2="12" y2="15"/>
-                        </svg>
-                      </button>
-                      {showUserMenu && (
-                        <div className="shelf-user-dropdown">
-                          <div className="user-info">
-                            <span className="user-name">{user.name}</span>
-                            <span className="user-email">{user.email}</span>
-                          </div>
-                          <div className="user-credits">
-                            <span className="credits-label">Credits</span>
-                            <span className="credits-amount">{credits?.toLocaleString() ?? '...'}</span>
-                          </div>
-                          <button className="buy-credits-btn" onClick={() => { setShowUserMenu(false); setShowCreditsModal(true); }}>
-                            Buy Credits
-                          </button>
-                          <button className="logout-btn" onClick={logout}>
-                            Logout
-                          </button>
+              <div
+                className="shelf-actions"
+                style={{ top: shelfPos.actionsTop, left: shelfPos.actionsLeft }}
+              >
+                {userLoading ? null : user ? (
+                  <>
+                    <button
+                      className="shelf-avatar-btn"
+                      onClick={() => setShowUserMenu(!showUserMenu)}
+                    >
+                      {user.picture ? (
+                        <img
+                          src={user.picture}
+                          alt={user.name}
+                          className="user-avatar"
+                        />
+                      ) : (
+                        <div className="user-avatar-placeholder">
+                          {user.name?.charAt(0) || user.email.charAt(0)}
                         </div>
                       )}
-                    </>
-                  ) : (
-                    <button className="shelf-signin-btn" onClick={login}>
-                      <svg className="google-icon" viewBox="0 0 24 24" width="16" height="16">
-                        <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                        <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                        <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-                        <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
-                      </svg>
-                      <span>Sign in</span>
                     </button>
-                  )}
-                  <div className="shelf-help-wrapper" ref={helpRef}>
                     <button
-                      className="shelf-help-btn"
-                      onClick={() => setShowHelpMenu(!showHelpMenu)}
-                      title="Help"
+                      className="shelf-upload-btn"
+                      onClick={() => setShowUploadModal(true)}
+                      title="Upload Book"
                     >
-                      <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
-                        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25z"/>
+                      <svg
+                        viewBox="0 0 24 24"
+                        width="20"
+                        height="20"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                        <polyline points="17 8 12 3 7 8" />
+                        <line x1="12" y1="3" x2="12" y2="15" />
                       </svg>
                     </button>
-                    {showHelpMenu && (
-                      <div className="shelf-help-dropdown">
-                        <a
-                          href="https://github.com/GabrielDrapor/ovid"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="shelf-help-item"
-                          onClick={() => setShowHelpMenu(false)}
+                    {showUserMenu && (
+                      <div className="shelf-user-dropdown">
+                        <div className="user-info">
+                          <span className="user-name">{user.name}</span>
+                          <span className="user-email">{user.email}</span>
+                        </div>
+                        <div className="user-credits">
+                          <span className="credits-label">Credits</span>
+                          <span className="credits-amount">
+                            {credits?.toLocaleString() ?? '...'}
+                          </span>
+                        </div>
+                        <button
+                          className="buy-credits-btn"
+                          onClick={() => {
+                            setShowUserMenu(false);
+                            setShowCreditsModal(true);
+                          }}
                         >
-                          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
-                            <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
-                          </svg>
-                          <span>GitHub</span>
-                        </a>
-                        <a
-                          href="https://discord.gg/DBbB7qSXZf"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="shelf-help-item"
-                          onClick={() => setShowHelpMenu(false)}
-                        >
-                          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
-                            <path d="M20.317 4.37a19.791 19.791 0 00-4.885-1.515.074.074 0 00-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 00-5.487 0 12.64 12.64 0 00-.617-1.25.077.077 0 00-.079-.037A19.736 19.736 0 003.677 4.37a.07.07 0 00-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 00.031.057 19.9 19.9 0 005.993 3.03.078.078 0 00.084-.028c.462-.63.874-1.295 1.226-1.994a.076.076 0 00-.041-.106 13.107 13.107 0 01-1.872-.892.077.077 0 01-.008-.128 10.2 10.2 0 00.372-.292.074.074 0 01.077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 01.078.01c.12.098.246.198.373.292a.077.077 0 01-.006.127 12.299 12.299 0 01-1.873.892.077.077 0 00-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 00.084.028 19.839 19.839 0 006.002-3.03.077.077 0 00.032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 00-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/>
-                          </svg>
-                          <span>Discord</span>
-                        </a>
+                          Buy Credits
+                        </button>
+                        <button className="logout-btn" onClick={logout}>
+                          Logout
+                        </button>
                       </div>
                     )}
-                  </div>
+                  </>
+                ) : (
+                  <button className="shelf-signin-btn" onClick={login}>
+                    <svg
+                      className="google-icon"
+                      viewBox="0 0 24 24"
+                      width="16"
+                      height="16"
+                    >
+                      <path
+                        fill="#4285F4"
+                        d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                      />
+                      <path
+                        fill="#34A853"
+                        d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                      />
+                      <path
+                        fill="#FBBC05"
+                        d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
+                      />
+                      <path
+                        fill="#EA4335"
+                        d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
+                      />
+                    </svg>
+                    <span>Sign in</span>
+                  </button>
+                )}
+                <div className="shelf-help-wrapper" ref={helpRef}>
+                  <button
+                    className="shelf-help-btn"
+                    onClick={() => setShowHelpMenu(!showHelpMenu)}
+                    title="Help"
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      width="18"
+                      height="18"
+                      fill="currentColor"
+                    >
+                      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25z" />
+                    </svg>
+                  </button>
+                  {showHelpMenu && (
+                    <div className="shelf-help-dropdown">
+                      <a
+                        href="https://github.com/GabrielDrapor/ovid"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="shelf-help-item"
+                        onClick={() => setShowHelpMenu(false)}
+                      >
+                        <svg
+                          viewBox="0 0 24 24"
+                          width="16"
+                          height="16"
+                          fill="currentColor"
+                        >
+                          <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z" />
+                        </svg>
+                        <span>GitHub</span>
+                      </a>
+                      <a
+                        href="https://discord.gg/DBbB7qSXZf"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="shelf-help-item"
+                        onClick={() => setShowHelpMenu(false)}
+                      >
+                        <svg
+                          viewBox="0 0 24 24"
+                          width="16"
+                          height="16"
+                          fill="currentColor"
+                        >
+                          <path d="M20.317 4.37a19.791 19.791 0 00-4.885-1.515.074.074 0 00-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 00-5.487 0 12.64 12.64 0 00-.617-1.25.077.077 0 00-.079-.037A19.736 19.736 0 003.677 4.37a.07.07 0 00-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 00.031.057 19.9 19.9 0 005.993 3.03.078.078 0 00.084-.028c.462-.63.874-1.295 1.226-1.994a.076.076 0 00-.041-.106 13.107 13.107 0 01-1.872-.892.077.077 0 01-.008-.128 10.2 10.2 0 00.372-.292.074.074 0 01.077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 01.078.01c.12.098.246.198.373.292a.077.077 0 01-.006.127 12.299 12.299 0 01-1.873.892.077.077 0 00-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 00.084.028 19.839 19.839 0 006.002-3.03.077.077 0 00.032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 00-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z" />
+                        </svg>
+                        <span>Discord</span>
+                      </a>
+                    </div>
+                  )}
+                </div>
               </div>
               {userBooks.length > 0 && (
-                <div className="books-grid" style={{ bottom: shelfPos.row2Bottom }}>
+                <div
+                  className="books-grid"
+                  style={{ bottom: shelfPos.row2Bottom }}
+                >
                   {userBooks.map(renderBook)}
                 </div>
               )}
@@ -594,9 +835,10 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
 
             <div className="preview-info">
               <h2>{hoveredBook.original_title || hoveredBook.title}</h2>
-              {hoveredBook.original_title && hoveredBook.title !== hoveredBook.original_title && (
-                <h3 className="translated-title">{hoveredBook.title}</h3>
-              )}
+              {hoveredBook.original_title &&
+                hoveredBook.title !== hoveredBook.original_title && (
+                  <h3 className="translated-title">{hoveredBook.title}</h3>
+                )}
               <p className="author">By {hoveredBook.author}</p>
 
               {hoveredBook.status === 'processing' ? (
@@ -605,19 +847,36 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                   {(() => {
                     const tp = translationProgress.get(hoveredBook.uuid);
                     if (tp && tp.chaptersTotal > 0) {
-                      const pct = Math.round((tp.chaptersCompleted / tp.chaptersTotal) * 100);
+                      const pct = Math.round(
+                        (tp.chaptersCompleted / tp.chaptersTotal) * 100
+                      );
                       return (
                         <>
-                          <span>Translating... {tp.chaptersCompleted}/{tp.chaptersTotal} chapters ({pct}%)</span>
+                          <span>
+                            Translating... {tp.chaptersCompleted}/
+                            {tp.chaptersTotal} chapters ({pct}%)
+                          </span>
                           <div className="translation-progress-bar">
-                            <div className="translation-progress-fill" style={{ width: `${pct}%` }}></div>
+                            <div
+                              className="translation-progress-fill"
+                              style={{ width: `${pct}%` }}
+                            ></div>
                           </div>
                         </>
                       );
                     }
-                    return <span>{tp?.phase === 'glossary' ? 'Extracting glossary...' : 'Translating...'}</span>;
+                    return (
+                      <span>
+                        {tp?.phase === 'glossary'
+                          ? 'Extracting glossary...'
+                          : 'Translating...'}
+                      </span>
+                    );
                   })()}
-                  <span className="safe-to-close-hint">You can safely close this page — the book will be ready when you return.</span>
+                  <span className="safe-to-close-hint">
+                    You can safely close this page — the book will be ready when
+                    you return.
+                  </span>
                 </div>
               ) : hoveredBook.status === 'error' ? (
                 <div className="book-status-error">
@@ -626,11 +885,13 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
               ) : null}
               {(() => {
                 const progress = bookProgressMap.get(hoveredBook.uuid);
-                const progressPercent = progress?.is_completed ? 100 : (progress?.reading_progress || 0);
-                const statusText = progress?.is_completed 
-                  ? '✓ Completed' 
-                  : progressPercent > 0 
-                    ? `${progressPercent}% read` 
+                const progressPercent = progress?.is_completed
+                  ? 100
+                  : progress?.reading_progress || 0;
+                const statusText = progress?.is_completed
+                  ? '✓ Completed'
+                  : progressPercent > 0
+                    ? `${progressPercent}% read`
                     : 'Not started';
                 return (
                   <>
@@ -638,29 +899,39 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                     {user && hoveredBook.status !== 'processing' && (
                       <div className="progress-section">
                         <div className="progress-bar">
-                          <div 
-                            className="progress-fill" 
+                          <div
+                            className="progress-fill"
                             style={{ width: `${progressPercent}%` }}
                           ></div>
                         </div>
-                        <span className="progress-text">
-                          {statusText}
-                        </span>
+                        <span className="progress-text">{statusText}</span>
                       </div>
                     )}
-                    
+
                     {/* Remove button - only for user-owned books */}
                     {hoveredBook.user_id && (
                       <button
                         className="remove-book-btn"
-                        onClick={(e) => { e.stopPropagation(); handleDeleteBook(hoveredBook.uuid); }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteBook(hoveredBook.uuid);
+                        }}
                         title="Remove Book"
                       >
-                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <polyline points="3 6 5 6 21 6"/>
-                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                          <line x1="10" y1="11" x2="10" y2="17"/>
-                          <line x1="14" y1="11" x2="14" y2="17"/>
+                        <svg
+                          viewBox="0 0 24 24"
+                          width="16"
+                          height="16"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <polyline points="3 6 5 6 21 6" />
+                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                          <line x1="10" y1="11" x2="10" y2="17" />
+                          <line x1="14" y1="11" x2="14" y2="17" />
                         </svg>
                         <span>Remove</span>
                       </button>
@@ -680,21 +951,36 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
       {/* Mobile book bottom sheet */}
       {isMobile && mobileSelectedBook && (
         <>
-          <div className="mobile-book-sheet-overlay" onClick={() => setMobileSelectedBook(null)} />
+          <div
+            className="mobile-book-sheet-overlay"
+            onClick={() => setMobileSelectedBook(null)}
+          />
           <div className="mobile-book-sheet">
             <div className="sheet-handle" />
             {mobileSelectedBook.book_cover_img_url && (
-              <img src={mobileSelectedBook.book_cover_img_url} alt={mobileSelectedBook.title} className="sheet-cover" />
+              <img
+                src={mobileSelectedBook.book_cover_img_url}
+                alt={mobileSelectedBook.title}
+                className="sheet-cover"
+              />
             )}
-            <h2 className="sheet-title">{mobileSelectedBook.original_title || mobileSelectedBook.title}</h2>
-            {mobileSelectedBook.original_title && mobileSelectedBook.title !== mobileSelectedBook.original_title && (
-              <p className="sheet-translated-title">{mobileSelectedBook.title}</p>
-            )}
+            <h2 className="sheet-title">
+              {mobileSelectedBook.original_title || mobileSelectedBook.title}
+            </h2>
+            {mobileSelectedBook.original_title &&
+              mobileSelectedBook.title !==
+                mobileSelectedBook.original_title && (
+                <p className="sheet-translated-title">
+                  {mobileSelectedBook.title}
+                </p>
+              )}
             <p className="sheet-author">By {mobileSelectedBook.author}</p>
 
             {(() => {
               const progress = bookProgressMap.get(mobileSelectedBook.uuid);
-              const progressPercent = progress?.is_completed ? 100 : (progress?.reading_progress || 0);
+              const progressPercent = progress?.is_completed
+                ? 100
+                : progress?.reading_progress || 0;
               const statusText = progress?.is_completed
                 ? '✓ Completed'
                 : progressPercent > 0
@@ -703,7 +989,10 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
               return user && mobileSelectedBook.status !== 'processing' ? (
                 <div className="progress-section">
                   <div className="progress-bar">
-                    <div className="progress-fill" style={{ width: `${progressPercent}%` }}></div>
+                    <div
+                      className="progress-fill"
+                      style={{ width: `${progressPercent}%` }}
+                    ></div>
                   </div>
                   <span className="progress-text">{statusText}</span>
                 </div>
@@ -712,21 +1001,42 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
 
             {mobileSelectedBook.status === 'processing' ? (
               <div className="sheet-status">
-                <div className="processing-spinner" style={{ margin: '0 auto 8px' }}></div>
+                <div
+                  className="processing-spinner"
+                  style={{ margin: '0 auto 8px' }}
+                ></div>
                 {(() => {
                   const tp = translationProgress.get(mobileSelectedBook.uuid);
                   if (tp && tp.chaptersTotal > 0) {
-                    const pct = Math.round((tp.chaptersCompleted / tp.chaptersTotal) * 100);
-                    return <span>Translating... {tp.chaptersCompleted}/{tp.chaptersTotal} chapters ({pct}%)</span>;
+                    const pct = Math.round(
+                      (tp.chaptersCompleted / tp.chaptersTotal) * 100
+                    );
+                    return (
+                      <span>
+                        Translating... {tp.chaptersCompleted}/{tp.chaptersTotal}{' '}
+                        chapters ({pct}%)
+                      </span>
+                    );
                   }
                   return <span>Translating...</span>;
                 })()}
-                <span className="safe-to-close-hint">You can safely close this page — the book will be ready when you return.</span>
+                <span className="safe-to-close-hint">
+                  You can safely close this page — the book will be ready when
+                  you return.
+                </span>
               </div>
             ) : mobileSelectedBook.status === 'error' ? (
-              <div className="sheet-status" style={{ color: '#ff6b6b' }}>Translation failed</div>
+              <div className="sheet-status" style={{ color: '#ff6b6b' }}>
+                Translation failed
+              </div>
             ) : (
-              <button className="sheet-read-btn" onClick={() => { setMobileSelectedBook(null); onSelectBook(mobileSelectedBook.uuid); }}>
+              <button
+                className="sheet-read-btn"
+                onClick={() => {
+                  setMobileSelectedBook(null);
+                  onSelectBook(mobileSelectedBook.uuid);
+                }}
+              >
                 Read
               </button>
             )}
@@ -734,11 +1044,24 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
             {mobileSelectedBook.user_id && (
               <button
                 className="remove-book-btn"
-                onClick={(e) => { e.stopPropagation(); handleDeleteBook(mobileSelectedBook.uuid); setMobileSelectedBook(null); }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleDeleteBook(mobileSelectedBook.uuid);
+                  setMobileSelectedBook(null);
+                }}
               >
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="3 6 5 6 21 6"/>
-                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                <svg
+                  viewBox="0 0 24 24"
+                  width="16"
+                  height="16"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <polyline points="3 6 5 6 21 6" />
+                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
                 </svg>
                 <span>Remove</span>
               </button>
@@ -749,43 +1072,79 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
 
       {/* Upload Modal */}
       {showUploadModal && (
-        <div className="upload-modal-overlay" onClick={() => !uploading && !estimating && !uploadError && !estimate && setShowUploadModal(false)}>
-          <div className="upload-modal-content" onClick={(e) => e.stopPropagation()}>
+        <div
+          className="upload-modal-overlay"
+          onClick={() =>
+            !uploading &&
+            !estimating &&
+            !uploadError &&
+            !estimate &&
+            setShowUploadModal(false)
+          }
+        >
+          <div
+            className="upload-modal-content"
+            onClick={(e) => e.stopPropagation()}
+          >
             <h2>Upload Book</h2>
             {uploadError ? (
               <div className="upload-error">
-                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#ff6b6b" strokeWidth="2">
-                  <circle cx="12" cy="12" r="10"/>
-                  <line x1="12" y1="8" x2="12" y2="12"/>
-                  <line x1="12" y1="16" x2="12.01" y2="16"/>
+                <svg
+                  width="48"
+                  height="48"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="#ff6b6b"
+                  strokeWidth="2"
+                >
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="12" y1="8" x2="12" y2="12" />
+                  <line x1="12" y1="16" x2="12.01" y2="16" />
                 </svg>
                 <p className="error-message">{uploadError.message}</p>
-                {uploadError.required && uploadError.available !== undefined && (
-                  <div className="credit-details">
-                    <div className="credit-row">
-                      <span>Required:</span>
-                      <span className="required">{uploadError.required.toLocaleString()} credits</span>
+                {uploadError.required &&
+                  uploadError.available !== undefined && (
+                    <div className="credit-details">
+                      <div className="credit-row">
+                        <span>Required:</span>
+                        <span className="required">
+                          {uploadError.required.toLocaleString()} credits
+                        </span>
+                      </div>
+                      <div className="credit-row">
+                        <span>Available:</span>
+                        <span className="available">
+                          {uploadError.available.toLocaleString()} credits
+                        </span>
+                      </div>
+                      <div className="credit-row">
+                        <span>Need:</span>
+                        <span className="needed">
+                          {(
+                            uploadError.required - uploadError.available
+                          ).toLocaleString()}{' '}
+                          more credits
+                        </span>
+                      </div>
                     </div>
-                    <div className="credit-row">
-                      <span>Available:</span>
-                      <span className="available">{uploadError.available.toLocaleString()} credits</span>
-                    </div>
-                    <div className="credit-row">
-                      <span>Need:</span>
-                      <span className="needed">{(uploadError.required - uploadError.available).toLocaleString()} more credits</span>
-                    </div>
-                  </div>
-                )}
+                  )}
                 <div className="error-actions">
                   <button
                     className="buy-credits-btn-primary"
-                    onClick={() => { setShowUploadModal(false); setUploadError(null); setShowCreditsModal(true); }}
+                    onClick={() => {
+                      setShowUploadModal(false);
+                      setUploadError(null);
+                      setShowCreditsModal(true);
+                    }}
                   >
                     Buy Credits
                   </button>
                   <button
                     className="cancel-upload-btn"
-                    onClick={() => { setShowUploadModal(false); setUploadError(null); }}
+                    onClick={() => {
+                      setShowUploadModal(false);
+                      setUploadError(null);
+                    }}
                   >
                     Cancel
                   </button>
@@ -804,6 +1163,52 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                   </div>
                 ) : (
                   <>
+                    <div className="estimate-language-pickers">
+                      <div className="estimate-language-field">
+                        <label htmlFor="estimate-source-language">From</label>
+                        <select
+                          id="estimate-source-language"
+                          value={estimate.sourceLanguage}
+                          disabled={reEstimating}
+                          onChange={(e) =>
+                            handleChangeSourceLanguage(e.target.value)
+                          }
+                        >
+                          {Object.entries(SUPPORTED_LANGUAGES).map(
+                            ([code, label]) => (
+                              <option key={code} value={code}>
+                                {label}
+                              </option>
+                            )
+                          )}
+                        </select>
+                        <span className="estimate-language-hint">
+                          {estimate.sourceLanguage ===
+                          estimate.detectedSourceLanguage
+                            ? 'Detected automatically — change if wrong.'
+                            : `Detected ${SUPPORTED_LANGUAGES[estimate.detectedSourceLanguage] || estimate.detectedSourceLanguage}.`}
+                        </span>
+                      </div>
+                      <div className="estimate-language-field">
+                        <label htmlFor="estimate-target-language">To</label>
+                        <select
+                          id="estimate-target-language"
+                          value={estimate.targetLanguage}
+                          disabled={reEstimating}
+                          onChange={(e) =>
+                            handleChangeTargetLanguage(e.target.value)
+                          }
+                        >
+                          {Object.entries(SUPPORTED_LANGUAGES).map(
+                            ([code, label]) => (
+                              <option key={code} value={code}>
+                                {label}
+                              </option>
+                            )
+                          )}
+                        </select>
+                      </div>
+                    </div>
                     <div className="estimate-details">
                       <div className="estimate-row">
                         <span>Chapters:</span>
@@ -811,36 +1216,63 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                       </div>
                       <div className="estimate-row cost">
                         <span>Translation cost:</span>
-                        <span className={estimate.canAfford ? 'affordable' : 'not-affordable'}>
-                          {estimate.requiredCredits.toLocaleString()} credits
+                        <span
+                          className={
+                            estimate.canAfford ? 'affordable' : 'not-affordable'
+                          }
+                        >
+                          {reEstimating
+                            ? 'Recalculating…'
+                            : `${estimate.requiredCredits.toLocaleString()} credits`}
                         </span>
                       </div>
                       <div className="estimate-row balance">
                         <span>Your balance:</span>
-                        <span>{estimate.availableCredits.toLocaleString()} credits</span>
+                        <span>
+                          {estimate.availableCredits.toLocaleString()} credits
+                        </span>
                       </div>
-                      {!estimate.canAfford && (
+                      {!estimate.canAfford && !reEstimating && (
                         <div className="estimate-row needed">
                           <span>Need:</span>
                           <span className="not-affordable">
-                            {(estimate.requiredCredits - estimate.availableCredits).toLocaleString()} more credits
+                            {(
+                              estimate.requiredCredits -
+                              estimate.availableCredits
+                            ).toLocaleString()}{' '}
+                            more credits
                           </span>
                         </div>
                       )}
                     </div>
+                    {estimate.sourceLanguage === estimate.targetLanguage && (
+                      <div className="estimate-language-warning">
+                        Source and target language are the same. Change one to
+                        continue.
+                      </div>
+                    )}
                     <div className="estimate-actions">
                       {estimate.canAfford ? (
                         <button
                           className="confirm-upload-btn"
                           onClick={handleConfirmUpload}
-                          disabled={uploading}
+                          disabled={
+                            uploading ||
+                            reEstimating ||
+                            estimate.sourceLanguage === estimate.targetLanguage
+                          }
                         >
                           Confirm & Translate
                         </button>
                       ) : (
                         <button
                           className="buy-credits-btn-primary"
-                          onClick={() => { setShowUploadModal(false); setEstimate(null); setShowCreditsModal(true); }}
+                          onClick={() => {
+                            setShowUploadModal(false);
+                            setEstimate(null);
+                            setShowCreditsModal(true);
+                          }}
+                          disabled={reEstimating}
                         >
                           Buy Credits
                         </button>
@@ -848,6 +1280,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                       <button
                         className="cancel-upload-btn"
                         onClick={handleCancelEstimate}
+                        disabled={reEstimating}
                       >
                         Cancel
                       </button>
@@ -858,7 +1291,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
             ) : estimating ? (
               <div className="upload-progress">
                 <div className="spinner"></div>
-                <p>Analyzing book...</p>
+                <p>Analyzing book…</p>
               </div>
             ) : uploading ? (
               <div className="upload-progress">
@@ -868,7 +1301,8 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
             ) : (
               <div className="upload-area">
                 <div className="current-credits">
-                  Your credits: <strong>{credits?.toLocaleString() ?? '...'}</strong>
+                  Your credits:{' '}
+                  <strong>{credits?.toLocaleString() ?? '...'}</strong>
                 </div>
                 <input
                   type="file"
@@ -883,13 +1317,22 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                   style={{ display: 'none' }}
                 />
                 <label htmlFor="epub-file-input" className="upload-label">
-                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <svg
+                    width="48"
+                    height="48"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                  >
                     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                     <polyline points="17 8 12 3 7 8" />
                     <line x1="12" y1="3" x2="12" y2="15" />
                   </svg>
                   <span>Click to select EPUB file</span>
-                  <span className="upload-hint">The book will be automatically translated to Chinese</span>
+                  <span className="upload-hint">
+                    You'll pick source and target languages next.
+                  </span>
                 </label>
                 <button
                   className="cancel-upload-btn"
@@ -905,10 +1348,19 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
 
       {/* Credits Purchase Modal */}
       {showCreditsModal && (
-        <div className="upload-modal-overlay" onClick={() => setShowCreditsModal(false)}>
-          <div className="upload-modal-content credits-modal" onClick={(e) => e.stopPropagation()}>
+        <div
+          className="upload-modal-overlay"
+          onClick={() => setShowCreditsModal(false)}
+        >
+          <div
+            className="upload-modal-content credits-modal"
+            onClick={(e) => e.stopPropagation()}
+          >
             <h2>Buy Credits</h2>
-            <p className="credits-balance">Current balance: <strong>{credits?.toLocaleString() ?? '0'}</strong> credits</p>
+            <p className="credits-balance">
+              Current balance:{' '}
+              <strong>{credits?.toLocaleString() ?? '0'}</strong> credits
+            </p>
             <div className="credit-packages">
               {creditPackages.map((pkg) => (
                 <button
@@ -916,13 +1368,19 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                   className="credit-package"
                   onClick={() => purchaseCredits(pkg.id)}
                 >
-                  <span className="package-credits">{pkg.credits.toLocaleString()}</span>
+                  <span className="package-credits">
+                    {pkg.credits.toLocaleString()}
+                  </span>
                   <span className="package-label">credits</span>
-                  <span className="package-price">${(pkg.price / 100).toFixed(2)}</span>
+                  <span className="package-price">
+                    ${(pkg.price / 100).toFixed(2)}
+                  </span>
                 </button>
               ))}
             </div>
-            <p className="credits-info">Credits are used for book translations.</p>
+            <p className="credits-info">
+              Credits are used for book translations.
+            </p>
             <button
               className="cancel-upload-btn"
               onClick={() => setShowCreditsModal(false)}
