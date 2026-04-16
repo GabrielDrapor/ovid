@@ -657,24 +657,27 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
           view-transition-name: epub-page;
         }
         @keyframes page-turn-in-right {
-          from { opacity: 0; transform: translate3d(48px, 0, 0); }
-          to   { opacity: 1; transform: translate3d(0, 0, 0); }
+          from { transform: translate3d(100%, 0, 0); }
+          to   { transform: translate3d(0, 0, 0); }
         }
         @keyframes page-turn-out-left {
-          from { opacity: 1; transform: translate3d(0, 0, 0); }
-          to   { opacity: 0; transform: translate3d(-48px, 0, 0); }
+          from { transform: translate3d(0, 0, 0); }
+          to   { transform: translate3d(-100%, 0, 0); }
         }
         @keyframes page-turn-in-left {
-          from { opacity: 0; transform: translate3d(-48px, 0, 0); }
-          to   { opacity: 1; transform: translate3d(0, 0, 0); }
+          from { transform: translate3d(-100%, 0, 0); }
+          to   { transform: translate3d(0, 0, 0); }
         }
         @keyframes page-turn-out-right {
-          from { opacity: 1; transform: translate3d(0, 0, 0); }
-          to   { opacity: 0; transform: translate3d(48px, 0, 0); }
+          from { transform: translate3d(0, 0, 0); }
+          to   { transform: translate3d(100%, 0, 0); }
+        }
+        ::view-transition-group(epub-page) {
+          overflow: hidden;
         }
         ::view-transition-old(epub-page),
         ::view-transition-new(epub-page) {
-          animation-duration: 220ms;
+          animation-duration: 320ms;
           animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
           animation-fill-mode: both;
           mix-blend-mode: normal;
