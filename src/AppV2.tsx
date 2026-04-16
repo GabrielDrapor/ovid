@@ -82,6 +82,11 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
   // Debounce timer for progress API updates
   const progressTimerRef = useRef<NodeJS.Timeout | null>(null);
 
+  // In-memory cache of fetched chapter content, keyed by chapter number.
+  // Lets prev/next navigation hit memory instead of the network so the
+  // page-turn animation runs without a fetch stall.
+  const chapterCacheRef = useRef<Map<number, ChapterContent>>(new Map());
+
   // Track book completion status
   const [isCompleted, setIsCompleted] = useState(false);
 
@@ -239,6 +244,31 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
     loadBookMeta();
   }, [bookUuid]);
 
+  // Fetch a chapter payload with an in-memory cache so repeat/adjacent
+  // navigation is instant. On miss, hits the API and caches the result.
+  const fetchChapterData = async (chapterNumber: number): Promise<ChapterContent> => {
+    const cached = chapterCacheRef.current.get(chapterNumber);
+    if (cached) return cached;
+    const response = await fetchWithRetry(`/api/v2/book/${bookUuid}/chapter/${chapterNumber}`);
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    const data = (await response.json()) as ChapterContent;
+    chapterCacheRef.current.set(chapterNumber, data);
+    return data;
+  };
+
+  // Background-prefetch a chapter with no loading UI, ignoring failures.
+  const prefetchChapter = (chapterNumber: number) => {
+    if (chapterNumber < 1) return;
+    if (chapters.length > 0 && chapterNumber > chapters.length) return;
+    if (chapterCacheRef.current.has(chapterNumber)) return;
+    const run = () => { fetchChapterData(chapterNumber).catch(() => {}); };
+    const w = window as Window & { requestIdleCallback?: (cb: () => void) => void };
+    if (typeof w.requestIdleCallback === 'function') w.requestIdleCallback(run);
+    else setTimeout(run, 200);
+  };
+
   // Load chapter content
   const loadChapter = async (chapterNumber: number, scrollToXpath?: string) => {
     // Cancel any pending progress save from the previous chapter
@@ -247,15 +277,17 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
       clearTimeout(progressTimerRef.current);
       progressTimerRef.current = null;
     }
-    setLoading(true);
+    const cacheHit = chapterCacheRef.current.has(chapterNumber);
+    // Skip the "Loading chapter..." flash when we already have the content —
+    // this is what makes the page-turn animation feel instant.
+    if (!cacheHit) setLoading(true);
     try {
-      const response = await fetchWithRetry(`/api/v2/book/${bookUuid}/chapter/${chapterNumber}`);
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      const data = await response.json();
-      setChapterContent(data as ChapterContent);
+      const data = await fetchChapterData(chapterNumber);
+      setChapterContent(data);
       setCurrentChapter(chapterNumber);
+      // Warm the cache for adjacent chapters so the next click is also instant.
+      prefetchChapter(chapterNumber - 1);
+      prefetchChapter(chapterNumber + 1);
 
       // Auto-update reading progress in database (fire-and-forget)
       // Use PUT progress endpoint to avoid resetting completion status
@@ -384,9 +416,10 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
     }
   }, [bookUuid]);
 
-  // Wrapper for manual chapter navigation (no xpath) - must be before early returns
+  // Wrapper for manual chapter navigation (no xpath) - must be before early returns.
+  // Returns the Promise so the reader can await it inside document.startViewTransition().
   const handleLoadChapter = useCallback((chapterNumber: number) => {
-    loadChapter(chapterNumber);
+    return loadChapter(chapterNumber);
   }, [bookUuid]);
 
   if (error) {
