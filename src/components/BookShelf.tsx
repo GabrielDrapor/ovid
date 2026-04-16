@@ -575,7 +575,11 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
           <span>{uploadToast}</span>
         </div>
       )}
-      <div className="bookshelf-wall" ref={wallRef}>
+      <div
+        className="bookshelf-wall"
+        ref={wallRef}
+        style={{ backgroundImage: 'url(/bookcase_bg.jpeg)' }}
+      >
         {(() => {
           const safeBooks = Array.isArray(books) ? books : [];
           const publicBooks = safeBooks.filter((b) => !b.user_id);
