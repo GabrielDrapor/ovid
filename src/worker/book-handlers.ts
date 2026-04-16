@@ -58,11 +58,16 @@ export async function handleBookUpload(
 
     if (contentType.includes('application/json')) {
       // Fast path: file already in R2 from estimate phase — just copy it
-      const body = await request.json() as { fileKey?: string; targetLanguage?: string; sourceLanguage?: string };
+      const body = (await request.json()) as {
+        fileKey?: string;
+        targetLanguage?: string;
+        sourceLanguage?: string;
+      };
 
       if (!body.fileKey) {
         return new Response(JSON.stringify({ error: 'Missing fileKey' }), {
-          status: 400, headers: { 'Content-Type': 'application/json' },
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
         });
       }
 
@@ -71,7 +76,7 @@ export async function handleBookUpload(
 
       // Derive extension from the temp key
       const supportedExtensions = ['.epub', '.mobi', '.azw3'];
-      const ext = supportedExtensions.find(e => body.fileKey!.endsWith(e));
+      const ext = supportedExtensions.find((e) => body.fileKey!.endsWith(e));
       if (!ext) {
         return new Response(
           JSON.stringify({ error: 'Invalid fileKey extension' }),
@@ -85,7 +90,9 @@ export async function handleBookUpload(
       if (!tempObject) {
         console.warn(`Upload: estimate file not found at ${body.fileKey}`);
         return new Response(
-          JSON.stringify({ error: 'Estimated file not found — please re-upload' }),
+          JSON.stringify({
+            error: 'Estimated file not found — please re-upload',
+          }),
           { status: 404, headers: { 'Content-Type': 'application/json' } }
         );
       }
@@ -107,16 +114,19 @@ export async function handleBookUpload(
 
       if (!file) {
         return new Response(JSON.stringify({ error: 'No file provided' }), {
-          status: 400, headers: { 'Content-Type': 'application/json' },
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
         });
       }
 
       const fileName = file.name.toLowerCase();
       const supportedExtensions = ['.epub', '.mobi', '.azw3'];
-      const ext = supportedExtensions.find(e => fileName.endsWith(e));
+      const ext = supportedExtensions.find((e) => fileName.endsWith(e));
       if (!ext) {
         return new Response(
-          JSON.stringify({ error: 'Only EPUB, MOBI, and AZW3 files are supported' }),
+          JSON.stringify({
+            error: 'Only EPUB, MOBI, and AZW3 files are supported',
+          }),
           { status: 400, headers: { 'Content-Type': 'application/json' } }
         );
       }
@@ -134,11 +144,13 @@ export async function handleBookUpload(
     const maxOrderRow = await env.DB.prepare(
       'SELECT COALESCE(MAX(display_order), 0) as max_order FROM books_v2'
     ).first<{ max_order: number }>();
-    const nextOrder = ((maxOrderRow?.max_order) || 0) + 1;
+    const nextOrder = (maxOrderRow?.max_order || 0) + 1;
     await env.DB.prepare(
       `INSERT INTO books_v2 (uuid, title, original_title, author, language_pair, user_id, status, display_order)
        VALUES (?, 'Processing...', '', '', ?, ?, 'processing', ?)`
-    ).bind(bookUuid, `${sourceLanguage}-${targetLanguage}`, user.id, nextOrder).run();
+    )
+      .bind(bookUuid, `${sourceLanguage}-${targetLanguage}`, user.id, nextOrder)
+      .run();
 
     // Delegate everything to Railway (parsing, DB writes, credits, translation)
     const translatorUrl = env.TRANSLATOR_SERVICE_URL;
@@ -157,7 +169,10 @@ export async function handleBookUpload(
           secret: translatorSecret,
         }),
       }).catch((err) => {
-        console.error(`Failed to notify translator service for ${bookUuid}:`, err);
+        console.error(
+          `Failed to notify translator service for ${bookUuid}:`,
+          err
+        );
       })
     );
 
@@ -219,7 +234,8 @@ export async function handleTranslateNext(
       return json({
         done: false,
         progress: {
-          phase: job.status === 'extracting_glossary' ? 'glossary' : 'translating',
+          phase:
+            job.status === 'extracting_glossary' ? 'glossary' : 'translating',
           chaptersCompleted: job.completed_chapters,
           chaptersTotal: job.total_chapters,
           currentChapter: job.current_chapter,
@@ -246,8 +262,13 @@ export async function handleTranslateNext(
     });
 
     // Phase 1: Extract glossary
-    if (job.status === 'pending' || (job.status === 'extracting_glossary' && !job.glossary_extracted)) {
-      await updateTranslationJob(env.DB, bookUuid, { status: 'extracting_glossary' });
+    if (
+      job.status === 'pending' ||
+      (job.status === 'extracting_glossary' && !job.glossary_extracted)
+    ) {
+      await updateTranslationJob(env.DB, bookUuid, {
+        status: 'extracting_glossary',
+      });
 
       // Gather all text for glossary extraction
       const allTexts: string[] = [];
@@ -287,8 +308,11 @@ export async function handleTranslateNext(
     if (job.status === 'translating') {
       // Translate book title first
       if (!job.title_translated) {
-        const bookRow = await env.DB.prepare('SELECT original_title FROM books_v2 WHERE uuid = ?')
-          .bind(bookUuid).first();
+        const bookRow = await env.DB.prepare(
+          'SELECT original_title FROM books_v2 WHERE uuid = ?'
+        )
+          .bind(bookUuid)
+          .first();
         const originalTitle = (bookRow?.original_title as string) || 'Untitled';
 
         const translatedTitle = await translator.translateText(originalTitle, {
@@ -297,7 +321,8 @@ export async function handleTranslateNext(
         });
 
         await env.DB.prepare('UPDATE books_v2 SET title = ? WHERE uuid = ?')
-          .bind(translatedTitle, bookUuid).run();
+          .bind(translatedTitle, bookUuid)
+          .run();
 
         await updateTranslationJob(env.DB, bookUuid, {
           title_translated: 1,
@@ -326,7 +351,11 @@ export async function handleTranslateNext(
         return json({ done: true });
       }
 
-      const textNodes = await getChapterTextNodes(env.DB, job.book_id, chapterNum);
+      const textNodes = await getChapterTextNodes(
+        env.DB,
+        job.book_id,
+        chapterNum
+      );
       if (!textNodes || textNodes.length === 0) {
         // Empty chapter, skip to next
         await updateTranslationJob(env.DB, bookUuid, {
@@ -346,7 +375,11 @@ export async function handleTranslateNext(
         });
       }
 
-      const chapterId = await getChapterIdByNumber(env.DB, job.book_id, chapterNum);
+      const chapterId = await getChapterIdByNumber(
+        env.DB,
+        job.book_id,
+        chapterNum
+      );
       if (!chapterId) {
         // Chapter not found, skip
         await updateTranslationJob(env.DB, bookUuid, {
@@ -423,15 +456,25 @@ export async function handleTranslateNext(
         // Translate chapter title
         const chapterRow = await env.DB.prepare(
           'SELECT original_title FROM chapters_v2 WHERE book_id = ? AND chapter_number = ?'
-        ).bind(job.book_id, chapterNum).first();
+        )
+          .bind(job.book_id, chapterNum)
+          .first();
 
         if (chapterRow?.original_title) {
           try {
             const translatedChTitle = await translator.translateText(
               chapterRow.original_title as string,
-              { sourceLanguage: job.source_language, targetLanguage: job.target_language }
+              {
+                sourceLanguage: job.source_language,
+                targetLanguage: job.target_language,
+              }
             );
-            await updateChapterTitle(env.DB, job.book_id, chapterNum, translatedChTitle);
+            await updateChapterTitle(
+              env.DB,
+              job.book_id,
+              chapterNum,
+              translatedChTitle
+            );
           } catch {
             // Keep original title on failure
           }
@@ -501,10 +544,15 @@ export async function handleTranslateNext(
         error_message: errorMessage,
       });
       await updateBookStatus(env.DB, bookUuid, 'error');
-    } catch { /* ignore cleanup errors */ }
+    } catch {
+      /* ignore cleanup errors */
+    }
 
     return new Response(
-      JSON.stringify({ error: 'Translation chunk failed', details: errorMessage }),
+      JSON.stringify({
+        error: 'Translation chunk failed',
+        details: errorMessage,
+      }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }
     );
   }
@@ -535,37 +583,79 @@ export async function handleBookEstimate(
   }
 
   try {
-    const formData = await request.formData();
-    const file = formData.get('file') as File;
-    const targetLanguage = (formData.get('targetLanguage') as string) || 'zh';
-
-    if (!file) {
-      return new Response(JSON.stringify({ error: 'No file provided' }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
-
-    const fileName = file.name.toLowerCase();
+    const contentType = request.headers.get('content-type') || '';
     const supportedExtensions = ['.epub', '.mobi', '.azw3'];
-    const fileExtension = supportedExtensions.find(ext => fileName.endsWith(ext));
+    let targetLanguage = 'zh';
+    let tempKey: string;
+    let fileExtension: string;
 
-    if (!fileExtension) {
-      return new Response(
-        JSON.stringify({ error: 'Only EPUB, MOBI, and AZW3 files are supported' }),
-        { status: 400, headers: { 'Content-Type': 'application/json' } }
-      );
+    if (contentType.includes('application/json')) {
+      // Re-estimate path: file already in R2 from a prior estimate call.
+      const body = (await request.json()) as {
+        fileKey?: string;
+        targetLanguage?: string;
+      };
+      if (!body.fileKey) {
+        return new Response(JSON.stringify({ error: 'Missing fileKey' }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      const ext = supportedExtensions.find((e) => body.fileKey!.endsWith(e));
+      if (!ext) {
+        return new Response(
+          JSON.stringify({ error: 'Invalid fileKey extension' }),
+          { status: 400, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      // Verify the object still exists so the client can fall back to re-upload.
+      const existing = await env.ASSETS_BUCKET.head(body.fileKey);
+      if (!existing) {
+        return new Response(
+          JSON.stringify({
+            error: 'Estimated file not found — please re-upload',
+          }),
+          { status: 404, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      tempKey = body.fileKey;
+      fileExtension = ext;
+      targetLanguage = body.targetLanguage || 'zh';
+    } else {
+      const formData = await request.formData();
+      const file = formData.get('file') as File;
+      targetLanguage = (formData.get('targetLanguage') as string) || 'zh';
+
+      if (!file) {
+        return new Response(JSON.stringify({ error: 'No file provided' }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      const fileName = file.name.toLowerCase();
+      const ext = supportedExtensions.find((e) => fileName.endsWith(e));
+
+      if (!ext) {
+        return new Response(
+          JSON.stringify({
+            error: 'Only EPUB, MOBI, and AZW3 files are supported',
+          }),
+          { status: 400, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      fileExtension = ext;
+
+      const buffer = await file.arrayBuffer();
+
+      // Store file temporarily in R2 for Railway to parse
+      tempKey = `uploads/_estimate/${crypto.randomUUID()}${fileExtension}`;
+      await env.ASSETS_BUCKET.put(tempKey, buffer, {
+        httpMetadata: { contentType: file.type || 'application/octet-stream' },
+        customMetadata: { originalName: file.name },
+      });
+      console.log(`Estimate: stored temp file at ${tempKey}`);
     }
-
-    const buffer = await file.arrayBuffer();
-
-    // Store file temporarily in R2 for Railway to parse
-    const tempKey = `uploads/_estimate/${crypto.randomUUID()}${fileExtension}`;
-    await env.ASSETS_BUCKET.put(tempKey, buffer, {
-      httpMetadata: { contentType: file.type || 'application/octet-stream' },
-      customMetadata: { originalName: file.name },
-    });
-    console.log(`Estimate: stored temp file at ${tempKey}`);
 
     // Ask Railway to parse and estimate
     const resp = await fetch(`${env.TRANSLATOR_SERVICE_URL}/estimate`, {
