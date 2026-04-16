@@ -1,0 +1,162 @@
+/*
+ * Ovid — Design Tokens
+ * See .impeccable.md for the aesthetic brief. Edit here, never inline.
+ *
+ * Palette anchor: cream paper, walnut, ink, oxblood (rare accent).
+ * Both light and dark are first-class. Neither is a courtesy mode.
+ */
+
+@layer tokens {
+  :root {
+    color-scheme: light dark;
+
+    /* ── Type families ─────────────────────────────────────────────
+     * Display  — Young Serif: quiet letterpress bite, single weight enforces restraint.
+     * Body     — EB Garamond: warm oldstyle, real italic voice, made for long reading.
+     * CJK body — LXGW Neo ZhiSong Screen: song-ti, print-formal, already self-hosted.
+     * CJK disp — LXGW WenKai: kai-ti, hand-written warmth for diaspora tone (optional).
+     *
+     * Stacks put Latin face first so English renders in the serif,
+     * then falls through to the CJK face for Han characters.
+     */
+    --font-display: 'Young Serif', 'EB Garamond', 'LXGW Neo ZhiSong Screen',
+      ui-serif, Georgia, 'Times New Roman', serif;
+    --font-body: 'EB Garamond', 'LXGW Neo ZhiSong Screen', ui-serif, Georgia,
+      'Times New Roman', serif;
+    --font-ui: 'EB Garamond', 'LXGW Neo ZhiSong Screen', ui-serif, Georgia, serif;
+    --font-numeric: 'EB Garamond', ui-serif, 'Cambria Math', Georgia, serif;
+
+    /* Weights — both faces have limited weights; use these semantic names */
+    --weight-regular: 400;
+    --weight-medium: 500;
+    --weight-semibold: 600;
+
+    /* ── Type scale ────────────────────────────────────────────────
+     * 1.25 ratio. 17px base (slightly larger for reading).
+     * Only --text-display is fluid; UI sizes stay fixed so things
+     * don't wiggle on resize.
+     */
+    --text-xs: 0.8125rem;   /* 13px — captions, meta */
+    --text-sm: 0.9375rem;   /* 15px — secondary */
+    --text-base: 1.0625rem; /* 17px — body default */
+    --text-md: 1.25rem;     /* 20px — lede */
+    --text-lg: 1.5625rem;   /* 25px — h3 */
+    --text-xl: 1.953rem;    /* 31px — h2 */
+    --text-2xl: 2.441rem;   /* 39px — h1 */
+    --text-display: clamp(2.5rem, 2.2rem + 1.8vw, 3.815rem);
+
+    /* Leading — shorter measures want tighter leading */
+    --lh-tight: 1.2;
+    --lh-snug: 1.35;
+    --lh-body: 1.65;        /* body reading default */
+    --lh-body-cjk: 1.8;     /* CJK wants more breathing room */
+
+    /* Measure — ~65ch for Latin body, shorter for CJK */
+    --measure: 68ch;
+    --measure-narrow: 52ch;
+
+    /* Tracking */
+    --tracking-tight: -0.01em;
+    --tracking-normal: 0;
+    --tracking-wide: 0.02em;
+    --tracking-label: 0.06em; /* for short all-caps labels only */
+
+    /* ── Spacing scale ─────────────────────────────────────────────
+     * 4pt base, semantic names, not pixel names.
+     */
+    --space-3xs: 0.25rem;   /* 4 */
+    --space-2xs: 0.5rem;    /* 8 */
+    --space-xs: 0.75rem;    /* 12 */
+    --space-sm: 1rem;       /* 16 */
+    --space-md: 1.5rem;     /* 24 */
+    --space-lg: 2rem;       /* 32 */
+    --space-xl: 3rem;       /* 48 */
+    --space-2xl: 4rem;      /* 64 */
+    --space-3xl: 6rem;      /* 96 */
+
+    /* ── Radius ────────────────────────────────────────────────────
+     * Restrained. Books don't have rounded corners.
+     */
+    --radius-xs: 2px;
+    --radius-sm: 4px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+    --radius-pill: 999px;   /* use sparingly, specific cases only */
+
+    /* ── Motion ────────────────────────────────────────────────────
+     * ease-out-quart for natural deceleration. No bounce, no elastic.
+     * "Held, not used": lean slow over snappy.
+     */
+    --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+    --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+    --duration-fast: 140ms;
+    --duration-base: 240ms;
+    --duration-slow: 420ms;
+
+    /* ── Palette ───────────────────────────────────────────────────
+     * OKLCH only. All neutrals tinted warm (hue ≈ 50-75).
+     * Accent (oxblood) appears once per view, at most.
+     *
+     * light-dark() resolves based on :root.color-scheme or
+     * [data-theme] below.
+     */
+
+    /* Surfaces */
+    --paper:       light-dark(oklch(96.5% 0.012 80), oklch(15.5% 0.010 50));
+    --paper-soft:  light-dark(oklch(93.5% 0.015 75), oklch(19%   0.012 50));
+    --paper-sunk:  light-dark(oklch(90%   0.018 75), oklch(12%   0.010 50));
+
+    /* Ink (text) */
+    --ink:         light-dark(oklch(22%   0.014 50), oklch(91%   0.014 80));
+    --ink-soft:    light-dark(oklch(40%   0.018 55), oklch(72%   0.016 75));
+    --ink-faint:   light-dark(oklch(58%   0.014 60), oklch(54%   0.016 65));
+    --ink-ghost:   light-dark(oklch(72%   0.010 65), oklch(40%   0.014 55));
+
+    /* Walnut — secondary warm tones */
+    --walnut:      light-dark(oklch(45%   0.035 45), oklch(55%   0.030 55));
+    --walnut-soft: light-dark(oklch(72%   0.020 55), oklch(40%   0.025 50));
+
+    /* Rules / dividers — very quiet */
+    --rule:        light-dark(oklch(86%   0.012 70), oklch(26%   0.012 50));
+    --rule-soft:   light-dark(oklch(91%   0.010 70), oklch(22%   0.010 50));
+
+    /* Accent — oxblood. Rare. */
+    --accent:      light-dark(oklch(40%   0.135 22), oklch(58%   0.125 22));
+    --accent-soft: light-dark(oklch(40%   0.135 22 / 0.10), oklch(58% 0.125 22 / 0.15));
+    --accent-ink:  light-dark(oklch(32%   0.140 20), oklch(72%   0.110 25));
+
+    /* Semantic states — muted, warm-tinted, not generic SaaS hues */
+    --caution:     light-dark(oklch(55%   0.105 65), oklch(72%   0.115 70));   /* amber, muted */
+    --caution-soft:light-dark(oklch(55%   0.105 65 / 0.10), oklch(72% 0.115 70 / 0.15));
+    --danger:      light-dark(oklch(42%   0.125 28), oklch(65%   0.130 28));   /* oxblood-adjacent */
+    --danger-soft: light-dark(oklch(42%   0.125 28 / 0.08), oklch(65% 0.130 28 / 0.15));
+
+    /* Shadows — warm-tinted, never pure black */
+    --shadow-sm: 0 1px 2px oklch(20% 0.02 50 / 0.10);
+    --shadow-md: 0 6px 20px oklch(20% 0.02 50 / 0.14);
+    --shadow-lg: 0 20px 60px oklch(15% 0.02 50 / 0.22);
+    --shadow-page: 0 30px 80px oklch(12% 0.015 50 / 0.35);
+
+    /* Focus — visible, warm, accessible */
+    --focus-ring: 0 0 0 3px light-dark(oklch(40% 0.135 22 / 0.28), oklch(58% 0.125 22 / 0.38));
+  }
+
+  /* Manual theme override hooks. Components can force a theme on a
+   * subtree, e.g. the reader page that always reads on light paper
+   * regardless of shelf chrome around it. */
+  [data-theme='light'] {
+    color-scheme: light;
+  }
+  [data-theme='dark'] {
+    color-scheme: dark;
+  }
+
+  /* Respect user motion preference. */
+  @media (prefers-reduced-motion: reduce) {
+    :root {
+      --duration-fast: 1ms;
+      --duration-base: 1ms;
+      --duration-slow: 1ms;
+    }
+  }
+}
