@@ -1,14 +1,17 @@
-<h1 align="center">Ovid</h1>
-
 <p align="center">
   <img src="logo.png" alt="Ovid" width="180"/>
 </p>
+
+<h1 align="center">Ovid</h1>
 
 <p align="center"><strong>Two languages, one tap.</strong></p>
 
 <div align="center">
   <img width="800" height="476" alt="image" src="https://github.com/user-attachments/assets/b4263157-c44b-4b7e-8692-69f19c457e57" />
-  <img width="800" height="1215" alt="2026-03-1923 59 55-ezgif com-video-to-gif-converter" src="https://github.com/user-attachments/assets/2b6dc7ee-7082-4759-ae6a-fbd462d3bc85" />
+</div>
+
+<div align="center">
+  <img width="800" alt="2026-03-1923 59 55-ezgif com-video-to-gif-converter" src="https://github.com/user-attachments/assets/2b6dc7ee-7082-4759-ae6a-fbd462d3bc85" />
 </div>
 
 
