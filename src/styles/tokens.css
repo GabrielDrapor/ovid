@@ -11,20 +11,19 @@
     color-scheme: light dark;
 
     /* ── Type families ─────────────────────────────────────────────
-     * Display  — Young Serif: quiet letterpress bite, single weight enforces restraint.
-     * Body     — EB Garamond: warm oldstyle, real italic voice, made for long reading.
+     * Display + Body — Literata: variable optical size, full weight range,
+     *                  real italics, designed for long-form reading on screens.
      * CJK body — LXGW Neo ZhiSong Screen: song-ti, print-formal, already self-hosted.
-     * CJK disp — LXGW WenKai: kai-ti, hand-written warmth for diaspora tone (optional).
      *
      * Stacks put Latin face first so English renders in the serif,
      * then falls through to the CJK face for Han characters.
      */
-    --font-display: 'Young Serif', 'EB Garamond', 'LXGW Neo ZhiSong Screen',
+    --font-display: 'Literata', 'LXGW Neo ZhiSong Screen',
       ui-serif, Georgia, 'Times New Roman', serif;
-    --font-body: 'EB Garamond', 'LXGW Neo ZhiSong Screen', ui-serif, Georgia,
+    --font-body: 'Literata', 'LXGW Neo ZhiSong Screen', ui-serif, Georgia,
       'Times New Roman', serif;
-    --font-ui: 'EB Garamond', 'LXGW Neo ZhiSong Screen', ui-serif, Georgia, serif;
-    --font-numeric: 'EB Garamond', ui-serif, 'Cambria Math', Georgia, serif;
+    --font-ui: 'Literata', 'LXGW Neo ZhiSong Screen', ui-serif, Georgia, serif;
+    --font-numeric: 'Literata', ui-serif, 'Cambria Math', Georgia, serif;
 
     /* Weights — both faces have limited weights; use these semantic names */
     --weight-regular: 400;
