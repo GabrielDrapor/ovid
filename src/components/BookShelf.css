@@ -389,7 +389,7 @@
 
   background-color: oklch(16% 0.018 48);
   background-size: cover;
-  background-position: center center;
+  background-position: left center;
   background-repeat: no-repeat;
   box-shadow: inset -20px 0 60px oklch(0% 0 0 / 0.45);
 }
