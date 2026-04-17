@@ -563,6 +563,24 @@
   color: oklch(92% 0.014 80);
 }
 
+.shelf-theme-btn {
+  width: 30px;
+  height: 30px;
+  background: none;
+  border: none;
+  color: oklch(92% 0.014 80 / 0.82);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-out);
+  padding: 0;
+}
+
+.shelf-theme-btn:hover {
+  color: oklch(92% 0.014 80);
+}
+
 .shelf-help-dropdown {
   position: absolute;
   bottom: 36px;

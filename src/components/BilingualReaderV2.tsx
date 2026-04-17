@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useTheme } from '../contexts/ThemeContext';
 import './BilingualReader.css';
 
 interface Chapter {
@@ -95,6 +96,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
   initialXpath,
   onProgressChange,
 }) => {
+  const { theme, toggleTheme } = useTheme();
   const contentRef = useRef<HTMLDivElement>(null);
   const [showOriginal, setShowOriginal] = useState(true);
   const showOriginalRef = useRef(showOriginal);
@@ -843,6 +845,14 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
 
             {/* Divider */}
             <div className="fab-divider" />
+
+            {/* Theme toggle */}
+            <button
+              className="fab-menu-item"
+              onClick={toggleTheme}
+            >
+              <span>{theme === 'light' ? 'Dark Mode' : 'Light Mode'}</span>
+            </button>
 
             {/* Typography section - collapsible */}
             <button
