@@ -94,7 +94,7 @@ function SharedBookView({ shareToken }: SharedBookViewProps) {
       <div className="App">
         <div style={{ textAlign: 'center', padding: '50px' }}>
           <div>{error}</div>
-          <a href="/" style={{ color: '#666', marginTop: '20px', display: 'inline-block' }}>Go to Library</a>
+          <a href="/" style={{ color: 'var(--ink-soft)', marginTop: 'var(--space-sm)', display: 'inline-block' }}>Go to Library</a>
         </div>
       </div>
     );

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useTheme } from '../contexts/ThemeContext';
 import './BilingualReader.css';
 
 interface Chapter {
@@ -100,6 +101,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
   initialShowOriginal,
   onShowOriginalChange,
 }) => {
+  const { theme, toggleTheme } = useTheme();
   const contentRef = useRef<HTMLDivElement>(null);
   const [showOriginal, setShowOriginal] = useState(initialShowOriginal ?? true);
   const showOriginalRef = useRef(showOriginal);
@@ -617,7 +619,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
           transition: background-color 0.2s;
         }
         .reader-content-v2 [data-bilingual]:hover {
-          background-color: rgba(0, 0, 0, 0.02);
+          background-color: var(--paper-soft);
         }
         .reader-content-v2 p {
           margin: 0 0 0.8em 0;
@@ -685,7 +687,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
         }}
       >
         {isLoading && (
-          <div style={{ textAlign: 'center', padding: '20px', color: '#666' }}>
+          <div style={{ textAlign: 'center', padding: 'var(--space-sm)', color: 'var(--ink-faint)', fontStyle: 'italic' }}>
             Loading chapter...
           </div>
         )}
@@ -849,6 +851,14 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
 
             {/* Divider */}
             <div className="fab-divider" />
+
+            {/* Theme toggle */}
+            <button
+              className="fab-menu-item"
+              onClick={toggleTheme}
+            >
+              <span>{theme === 'light' ? 'Dark Mode' : 'Light Mode'}</span>
+            </button>
 
             {/* Typography section - collapsible */}
             <button
