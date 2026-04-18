@@ -8,12 +8,14 @@
 export interface ReadingProgress {
   chapter: number;
   xpath?: string;
+  showOriginal?: boolean; // Undefined means "use default" (true)
   timestamp: number; // UTC milliseconds (Date.now())
 }
 
 export interface CloudProgress {
   chapter_number: number | null;
   paragraph_xpath: string | null;
+  show_original: number | null;
   updated_at: string | null;
 }
 
@@ -51,18 +53,21 @@ export function getLocalProgress(uuid: string): ReadingProgress {
     // Ignore parse errors
   }
 
-  // Fall back to old format for migration
+  // Fall back to old format for migration. Unknown save time → epoch so any
+  // real cloud record beats it during merge.
   try {
     const oldSaved = localStorage.getItem(`ovid_progress_${uuid}`);
     if (oldSaved) {
       const chapter = parseInt(oldSaved, 10);
-      if (chapter >= 1) return { chapter, timestamp: Date.now() };
+      if (chapter >= 1) return { chapter, timestamp: 0 };
     }
   } catch {
     // Ignore
   }
 
-  return { chapter: 1, timestamp: Date.now() };
+  // No local progress at all — timestamp 0 so cloud progress (if any) always wins.
+  // Date.now() here would defeat cross-device sync on first open of a new device.
+  return { chapter: 1, timestamp: 0 };
 }
 
 /**
@@ -86,6 +91,7 @@ export function mergeProgress(
       merged: {
         chapter: cloud.chapter_number,
         xpath: cloud.paragraph_xpath || undefined,
+        showOriginal: cloud.show_original === null ? undefined : cloud.show_original === 1,
         timestamp: cloudTimestamp,
       },
       source: 'cloud',
