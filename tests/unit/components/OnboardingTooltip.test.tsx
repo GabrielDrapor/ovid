@@ -17,6 +17,7 @@ vi.mock('../../../src/components/BilingualReader.css', () => ({}));
 
 // We test the onboarding tooltip behavior by testing BilingualReaderV2 directly
 import BilingualReaderV2 from '../../../src/components/BilingualReaderV2';
+import { ThemeProvider } from '../../../src/contexts/ThemeContext';
 
 const MOCK_TRANSLATIONS = [
   {
@@ -60,7 +61,7 @@ describe('Onboarding Tooltip', () => {
   it('shows tooltip on first visit when translations are ready', async () => {
     vi.useRealTimers(); // Need real timers for this test
     
-    const { container } = render(<BilingualReaderV2 {...defaultProps} />);
+    const { container } = render(<BilingualReaderV2 {...defaultProps} />, { wrapper: ThemeProvider });
 
     // Wait for translations to apply (100ms delay) + tooltip to show (500ms delay)
     await waitFor(() => {
@@ -76,7 +77,7 @@ describe('Onboarding Tooltip', () => {
     vi.useRealTimers();
     localStorage.setItem('ovid_onboarding_seen', '1');
 
-    const { container } = render(<BilingualReaderV2 {...defaultProps} />);
+    const { container } = render(<BilingualReaderV2 {...defaultProps} />, { wrapper: ThemeProvider });
 
     // Wait enough time for it to potentially appear
     await new Promise(r => setTimeout(r, 1000));
@@ -88,7 +89,7 @@ describe('Onboarding Tooltip', () => {
   it('dismisses tooltip on click and saves to localStorage', async () => {
     vi.useRealTimers();
 
-    const { container } = render(<BilingualReaderV2 {...defaultProps} />);
+    const { container } = render(<BilingualReaderV2 {...defaultProps} />, { wrapper: ThemeProvider });
 
     // Wait for tooltip to appear
     await waitFor(() => {
@@ -112,7 +113,7 @@ describe('Onboarding Tooltip', () => {
     vi.useRealTimers();
 
     // First render - tooltip shows
-    const { container, unmount } = render(<BilingualReaderV2 {...defaultProps} />);
+    const { container, unmount } = render(<BilingualReaderV2 {...defaultProps} />, { wrapper: ThemeProvider });
 
     await waitFor(() => {
       expect(container.querySelector('.onboarding-tooltip')).toBeInTheDocument();
@@ -128,7 +129,7 @@ describe('Onboarding Tooltip', () => {
     unmount();
 
     // Second render - tooltip should NOT show
-    const { container: container2 } = render(<BilingualReaderV2 {...defaultProps} />);
+    const { container: container2 } = render(<BilingualReaderV2 {...defaultProps} />, { wrapper: ThemeProvider });
 
     await new Promise(r => setTimeout(r, 1000));
     expect(container2.querySelector('.onboarding-tooltip')).not.toBeInTheDocument();
