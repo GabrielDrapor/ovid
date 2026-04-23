@@ -4,6 +4,7 @@ import AppV2 from './AppV2';
 import SharedBookView from './components/SharedBookView';
 import ErrorBoundary from './components/ErrorBoundary';
 import { UserProvider } from './contexts/UserContext';
+import { ThemeProvider } from './contexts/ThemeContext';
 import './App.css';
 
 function App() {
@@ -134,4 +135,12 @@ function App() {
   return null;
 }
 
-export default App;
+function AppWithTheme() {
+  return (
+    <ThemeProvider>
+      <App />
+    </ThemeProvider>
+  );
+}
+
+export default AppWithTheme;

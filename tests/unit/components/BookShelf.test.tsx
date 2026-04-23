@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import React from 'react';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom';
+import { ThemeProvider } from '../../../src/contexts/ThemeContext';
 
 // Mock CSS import
 vi.mock('../../../src/components/BookShelf.css', () => ({}));
@@ -84,7 +85,7 @@ describe('BookShelf Component', () => {
       const BookShelf = (await import('../../../src/components/BookShelf')).default;
       const onSelectBook = vi.fn();
 
-      render(<BookShelf onSelectBook={onSelectBook} />);
+      render(<BookShelf onSelectBook={onSelectBook} />, { wrapper: ThemeProvider });
 
       await waitFor(() => {
         expect(mockFetch).toHaveBeenCalledWith('/api/v2/books');
@@ -101,7 +102,7 @@ describe('BookShelf Component', () => {
       setupFetch([MOCK_PROCESSING_BOOK]);
 
       const BookShelf = (await import('../../../src/components/BookShelf')).default;
-      render(<BookShelf onSelectBook={vi.fn()} />);
+      render(<BookShelf onSelectBook={vi.fn()} />, { wrapper: ThemeProvider });
 
       await waitFor(() => {
         const processingEl = document.querySelector('.book-spine-wrapper.processing');
@@ -114,7 +115,7 @@ describe('BookShelf Component', () => {
 
       const onSelectBook = vi.fn();
       const BookShelf = (await import('../../../src/components/BookShelf')).default;
-      render(<BookShelf onSelectBook={onSelectBook} />);
+      render(<BookShelf onSelectBook={onSelectBook} />, { wrapper: ThemeProvider });
 
       await waitFor(() => {
         const wrapper = document.querySelector('.book-spine-wrapper.processing');

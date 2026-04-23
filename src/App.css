@@ -1,8 +1,7 @@
-@import url('https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,200..900;1,7..72,200..900&display=swap');
-
-* {
-  font-family: 'Noto Sans CJK SC', 'Literata', system-ui, sans-serif;
-}
+/*
+ * App.css — global chrome shared across routes.
+ * Font defaults come from index.css via tokens; do not re-declare here.
+ */
 
 .App {
   text-align: left;
@@ -14,10 +13,18 @@
   align-items: center;
   justify-content: center;
   min-height: 100vh;
+  padding: var(--space-lg);
   text-align: center;
-  padding: 2rem;
+  color: var(--ink);
+  background-color: var(--paper);
+  font-family: var(--font-display);
 }
 
 .clickable-title {
   cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-out);
+}
+
+.clickable-title:hover {
+  color: var(--accent);
 }
