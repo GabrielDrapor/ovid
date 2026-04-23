@@ -551,6 +551,7 @@ export interface UserBookProgress {
   reading_progress: number | null; // 0-100, for future use
   chapter_number: number | null; // Current chapter
   paragraph_xpath: string | null; // XPath of current paragraph for cross-device sync
+  show_original: number; // 1 = show original text, 0 = show translation
   completed_at: string | null;
   last_read_at: string | null;
   created_at: string;
@@ -599,27 +600,31 @@ export async function updateReadingProgress(
   bookUuid: string,
   readingProgress: number,
   chapterNumber?: number,
-  paragraphXpath?: string
+  paragraphXpath?: string,
+  showOriginal?: boolean
 ): Promise<void> {
   // Try to update existing row first
   // Always overwrite chapter_number and paragraph_xpath (no COALESCE) to avoid
   // stale xpath data when the user switches chapters before a paragraph is observed.
+  // show_original is COALESCE'd so scroll-triggered saves don't clobber the user's toggle.
+  const showOriginalParam = showOriginal === undefined ? null : (showOriginal ? 1 : 0);
   const result = await db.prepare(
-    `UPDATE user_book_progress 
+    `UPDATE user_book_progress
      SET reading_progress = ?,
          chapter_number = ?,
          paragraph_xpath = ?,
+         show_original = COALESCE(?, show_original),
          last_read_at = CURRENT_TIMESTAMP,
          updated_at = CURRENT_TIMESTAMP
      WHERE user_id = ? AND book_uuid = ?`
-  ).bind(readingProgress, chapterNumber ?? null, paragraphXpath ?? null, userId, bookUuid).run();
-  
+  ).bind(readingProgress, chapterNumber ?? null, paragraphXpath ?? null, showOriginalParam, userId, bookUuid).run();
+
   // If no row existed, insert one
   if (!result.meta.changes || result.meta.changes === 0) {
     await db.prepare(
-      `INSERT INTO user_book_progress (user_id, book_uuid, is_completed, reading_progress, chapter_number, paragraph_xpath, last_read_at)
-       VALUES (?, ?, 0, ?, ?, ?, CURRENT_TIMESTAMP)`
-    ).bind(userId, bookUuid, readingProgress, chapterNumber ?? null, paragraphXpath ?? null).run();
+      `INSERT INTO user_book_progress (user_id, book_uuid, is_completed, reading_progress, chapter_number, paragraph_xpath, show_original, last_read_at)
+       VALUES (?, ?, 0, ?, ?, ?, ?, CURRENT_TIMESTAMP)`
+    ).bind(userId, bookUuid, readingProgress, chapterNumber ?? null, paragraphXpath ?? null, showOriginalParam ?? 1).run();
   }
 }
 

@@ -117,6 +117,9 @@ export default {
       await runMigration('progress_paragraph_xpath', `
         ALTER TABLE user_book_progress ADD COLUMN paragraph_xpath TEXT;
       `);
+      await runMigration('progress_show_original', `
+        ALTER TABLE user_book_progress ADD COLUMN show_original INTEGER NOT NULL DEFAULT 1;
+      `);
       migrationsRan = true;
     }
 
@@ -398,13 +401,14 @@ export default {
             });
           }
           try {
-            const body = await request.json() as { 
+            const body = await request.json() as {
               readingProgress: number;
               chapterNumber?: number;
               paragraphXpath?: string;
+              showOriginal?: boolean;
             };
             const bookUuid = progressMatch[1];
-            
+
             if (typeof body.readingProgress !== 'number' || body.readingProgress < 0 || body.readingProgress > 100) {
               return new Response(JSON.stringify({ error: 'readingProgress must be a number 0-100' }), {
                 status: 400, headers: { 'Content-Type': 'application/json' },
@@ -420,11 +424,16 @@ export default {
                 status: 400, headers: { 'Content-Type': 'application/json' },
               });
             }
-            
-            // Update reading_progress + optional chapter/xpath — never touch is_completed or completed_at
+            if (body.showOriginal !== undefined && typeof body.showOriginal !== 'boolean') {
+              return new Response(JSON.stringify({ error: 'showOriginal must be a boolean' }), {
+                status: 400, headers: { 'Content-Type': 'application/json' },
+              });
+            }
+
+            // Update reading_progress + optional chapter/xpath/showOriginal — never touch is_completed or completed_at
             await updateReadingProgress(
               env.DB, user.id, bookUuid, body.readingProgress,
-              body.chapterNumber, body.paragraphXpath
+              body.chapterNumber, body.paragraphXpath, body.showOriginal
             );
             const updatedProgress = await getUserBookProgress(env.DB, user.id, bookUuid);
             

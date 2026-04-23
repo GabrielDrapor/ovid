@@ -73,6 +73,11 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
   const initialProgress = useRef(getLocalProgress(bookUuid));
   const [currentChapter, setCurrentChapter] = useState(initialProgress.current.chapter);
   const [targetXpath, setTargetXpath] = useState<string | undefined>(initialProgress.current.xpath);
+  // Undefined until cloud merge resolves — reader won't mount until then,
+  // so its initial state always reflects the most recent known toggle.
+  const [initialShowOriginal, setInitialShowOriginal] = useState<boolean | undefined>(
+    initialProgress.current.showOriginal
+  );
 
 
   // Track current visible xpath and intra-chapter fraction for saving
@@ -154,6 +159,34 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
     };
     localStorage.setItem(PROGRESS_KEY(bookUuid), JSON.stringify(progress));
   }, [bookUuid]);
+
+  // Called by reader when the Show Translation / Show Original toggle flips.
+  // Saves immediately (no debounce) so the user's choice survives a reload.
+  const handleShowOriginalChange = useCallback((showOriginal: boolean) => {
+    // Mirror into localStorage so offline / unauth users still get persistence.
+    try {
+      const existing = localStorage.getItem(PROGRESS_KEY(bookUuid));
+      const prev: ReadingProgress = existing
+        ? JSON.parse(existing)
+        : { chapter: currentChapter, timestamp: Date.now() };
+      localStorage.setItem(
+        PROGRESS_KEY(bookUuid),
+        JSON.stringify({ ...prev, showOriginal, timestamp: Date.now() })
+      );
+    } catch { /* ignore */ }
+
+    const progressPercent = calculateProgress(chapterFractionRef.current);
+    fetch(`/api/book/${bookUuid}/progress`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        readingProgress: progressPercent,
+        chapterNumber: currentChapter,
+        paragraphXpath: currentXpathRef.current,
+        showOriginal,
+      }),
+    }).catch(err => console.error('Error saving showOriginal:', err));
+  }, [bookUuid, currentChapter, calculateProgress]);
 
   // Called by reader when visible element changes
   const handleProgressChange = useCallback((xpath: string, chapterFraction: number) => {
@@ -338,13 +371,14 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
     const init = async () => {
       const merged = await fetchAndMergeProgress(bookUuid);
       initialProgress.current = merged;
-      
+
       // If cloud had a different chapter/xpath, update state before loading
       if (merged.chapter !== currentChapter || merged.xpath !== targetXpath) {
         setCurrentChapter(merged.chapter);
         setTargetXpath(merged.xpath);
       }
-      
+      setInitialShowOriginal(merged.showOriginal);
+
       await loadChapter(merged.chapter, merged.xpath);
     };
     init();
@@ -468,6 +502,8 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
         onRevokeShare={handleRevokeShare}
         initialXpath={targetXpath}
         onProgressChange={handleProgressChange}
+        initialShowOriginal={initialShowOriginal ?? true}
+        onShowOriginalChange={handleShowOriginalChange}
       />
     </div>
   );

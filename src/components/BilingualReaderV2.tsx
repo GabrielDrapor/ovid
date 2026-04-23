@@ -41,6 +41,9 @@ interface BilingualReaderV2Props {
   // Granular progress tracking
   initialXpath?: string;  // XPath to scroll to on initial load
   onProgressChange?: (xpath: string, chapterFraction: number) => void;  // Called when visible element changes; chapterFraction is 0–1
+  // Show translation / show original toggle persistence
+  initialShowOriginal?: boolean;
+  onShowOriginalChange?: (showOriginal: boolean) => void;
 }
 
 /**
@@ -95,10 +98,12 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
   onRevokeShare,
   initialXpath,
   onProgressChange,
+  initialShowOriginal,
+  onShowOriginalChange,
 }) => {
   const { theme, toggleTheme } = useTheme();
   const contentRef = useRef<HTMLDivElement>(null);
-  const [showOriginal, setShowOriginal] = useState(true);
+  const [showOriginal, setShowOriginal] = useState(initialShowOriginal ?? true);
   const showOriginalRef = useRef(showOriginal);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isChaptersOpen, setIsChaptersOpen] = useState(false);
@@ -764,6 +769,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
                 const next = !showOriginal;
                 setShowOriginal(next);
                 updateAllElements(next);
+                onShowOriginalChange?.(next);
               }}
             >
               {showOriginal ? 'Show Translation' : 'Show Original'}

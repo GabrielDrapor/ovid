@@ -55,10 +55,12 @@ describe('reading-progress', () => {
       localStorage.clear();
     });
 
-    it('returns chapter 1 when no saved progress', () => {
+    it('returns chapter 1 with epoch timestamp when no saved progress', () => {
+      // Timestamp must be 0 (not Date.now()) so any real cloud record beats
+      // the default during merge — otherwise a fresh device always wins.
       const progress = getLocalProgress(uuid);
       expect(progress.chapter).toBe(1);
-      expect(progress.timestamp).toBeGreaterThan(0);
+      expect(progress.timestamp).toBe(0);
     });
 
     it('reads new format from localStorage', () => {
@@ -111,10 +113,12 @@ describe('reading-progress', () => {
     const makeCloud = (
       chapter: number | null,
       updatedAt: string | null,
-      xpath?: string | null
+      xpath?: string | null,
+      showOriginal: number | null = null
     ): CloudProgress => ({
       chapter_number: chapter,
       paragraph_xpath: xpath ?? null,
+      show_original: showOriginal,
       updated_at: updatedAt,
     });
 
@@ -198,6 +202,37 @@ describe('reading-progress', () => {
       const { merged, source } = mergeProgress(local, cloud);
       expect(source).toBe('local');
       expect(merged.chapter).toBe(4);
+    });
+
+    it('fresh device (timestamp 0) always picks cloud progress', () => {
+      // Regression test for the cross-device sync bug: a fresh device with no
+      // local record must never beat the cloud.
+      const local: ReadingProgress = { chapter: 1, timestamp: 0 };
+      const cloud = makeCloud(7, '2024-03-24 13:00:00', '/body[1]/p[9]');
+
+      const { merged, source } = mergeProgress(local, cloud);
+      expect(source).toBe('cloud');
+      expect(merged.chapter).toBe(7);
+    });
+
+    it('carries showOriginal from cloud when cloud wins', () => {
+      const localTs = Date.UTC(2024, 2, 24, 12, 0, 0);
+      const local = makeLocal(4, localTs);
+      // Cloud: 1 hour later, show_original = 0 (i.e. showing translation)
+      const cloud = makeCloud(5, '2024-03-24 13:00:00', null, 0);
+
+      const { merged, source } = mergeProgress(local, cloud);
+      expect(source).toBe('cloud');
+      expect(merged.showOriginal).toBe(false);
+    });
+
+    it('leaves showOriginal undefined when cloud has no value', () => {
+      const localTs = Date.UTC(2024, 2, 24, 12, 0, 0);
+      const local = makeLocal(4, localTs);
+      const cloud = makeCloud(5, '2024-03-24 13:00:00');
+
+      const { merged } = mergeProgress(local, cloud);
+      expect(merged.showOriginal).toBeUndefined();
     });
 
     it('handles equal timestamps — local wins (tie-break)', () => {
