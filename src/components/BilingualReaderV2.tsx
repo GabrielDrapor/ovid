@@ -25,7 +25,7 @@ interface BilingualReaderV2Props {
   currentChapter: number;
   totalChapters: number;
   chapters: Chapter[];
-  onLoadChapter: (chapterNumber: number) => void;
+  onLoadChapter: (chapterNumber: number) => void | Promise<void>;
   isLoading: boolean;
   bookUuid?: string;
   onBackToShelf?: () => void;
@@ -40,6 +40,9 @@ interface BilingualReaderV2Props {
   // Granular progress tracking
   initialXpath?: string;  // XPath to scroll to on initial load
   onProgressChange?: (xpath: string, chapterFraction: number) => void;  // Called when visible element changes; chapterFraction is 0–1
+  // Show translation / show original toggle persistence
+  initialShowOriginal?: boolean;
+  onShowOriginalChange?: (showOriginal: boolean) => void;
 }
 
 /**
@@ -94,9 +97,11 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
   onRevokeShare,
   initialXpath,
   onProgressChange,
+  initialShowOriginal,
+  onShowOriginalChange,
 }) => {
   const contentRef = useRef<HTMLDivElement>(null);
-  const [showOriginal, setShowOriginal] = useState(true);
+  const [showOriginal, setShowOriginal] = useState(initialShowOriginal ?? true);
   const showOriginalRef = useRef(showOriginal);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isChaptersOpen, setIsChaptersOpen] = useState(false);
@@ -516,23 +521,68 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
     setFontWeight(450);
   };
 
-  const goToPreviousChapter = () => {
-    if (currentChapter > 1 && !isLoading) {
-      onLoadChapter(currentChapter - 1);
-    }
-  };
+  // View-transition wrapper: crossfades chapters using the browser's View
+  // Transitions API when available, falling back to a plain load otherwise.
+  const navigateWithTransition = useCallback(
+    (chapterNumber: number) => {
+      const run = () => onLoadChapter(chapterNumber);
+      const doc = document as Document & {
+        startViewTransition?: (cb: () => void | Promise<void>) => { finished: Promise<void> };
+      };
+      const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      if (typeof doc.startViewTransition !== 'function' || reduced) {
+        run();
+        return;
+      }
+      doc.startViewTransition(() => Promise.resolve(run()));
+    },
+    [onLoadChapter]
+  );
 
-  const goToNextChapter = () => {
-    if (currentChapter < totalChapters && !isLoading) {
-      onLoadChapter(currentChapter + 1);
+  const goToPreviousChapter = useCallback(() => {
+    if (currentChapter > 1 && !isLoading) {
+      navigateWithTransition(currentChapter - 1);
     }
-  };
+  }, [currentChapter, isLoading, navigateWithTransition]);
+
+  const goToNextChapter = useCallback(() => {
+    if (currentChapter < totalChapters && !isLoading) {
+      navigateWithTransition(currentChapter + 1);
+    }
+  }, [currentChapter, isLoading, totalChapters, navigateWithTransition]);
 
   const scrollToChapter = (chapterNumber: number) => {
-    onLoadChapter(chapterNumber);
+    navigateWithTransition(chapterNumber);
     setIsChaptersOpen(false);
     setIsMenuOpen(false);
   };
+
+  // Keyboard navigation: ArrowLeft = previous chapter, ArrowRight = next chapter.
+  // Skip when a menu is open or focus is on an editable field.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (isMenuOpen || isChaptersOpen || isTypographyOpen) return;
+      const target = e.target as HTMLElement | null;
+      if (target) {
+        const tag = target.tagName;
+        if (
+          tag === 'INPUT' ||
+          tag === 'TEXTAREA' ||
+          tag === 'SELECT' ||
+          target.isContentEditable
+        ) {
+          return;
+        }
+      }
+      e.preventDefault();
+      if (e.key === 'ArrowLeft') goToPreviousChapter();
+      else goToNextChapter();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [goToPreviousChapter, goToNextChapter, isMenuOpen, isChaptersOpen, isTypographyOpen]);
 
   return (
     <div className="bilingual-reader">
@@ -594,6 +644,33 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
         .reader-content-v2 svg {
           max-width: 100%;
           height: auto;
+        }
+
+        /* Sequential fade between chapters via View Transitions API:
+           old fades out, then new fades in — no overlap, so no ghosting. */
+        .epub-content {
+          view-transition-name: epub-page;
+        }
+        @keyframes page-fade-out {
+          from { opacity: 1; }
+          to   { opacity: 0; }
+        }
+        @keyframes page-fade-in {
+          from { opacity: 0; }
+          to   { opacity: 1; }
+        }
+        ::view-transition-old(epub-page) {
+          animation: page-fade-out 200ms ease-out both;
+        }
+        ::view-transition-new(epub-page) {
+          animation: page-fade-in 240ms ease-in 200ms both;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          ::view-transition-old(epub-page),
+          ::view-transition-new(epub-page) {
+            animation-duration: 1ms;
+            animation-delay: 0s;
+          }
         }
       `}} />
 
@@ -690,6 +767,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
                 const next = !showOriginal;
                 setShowOriginal(next);
                 updateAllElements(next);
+                onShowOriginalChange?.(next);
               }}
             >
               {showOriginal ? 'Show Translation' : 'Show Original'}

@@ -16,6 +16,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "deploy": "yarn build && wrangler deploy --config wrangler.toml",
+    "deploy:staging": "yarn build && wrangler deploy --config wrangler.toml --env staging",
     "preview": "wrangler dev --local src/worker/index.ts --assets ./build",
     "db:local": "wrangler d1 execute ovid-db --local --command",
     "db:local:file": "wrangler d1 execute ovid-db --local --file",
