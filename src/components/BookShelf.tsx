@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { SUPPORTED_LANGUAGES } from '../utils/translator';
 import { useUser } from '../contexts/UserContext';
+import { ApiError, fetchApi } from '../utils/api';
 import './BookShelf.css';
 
 const DEFAULT_TARGET_LANGUAGE = 'zh';
@@ -345,18 +346,10 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
       formData.append('file', file);
       formData.append('targetLanguage', DEFAULT_TARGET_LANGUAGE);
 
-      const response = await fetch('/api/books/estimate', {
+      const response = await fetchApi('/api/books/estimate', {
         method: 'POST',
         body: formData,
       });
-
-      if (!response.ok) {
-        const errorData = (await response.json()) as {
-          error?: string;
-          details?: string;
-        };
-        throw new Error(errorData.error || 'Failed to estimate');
-      }
 
       const estimateData = (await response.json()) as {
         title: string;
@@ -381,7 +374,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
         sourceLanguage: detected,
       });
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to estimate book');
+      alert(err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Failed to estimate book');
     } finally {
       setEstimating(false);
     }
@@ -406,7 +399,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
           const formData = new FormData();
           formData.append('file', estimate.file);
           formData.append('targetLanguage', newTarget);
-          response = await fetch('/api/books/estimate', {
+          response = await fetchApi('/api/books/estimate', {
             method: 'POST',
             body: formData,
           });
@@ -415,16 +408,12 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
         const formData = new FormData();
         formData.append('file', estimate.file);
         formData.append('targetLanguage', newTarget);
-        response = await fetch('/api/books/estimate', {
+        response = await fetchApi('/api/books/estimate', {
           method: 'POST',
           body: formData,
         });
       }
 
-      if (!response.ok) {
-        const errorData = (await response.json()) as { error?: string };
-        throw new Error(errorData.error || 'Failed to re-estimate');
-      }
 
       const estimateData = (await response.json()) as {
         title: string;
@@ -452,7 +441,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
           : prev
       );
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to re-estimate');
+      alert(err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Failed to re-estimate');
     } finally {
       setReEstimating(false);
     }
@@ -520,6 +509,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
           required?: number;
           available?: number;
           message?: string;
+          requestId?: string;
         };
 
         if (response.status === 402) {
@@ -534,7 +524,11 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
           return;
         }
 
-        throw new Error(errorData.error || 'Upload failed');
+        throw new ApiError(errorData.error || 'Upload failed', {
+          status: response.status,
+          requestId: errorData.requestId || response.headers.get('x-request-id') || undefined,
+          retryAfter: response.headers.get('retry-after'),
+        });
       }
 
       // Close modal immediately - book will appear on shelf in processing state
@@ -554,7 +548,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
     } catch (err) {
       setUploadProgress('');
       setUploading(false);
-      alert(err instanceof Error ? err.message : 'Upload failed');
+      alert(err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Upload failed');
     }
   };
 

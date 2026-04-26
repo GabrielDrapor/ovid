@@ -14,21 +14,22 @@ export async function fetchWithRetry(
     try {
       const response = await fetch(input, init);
 
-      // Don't retry on success or 4xx client errors
-      if (response.ok || (response.status >= 400 && response.status < 500)) {
+      if (response.ok) {
         return response;
       }
 
-      // 5xx server error - retry if we have attempts left
+      if (response.status >= 400 && response.status < 500) {
+        return response;
+      }
+
       if (attempt < maxRetries) {
-        const delay = 300 * Math.pow(3, attempt); // 300ms, 900ms, 2700ms
+        const delay = 300 * Math.pow(3, attempt);
         await new Promise(resolve => setTimeout(resolve, delay));
         continue;
       }
 
       return response;
     } catch (error) {
-      // Network error - retry if we have attempts left
       lastError = error instanceof Error ? error : new Error(String(error));
       if (attempt < maxRetries) {
         const delay = 300 * Math.pow(3, attempt);

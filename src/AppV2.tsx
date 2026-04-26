@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import BilingualReaderV2 from './components/BilingualReaderV2';
 import { useUser } from './contexts/UserContext';
 import { fetchWithRetry } from './utils/fetchWithRetry';
+import { ApiError, fetchApi } from './utils/api';
 import { getLocalProgress, mergeProgress, PROGRESS_KEY, type ReadingProgress, type CloudProgress } from './utils/reading-progress';
 import './App.css';
 
@@ -46,9 +47,7 @@ const fetchAndMergeProgress = async (uuid: string): Promise<ReadingProgress> => 
   const local = getLocalProgress(uuid);
 
   try {
-    const response = await fetch(`/api/book/${uuid}/progress`);
-    if (!response.ok) return local;
-
+    const response = await fetchApi(`/api/book/${uuid}/progress`);
     const data = await response.json() as { progress: CloudProgress | null };
     const { merged, source } = mergeProgress(local, data.progress);
 
@@ -233,12 +232,10 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
 
     const loadCompletion = async () => {
       try {
-        const response = await fetch(`/api/book/${bookUuid}/progress`);
-        if (response.ok) {
-          const data = await response.json();
-          if (data.progress?.is_completed) {
-            setIsCompleted(true);
-          }
+        const response = await fetchApi(`/api/book/${bookUuid}/progress`);
+        const data = await response.json();
+        if (data.progress?.is_completed) {
+          setIsCompleted(true);
         }
       } catch (err) {
         console.error('Error fetching completion status:', err);
@@ -247,11 +244,9 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
 
     const loadShareStatus = async () => {
       try {
-        const response = await fetch(`/api/book/${bookUuid}/share`);
-        if (response.ok) {
-          const data = await response.json() as { token: string | null };
-          setShareToken(data.token);
-        }
+        const response = await fetchApi(`/api/book/${bookUuid}/share`);
+        const data = await response.json() as { token: string | null };
+        setShareToken(data.token);
       } catch (err) {
         // Not owner or not logged in — ignore
       }
@@ -260,12 +255,10 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
     // Fetch book metadata to know the owner
     const loadBookMeta = async () => {
       try {
-        const response = await fetch('/api/books');
-        if (response.ok) {
-          const books = await response.json() as Array<{ uuid: string; user_id: number | null }>;
-          const book = books.find((b: any) => b.uuid === bookUuid);
-          if (book) setBookOwnerId(book.user_id);
-        }
+        const response = await fetchApi('/api/books');
+        const books = await response.json() as Array<{ uuid: string; user_id: number | null }>;
+        const book = books.find((b: any) => b.uuid === bookUuid);
+        if (book) setBookOwnerId(book.user_id);
       } catch {
         // ignore
       }
@@ -359,7 +352,7 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
         }, 100);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load chapter');
+      setError(err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Failed to load chapter');
       console.error('Error fetching chapter:', err);
     } finally {
       setLoading(false);
