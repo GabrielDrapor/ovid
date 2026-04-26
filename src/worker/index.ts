@@ -44,7 +44,7 @@ import {
 } from './book-handlers';
 // admin-covers moved to Railway translator service
 
-import { isRateLimited } from '../utils/rateLimiter';
+import { checkRateLimit } from '../utils/rateLimiter';
 
 // Rate limiting state (per-worker instance, resets on cold start)
 const apiRequestCounts = new Map<string, number[]>();
@@ -55,9 +55,40 @@ const MAX_UPLOAD_SIZE = 50 * 1024 * 1024; // 50MB
 
 let migrationsRan = false;
 
+const createRequestId = () => {
+  try {
+    return crypto.randomUUID();
+  } catch {
+    return `req_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+  }
+};
+
+const jsonResponse = (
+  body: Record<string, unknown>,
+  init: ResponseInit = {},
+  requestId?: string,
+  extraHeaders?: Record<string, string>
+) => {
+  const headers = new Headers(init.headers);
+  headers.set('Content-Type', 'application/json');
+  if (requestId) headers.set('x-request-id', requestId);
+  if (extraHeaders) {
+    for (const [key, value] of Object.entries(extraHeaders)) headers.set(key, value);
+  }
+  return new Response(JSON.stringify(requestId ? { ...body, requestId } : body), {
+    ...init,
+    headers,
+  });
+};
+
+const logEvent = (payload: Record<string, unknown>) => {
+  console.log(JSON.stringify({ ts: new Date().toISOString(), ...payload }));
+};
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+    const requestId = createRequestId();
 
     // Check config on startup
     checkOAuthConfig(env);
@@ -126,11 +157,39 @@ export default {
     // Handle API routes
     if (url.pathname.startsWith('/api/')) {
       const clientIp = request.headers.get('cf-connecting-ip') || request.headers.get('x-forwarded-for') || 'unknown';
+      const cfRay = request.headers.get('cf-ray');
+      const userAgent = request.headers.get('user-agent') || 'unknown';
 
       // Rate limit: 60 API requests per minute per IP
-      if (isRateLimited(apiRequestCounts, clientIp, 60_000, API_RATE_LIMIT)) {
-        return new Response(JSON.stringify({ error: 'Too many requests' }), {
-          status: 429, headers: { 'Content-Type': 'application/json', 'Retry-After': '60' },
+      const apiRate = checkRateLimit(apiRequestCounts, clientIp, 60_000, API_RATE_LIMIT);
+      if (apiRate.limited) {
+        logEvent({
+          level: 'warn',
+          type: 'rate_limit',
+          scope: 'api',
+          requestId,
+          method: request.method,
+          path: url.pathname,
+          clientIp,
+          userAgent,
+          cfRay,
+          limit: apiRate.limit,
+          current: apiRate.current,
+          remaining: apiRate.remaining,
+          resetAfterSeconds: apiRate.resetAfterSeconds,
+        });
+        return jsonResponse({
+          error: '请求过于频繁，请稍后再试。',
+          code: 'RATE_LIMITED',
+          details: `${request.method} ${url.pathname}`,
+          retryAfter: apiRate.resetAfterSeconds,
+        }, {
+          status: 429,
+        }, requestId, {
+          'Retry-After': String(apiRate.resetAfterSeconds),
+          'X-RateLimit-Limit': String(apiRate.limit),
+          'X-RateLimit-Remaining': String(apiRate.remaining),
+          'X-RateLimit-Reset': String(apiRate.resetAfterSeconds),
         });
       }
 
@@ -139,14 +198,51 @@ export default {
         // Size check: reject uploads > 50MB
         const contentLength = parseInt(request.headers.get('content-length') || '0');
         if (contentLength > MAX_UPLOAD_SIZE) {
-          return new Response(JSON.stringify({ error: 'Upload too large. Maximum size is 50MB.' }), {
-            status: 413, headers: { 'Content-Type': 'application/json' },
+          logEvent({
+            level: 'warn',
+            type: 'upload_rejected',
+            reason: 'file_too_large',
+            requestId,
+            method: request.method,
+            path: url.pathname,
+            clientIp,
+            userAgent,
+            contentLength,
+            maxUploadSize: MAX_UPLOAD_SIZE,
           });
+          return jsonResponse({ error: 'Upload too large. Maximum size is 50MB.', code: 'UPLOAD_TOO_LARGE' }, {
+            status: 413,
+          }, requestId);
         }
-        // Rate limit: 5 uploads per hour per IP
-        if (isRateLimited(uploadRequestCounts, clientIp, 3_600_000, UPLOAD_RATE_LIMIT)) {
-          return new Response(JSON.stringify({ error: 'Upload rate limit exceeded. Max 5 uploads per hour.' }), {
-            status: 429, headers: { 'Content-Type': 'application/json', 'Retry-After': '3600' },
+        const uploadRate = checkRateLimit(uploadRequestCounts, clientIp, 3_600_000, UPLOAD_RATE_LIMIT);
+        if (uploadRate.limited) {
+          logEvent({
+            level: 'warn',
+            type: 'rate_limit',
+            scope: 'upload',
+            requestId,
+            method: request.method,
+            path: url.pathname,
+            clientIp,
+            userAgent,
+            cfRay,
+            limit: uploadRate.limit,
+            current: uploadRate.current,
+            remaining: uploadRate.remaining,
+            resetAfterSeconds: uploadRate.resetAfterSeconds,
+          });
+          return jsonResponse({
+            error: '上传次数过多，请稍后再试。',
+            code: 'UPLOAD_RATE_LIMITED',
+            details: 'Max 5 uploads per hour.',
+            retryAfter: uploadRate.resetAfterSeconds,
+          }, {
+            status: 429,
+          }, requestId, {
+            'Retry-After': String(uploadRate.resetAfterSeconds),
+            'X-RateLimit-Limit': String(uploadRate.limit),
+            'X-RateLimit-Remaining': String(uploadRate.remaining),
+            'X-RateLimit-Reset': String(uploadRate.resetAfterSeconds),
           });
         }
       }
@@ -613,7 +709,15 @@ export default {
         return new Response('API endpoint not found', { status: 404 });
       } catch (error) {
         console.error('API Error:', error);
-        return new Response('Internal Server Error', { status: 500 });
+        logEvent({
+          level: 'error',
+          type: 'api_error',
+          requestId,
+          method: request.method,
+          path: url.pathname,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return jsonResponse({ error: 'Internal Server Error', code: 'INTERNAL_ERROR' }, { status: 500 }, requestId);
       }
     }
 

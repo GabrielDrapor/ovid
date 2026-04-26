@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
+import { fetchApi } from '../utils/api';
 
 export interface User {
   id: number;
@@ -41,12 +42,10 @@ export const UserProvider: React.FC<UserProviderProps> = ({ children }) => {
 
   const refreshCredits = useCallback(async () => {
     try {
-      const response = await fetch('/api/credits');
-      if (response.ok) {
-        const data = (await response.json()) as { credits: number; packages: CreditPackage[] };
-        setCredits(data.credits);
-        setCreditPackages(data.packages);
-      }
+      const response = await fetchApi('/api/credits');
+      const data = (await response.json()) as { credits: number; packages: CreditPackage[] };
+      setCredits(data.credits);
+      setCreditPackages(data.packages);
     } catch (error) {
       console.error('Failed to fetch credits:', error);
     }
@@ -54,14 +53,11 @@ export const UserProvider: React.FC<UserProviderProps> = ({ children }) => {
 
   const refreshUser = async () => {
     try {
-      const response = await fetch('/api/auth/me');
-      if (response.ok) {
-        const data = (await response.json()) as { user: User | null };
-        setUser(data.user);
-        if (data.user) {
-          // Fetch credits when user is logged in
-          await refreshCredits();
-        }
+      const response = await fetchApi('/api/auth/me');
+      const data = (await response.json()) as { user: User | null };
+      setUser(data.user);
+      if (data.user) {
+        await refreshCredits();
       }
     } catch (error) {
       console.error('Failed to fetch user:', error);
@@ -84,19 +80,13 @@ export const UserProvider: React.FC<UserProviderProps> = ({ children }) => {
       // Verify the checkout session and add credits
       const verifyPayment = async () => {
         try {
-          const response = await fetch(`/api/stripe/verify-session?session_id=${sessionId}`);
-          if (response.ok) {
-            const data = await response.json() as { success: boolean; credits?: number; creditsAdded?: number };
-            if (data.success && data.credits !== undefined) {
-              setCredits(data.credits);
-              if (data.creditsAdded) {
-                console.log(`Payment verified: ${data.creditsAdded} credits added`);
-              }
+          const response = await fetchApi(`/api/stripe/verify-session?session_id=${sessionId}`);
+          const data = await response.json() as { success: boolean; credits?: number; creditsAdded?: number };
+          if (data.success && data.credits !== undefined) {
+            setCredits(data.credits);
+            if (data.creditsAdded) {
+              console.log(`Payment verified: ${data.creditsAdded} credits added`);
             }
-          } else {
-            console.error('Failed to verify payment session');
-            // Fallback to refreshing credits
-            await refreshCredits();
           }
         } catch (error) {
           console.error('Error verifying payment:', error);
@@ -129,16 +119,12 @@ export const UserProvider: React.FC<UserProviderProps> = ({ children }) => {
 
   const purchaseCredits = async (packageId: string) => {
     try {
-      const response = await fetch('/api/stripe/checkout', {
+      const response = await fetchApi('/api/stripe/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ packageId }),
       });
 
-      if (!response.ok) {
-        const error = await response.json() as { error: string };
-        throw new Error(error.error || 'Failed to create checkout session');
-      }
 
       const data = (await response.json()) as { url: string };
       // Redirect to Stripe checkout
