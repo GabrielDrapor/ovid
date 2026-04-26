@@ -87,7 +87,7 @@ describe('BookShelf Component', () => {
       render(<BookShelf onSelectBook={onSelectBook} />);
 
       await waitFor(() => {
-        expect(mockFetch).toHaveBeenCalledWith('/api/v2/books');
+        expect(mockFetch).toHaveBeenCalledWith('/api/v2/books', undefined);
       });
 
       // The component renders books-row-1 for public and books-row-2 for user books

@@ -123,10 +123,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
 
   const fetchBooks = async () => {
     try {
-      const response = await fetch('/api/v2/books');
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
+      const response = await fetchApi('/api/v2/books');
       const booksData = await response.json();
       const booksList = Array.isArray(booksData) ? (booksData as Book[]) : [];
       setBooks(booksList);
@@ -146,23 +143,21 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
       // Fetch all progress in a single request
       if (user && booksData.length > 0) {
         try {
-          const progressResponse = await fetch('/api/progress');
-          if (progressResponse.ok) {
-            const data = (await progressResponse.json()) as {
-              progress: Record<string, UserBookProgress>;
-            };
-            const progressMap = new Map<string, UserBookProgress>();
-            for (const [uuid, p] of Object.entries(data.progress)) {
-              progressMap.set(uuid, p);
-            }
-            setBookProgressMap(progressMap);
+          const progressResponse = await fetchApi('/api/progress');
+          const data = (await progressResponse.json()) as {
+            progress: Record<string, UserBookProgress>;
+          };
+          const progressMap = new Map<string, UserBookProgress>();
+          for (const [uuid, p] of Object.entries(data.progress)) {
+            progressMap.set(uuid, p);
           }
+          setBookProgressMap(progressMap);
         } catch {
           // Silently skip
         }
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch books');
+      setError(err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Failed to fetch books');
       console.error('Error fetching books:', err);
       setLoading(false);
     }
@@ -387,7 +382,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
     try {
       let response: Response;
       if (estimate.fileKey) {
-        response = await fetch('/api/books/estimate', {
+        response = await fetchApi('/api/books/estimate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -560,17 +555,13 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
   const handleDeleteBook = async (bookUuid: string) => {
     if (!confirm('Are you sure you want to remove this book?')) return;
     try {
-      const response = await fetch(`/api/book/${bookUuid}`, {
+      await fetchApi(`/api/book/${bookUuid}`, {
         method: 'DELETE',
       });
-      if (!response.ok) {
-        const data = (await response.json()) as { error?: string };
-        throw new Error(data.error || 'Failed to delete');
-      }
       setHoveredBook(null);
       await fetchBooks();
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to delete book');
+      alert(err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Failed to delete book');
     }
   };
 
