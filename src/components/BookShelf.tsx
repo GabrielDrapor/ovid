@@ -36,8 +36,13 @@ interface BookShelfProps {
   onSelectBook: (bookUuid: string) => void;
 }
 
+const DEFAULT_SPINE_RATIO = 1 / 5.3;
+const MIN_SPINE_RATIO = 0.04;
+const MAX_SPINE_RATIO = 0.35;
+
 const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
   const [books, setBooks] = useState<Book[]>([]);
+  const [spineRatios, setSpineRatios] = useState<Map<string, number>>(new Map());
   const [bookProgressMap, setBookProgressMap] = useState<
     Map<string, UserBookProgress>
   >(new Map());
@@ -97,6 +102,23 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
     purchaseCredits,
     refreshCredits,
   } = useUser();
+
+  const handleSpineImageLoad = useCallback((bookUuid: string, event: React.SyntheticEvent<HTMLImageElement>) => {
+    const img = event.currentTarget;
+    const naturalWidth = img.naturalWidth || 0;
+    const naturalHeight = img.naturalHeight || 0;
+    if (!naturalWidth || !naturalHeight) return;
+
+    const ratio = Math.min(MAX_SPINE_RATIO, Math.max(MIN_SPINE_RATIO, naturalWidth / naturalHeight));
+    setSpineRatios((prev) => {
+      const next = new Map(prev);
+      if (Math.abs((next.get(bookUuid) ?? DEFAULT_SPINE_RATIO) - ratio) < 0.001) {
+        return prev;
+      }
+      next.set(bookUuid, ratio);
+      return next;
+    });
+  }, []);
 
   const fetchBooks = async () => {
     try {
@@ -606,12 +628,16 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                   }
                 }}
               >
-                <div className="book-spine-container">
+                <div
+                  className="book-spine-container"
+                  style={{ ['--book-spine-ratio' as any]: spineRatios.get(book.uuid) ?? DEFAULT_SPINE_RATIO }}
+                >
                   {book.book_spine_img_url ? (
                     <img
                       src={book.book_spine_img_url}
                       alt={`${book.title} spine`}
                       className="book-spine-img"
+                      onLoad={(event) => handleSpineImageLoad(book.uuid, event)}
                     />
                   ) : (
                     <div
