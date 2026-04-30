@@ -467,7 +467,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
 
       if (estimate.fileKey) {
         // Fast path: file already in R2 from estimate — send fileKey only
-        response = await fetch('/api/books/upload', {
+        response = await fetchApi('/api/books/upload', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -485,7 +485,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
           formData.append('targetLanguage', estimate.targetLanguage);
           formData.append('sourceLanguage', estimate.sourceLanguage);
 
-          response = await fetch('/api/books/upload', {
+          response = await fetchApi('/api/books/upload', {
             method: 'POST',
             body: formData,
           });
@@ -497,7 +497,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
         formData.append('targetLanguage', estimate.targetLanguage);
         formData.append('sourceLanguage', estimate.sourceLanguage);
 
-        response = await fetch('/api/books/upload', {
+        response = await fetchApi('/api/books/upload', {
           method: 'POST',
           body: formData,
         });
@@ -548,7 +548,14 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
     } catch (err) {
       setUploadProgress('');
       setUploading(false);
-      alert(err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Upload failed');
+      const message = err instanceof ApiError
+        ? err.message
+        : err instanceof TypeError
+          ? 'Network error while uploading. Please retry. If it keeps failing, contact support with time and browser.'
+          : err instanceof Error
+            ? err.message
+            : 'Upload failed';
+      alert(message);
     }
   };
 
