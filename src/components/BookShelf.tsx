@@ -66,6 +66,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
     actionsLeft: '250px',
   });
   const [showUploadModal, setShowUploadModal] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [showCreditsModal, setShowCreditsModal] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState('');
@@ -1332,6 +1333,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                   <strong>{credits?.toLocaleString() ?? '...'}</strong>
                 </div>
                 <input
+                  ref={fileInputRef}
                   type="file"
                   accept=".epub,.mobi,.azw3"
                   onChange={(e) => {
@@ -1339,11 +1341,19 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                     if (file) {
                       handleFileSelect(file);
                     }
+                    e.target.value = '';
                   }}
                   id="epub-file-input"
                   style={{ display: 'none' }}
                 />
-                <label htmlFor="epub-file-input" className="upload-label">
+                <label
+                  htmlFor="epub-file-input"
+                  className="upload-label"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    fileInputRef.current?.click();
+                  }}
+                >
                   <svg
                     width="48"
                     height="48"
