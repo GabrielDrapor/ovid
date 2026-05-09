@@ -1000,32 +1000,93 @@
   font-style: italic;
 }
 
-.upload-toast {
-  position: fixed;
-  top: 20px;
+/* Callout pinned above the just-uploaded book on the shelf */
+.upload-callout {
+  position: absolute;
+  bottom: calc(100% + 14px);
   left: 50%;
   transform: translateX(-50%);
-  background: #1a1a2e;
-  color: #4ade80;
-  border: 1px solid #4ade8044;
+  width: max-content;
+  max-width: min(360px, 80vw);
+  padding: 10px 16px 12px;
+  background: linear-gradient(135deg, #fde68a 0%, #fcd34d 100%);
+  color: #422006;
+  border: 1px solid #b45309;
   border-radius: 12px;
-  padding: 12px 24px;
+  box-shadow:
+    0 6px 20px rgba(0, 0, 0, 0.35),
+    0 0 0 4px rgba(252, 211, 77, 0.25);
   font-size: 0.9rem;
-  z-index: 10000;
-  cursor: pointer;
-  animation: toast-in 0.3s ease-out;
-  max-width: 90vw;
+  line-height: 1.4;
   text-align: center;
+  cursor: pointer;
+  z-index: 50;
+  animation:
+    upload-callout-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1),
+    upload-callout-pulse 2s ease-in-out 0.4s 2;
 }
 
-@keyframes toast-in {
+.upload-callout strong {
+  display: block;
+  font-weight: 700;
+  font-size: 0.95rem;
+  margin-bottom: 2px;
+  letter-spacing: 0.01em;
+}
+
+/* Triangle tail pointing down at the book spine */
+.upload-callout::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 9px solid transparent;
+  border-right: 9px solid transparent;
+  border-top: 9px solid #fcd34d;
+  filter: drop-shadow(0 2px 1px rgba(0, 0, 0, 0.2));
+}
+
+@keyframes upload-callout-in {
   from {
     opacity: 0;
-    transform: translateX(-50%) translateY(-10px);
+    transform: translateX(-50%) translateY(8px) scale(0.92);
   }
   to {
     opacity: 1;
-    transform: translateX(-50%) translateY(0);
+    transform: translateX(-50%) translateY(0) scale(1);
+  }
+}
+
+@keyframes upload-callout-pulse {
+  0%, 100% {
+    box-shadow:
+      0 6px 20px rgba(0, 0, 0, 0.35),
+      0 0 0 4px rgba(252, 211, 77, 0.25);
+  }
+  50% {
+    box-shadow:
+      0 6px 24px rgba(0, 0, 0, 0.4),
+      0 0 0 8px rgba(252, 211, 77, 0.35);
+  }
+}
+
+/* Subtle highlight ring on the book itself */
+.book-spine-wrapper.just-uploaded .book-spine-container {
+  outline: 2px solid #fcd34d;
+  outline-offset: 2px;
+  border-radius: 2px;
+  animation: just-uploaded-glow 2s ease-in-out 2;
+}
+
+@keyframes just-uploaded-glow {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(252, 211, 77, 0);
+  }
+  50% {
+    box-shadow: 0 0 16px 4px rgba(252, 211, 77, 0.5);
   }
 }
 

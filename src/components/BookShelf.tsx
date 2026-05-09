@@ -74,7 +74,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
     required?: number;
     available?: number;
   } | null>(null);
-  const [uploadToast, setUploadToast] = useState<string | null>(null);
+  const [uploadedBookUuid, setUploadedBookUuid] = useState<string | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const [estimating, setEstimating] = useState(false);
   const [reEstimating, setReEstimating] = useState(false);
@@ -537,11 +537,16 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
       setUploading(false);
       setEstimate(null);
 
-      // Show toast notification
-      setUploadToast(
-        'Book uploaded! Translation is in progress — you can safely close this page.'
-      );
-      toastTimerRef.current = setTimeout(() => setUploadToast(null), 8000);
+      // Pin a callout to the new book on the shelf
+      const uploadResult = (await response.json()) as { bookUuid?: string };
+      if (uploadResult.bookUuid) {
+        setUploadedBookUuid(uploadResult.bookUuid);
+        if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+        toastTimerRef.current = setTimeout(
+          () => setUploadedBookUuid(null),
+          12000
+        );
+      }
 
       await fetchBooks();
       await refreshCredits();
@@ -592,12 +597,6 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
 
   return (
     <div className="bookshelf-container">
-      {/* Upload success toast */}
-      {uploadToast && (
-        <div className="upload-toast" onClick={() => setUploadToast(null)}>
-          <span>{uploadToast}</span>
-        </div>
-      )}
       <div
         className="bookshelf-wall"
         ref={wallRef}
@@ -609,10 +608,11 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
           const userBooks = safeBooks.filter((b) => !!b.user_id);
           const renderBook = (book: Book) => {
             const isProcessing = book.status === 'processing';
+            const isJustUploaded = book.uuid === uploadedBookUuid;
             return (
               <div
                 key={book.uuid}
-                className={`book-spine-wrapper ${isProcessing ? 'processing' : ''}`}
+                className={`book-spine-wrapper ${isProcessing ? 'processing' : ''} ${isJustUploaded ? 'just-uploaded' : ''}`}
                 onMouseEnter={() => {
                   if (!isMobile) {
                     setCoverLoaded(false);
@@ -629,6 +629,21 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                   }
                 }}
               >
+                {isJustUploaded && (
+                  <div
+                    className="upload-callout"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setUploadedBookUuid(null);
+                      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+                    }}
+                  >
+                    <strong>Book uploaded!</strong>
+                    <span>
+                      Translation is in progress — you can safely close this page.
+                    </span>
+                  </div>
+                )}
                 <div
                   className="book-spine-container"
                   style={{ ['--book-spine-ratio' as any]: spineRatios.get(book.uuid) ?? DEFAULT_SPINE_RATIO }}

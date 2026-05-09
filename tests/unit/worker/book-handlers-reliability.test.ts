@@ -107,24 +107,24 @@ describe('Book Handlers Reliability', () => {
       expect(shelfCode).toContain('safely close this page');
     });
 
-    it('BookShelf shows upload success toast', () => {
+    it('BookShelf shows upload success callout pinned to the new book', () => {
       const shelfCode = fs.readFileSync(
         path.join(projectRoot, 'src/components/BookShelf.tsx'),
         'utf-8'
       );
 
-      expect(shelfCode).toContain('uploadToast');
-      expect(shelfCode).toContain('upload-toast');
+      expect(shelfCode).toContain('uploadedBookUuid');
+      expect(shelfCode).toContain('upload-callout');
       expect(shelfCode).toContain('Translation is in progress');
     });
 
-    it('CSS includes toast and hint styles', () => {
+    it('CSS includes callout and hint styles', () => {
       const cssCode = fs.readFileSync(
         path.join(projectRoot, 'src/components/BookShelf.css'),
         'utf-8'
       );
 
-      expect(cssCode).toContain('.upload-toast');
+      expect(cssCode).toContain('.upload-callout');
       expect(cssCode).toContain('.safe-to-close-hint');
     });
   });
