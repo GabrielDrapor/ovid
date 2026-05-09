@@ -118,6 +118,32 @@ async function llmChat(config: LLMConfig, messages: Array<{ role: string; conten
 }
 
 /**
+ * Try to parse a JSON object string, repairing truncated output by trimming
+ * back to the last complete `"key": "value"` entry and re-closing the brace.
+ */
+function parseGlossaryJson(raw: string): Record<string, string> {
+  let jsonStr = raw.trim();
+  if (jsonStr.startsWith('```')) {
+    jsonStr = jsonStr.replace(/```json?\n?/g, '').replace(/```$/g, '').trim();
+  }
+
+  try {
+    return JSON.parse(jsonStr);
+  } catch {
+    // Repair truncated JSON: trim back to the last `",` (complete entry boundary)
+    // and close the object. Handles truncation mid-key or mid-value.
+    const lastComma = jsonStr.lastIndexOf('",');
+    if (lastComma > 0) {
+      const repaired = jsonStr.slice(0, lastComma + 1) + '}';
+      try {
+        return JSON.parse(repaired);
+      } catch { /* fall through */ }
+    }
+    throw new Error('Unrepairable glossary JSON');
+  }
+}
+
+/**
  * Extract proper nouns glossary from book text
  */
 async function extractGlossary(
@@ -126,44 +152,54 @@ async function extractGlossary(
   sourceLanguage: string,
   targetLanguage: string
 ): Promise<Record<string, string>> {
-  // Sample strategically
-  const samples: string[] = [];
-  const total = allTexts.length;
-  samples.push(...allTexts.slice(0, Math.min(100, total)));
-  if (total > 200) {
-    const mid = Math.floor(total / 2) - 25;
-    samples.push(...allTexts.slice(mid, mid + 50));
-  }
-  if (total > 150) {
-    samples.push(...allTexts.slice(-50));
-  }
-
-  const combinedText = samples.join('\n\n');
   const targetLang = LANGUAGE_NAMES[targetLanguage] || targetLanguage;
+  const total = allTexts.length;
 
-  try {
-    const response = await llmChat(config, [
-      {
-        role: 'system',
-        content: `You are a professional literary translator specializing in proper noun extraction.
-Extract ALL proper nouns from the given ${sourceLanguage} text and provide consistent ${targetLang} translations.
-Return ONLY a valid JSON object. Example: {"Whymper": "温珀", "Mr. Whymper": "温珀先生"}`,
-      },
-      {
-        role: 'user',
-        content: `Extract all proper nouns and provide ${targetLang} translations. Return ONLY valid JSON.\n\nText:\n${combinedText}`,
-      },
-    ], { temperature: 0.1 });
+  // Two attempts with progressively smaller samples to keep output within token budget
+  const sampleSizes: Array<[number, number, number]> = [
+    [100, 50, 50],
+    [50, 25, 25],
+  ];
 
-    let jsonStr = response.trim();
-    if (jsonStr.startsWith('```')) {
-      jsonStr = jsonStr.replace(/```json?\n?/g, '').replace(/```$/g, '');
+  for (let attempt = 0; attempt < sampleSizes.length; attempt++) {
+    const [head, mid, tail] = sampleSizes[attempt];
+    const samples: string[] = [];
+    samples.push(...allTexts.slice(0, Math.min(head, total)));
+    if (total > head * 2) {
+      const midStart = Math.floor(total / 2) - Math.floor(mid / 2);
+      samples.push(...allTexts.slice(midStart, midStart + mid));
     }
-    return JSON.parse(jsonStr);
-  } catch (err) {
-    console.warn('Glossary extraction failed:', err);
-    return {};
+    if (total > head + tail) {
+      samples.push(...allTexts.slice(-tail));
+    }
+    const combinedText = samples.join('\n\n');
+
+    try {
+      const response = await llmChat(config, [
+        {
+          role: 'system',
+          content: `You are a professional literary translator specializing in proper noun extraction.
+Extract ALL proper nouns (people, places, organizations, brands, acronyms) from the given ${sourceLanguage} text and provide consistent ${targetLang} translations.
+For acronyms with no standard ${targetLang} translation, keep them as-is in the value (e.g. {"NBA": "NBA"}).
+Return ONLY a valid JSON object. Be concise — short values, no commentary. Example: {"Whymper": "温珀", "NBA": "NBA"}`,
+        },
+        {
+          role: 'user',
+          content: `Extract all proper nouns and provide ${targetLang} translations. Return ONLY valid JSON.\n\nText:\n${combinedText}`,
+        },
+      ], { temperature: 0.1, maxTokens: 16384 });
+
+      const parsed = parseGlossaryJson(response);
+      const count = Object.keys(parsed).length;
+      console.log(`[glossary] Extracted ${count} terms (attempt ${attempt + 1}, sample size ${samples.length})`);
+      return parsed;
+    } catch (err) {
+      console.warn(`[glossary] Attempt ${attempt + 1} failed:`, (err as Error).message);
+    }
   }
+
+  console.warn('[glossary] All attempts failed — proceeding with empty glossary');
+  return {};
 }
 
 /**
@@ -267,6 +303,16 @@ function buildGlossaryStr(text: string, glossary: Record<string, string>): strin
  * Returns the offending words, or an empty array if clean.
  */
 function detectEnglishResidue(text: string, glossary: Record<string, string>): string[] {
+  // For CJK targets, if the translation is already mostly target-language, trust it
+  // and skip residue scanning. Threshold: ≥60% CJK chars among letter-or-CJK chars
+  // means the model produced a real translation; sparse English is almost always
+  // legitimate proper nouns the model couldn't transliterate.
+  const cjkCount = (text.match(/[　-鿿가-힯]/g) ?? []).length;
+  const latinCount = (text.match(/[a-zA-Z]/g) ?? []).length;
+  if (cjkCount > 0 && cjkCount / (cjkCount + latinCount) >= 0.6) {
+    return [];
+  }
+
   // Match sequences of 3+ ASCII letters (skip short ones like "OK", "vs")
   const englishWords = text.match(/[a-zA-Z]{3,}/g);
   if (!englishWords) return [];
@@ -294,7 +340,11 @@ function detectEnglishResidue(text: string, glossary: Record<string, string>): s
 
   return englishWords.filter(w => {
     const lower = w.toLowerCase();
-    return !allowed.has(lower) && !commonAllowed.has(lower);
+    if (allowed.has(lower) || commonAllowed.has(lower)) return false;
+    // All-uppercase tokens are almost always acronyms (NBA, BBC, MTK, CBF, FIFA, GDP)
+    // — keep them as-is rather than flagging them as untranslated residue.
+    if (/^[A-Z]+$/.test(w)) return false;
+    return true;
   });
 }
 
