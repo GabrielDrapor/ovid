@@ -1000,32 +1000,95 @@
   font-style: italic;
 }
 
-.upload-toast {
+/* Bookplate-style callout pinned above the just-uploaded book.
+   position:fixed escapes the .books-grid overflow:hidden — top/left are
+   set in JS from the spine's getBoundingClientRect, transform centers it.
+   Palette intentionally muted (parchment + walnut) so it reads as part of
+   the shelf rather than a generic system toast. */
+.upload-callout {
   position: fixed;
-  top: 20px;
-  left: 50%;
   transform: translateX(-50%);
-  background: #1a1a2e;
-  color: #4ade80;
-  border: 1px solid #4ade8044;
-  border-radius: 12px;
-  padding: 12px 24px;
-  font-size: 0.9rem;
-  z-index: 10000;
-  cursor: pointer;
-  animation: toast-in 0.3s ease-out;
-  max-width: 90vw;
+  width: max-content;
+  max-width: min(280px, 70vw);
+  padding: 10px 16px 12px;
+  background:
+    linear-gradient(180deg, rgba(252, 246, 232, 0.98) 0%, rgba(240, 228, 200, 0.98) 100%);
+  color: #3a2817;
+  border: 1px solid rgba(120, 80, 40, 0.35);
+  border-radius: 4px;
+  box-shadow:
+    0 14px 32px rgba(0, 0, 0, 0.45),
+    0 2px 4px rgba(0, 0, 0, 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6),
+    inset 0 -1px 0 rgba(120, 80, 40, 0.08);
+  font-family: "Literata", "New York", ui-serif, Georgia, "Times New Roman", serif;
+  font-size: 0.82rem;
+  line-height: 1.45;
   text-align: center;
+  cursor: pointer;
+  z-index: 50;
+  animation: upload-callout-in 0.45s cubic-bezier(0.22, 1.2, 0.36, 1);
 }
 
-@keyframes toast-in {
+.upload-callout strong {
+  display: block;
+  font-weight: 600;
+  font-size: 0.92rem;
+  color: #2a1a0e;
+  margin-bottom: 2px;
+  letter-spacing: 0.005em;
+}
+
+/* Hairline divider between heading and body, like a bookplate */
+.upload-callout strong::after {
+  content: '';
+  display: block;
+  width: 28px;
+  height: 1px;
+  margin: 4px auto 5px;
+  background: rgba(120, 80, 40, 0.4);
+}
+
+/* Triangle tail pointing down at the book spine */
+.upload-callout::after {
+  content: '';
+  position: absolute;
+  top: calc(100% - 1px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-top: 7px solid rgba(240, 228, 200, 0.98);
+  filter: drop-shadow(0 1px 0 rgba(120, 80, 40, 0.45)) drop-shadow(0 3px 3px rgba(0, 0, 0, 0.3));
+}
+
+@keyframes upload-callout-in {
   from {
     opacity: 0;
-    transform: translateX(-50%) translateY(-10px);
+    transform: translateX(-50%) translateY(6px);
   }
   to {
     opacity: 1;
     transform: translateX(-50%) translateY(0);
+  }
+}
+
+/* Soft warm glow on the book itself — single fade, no harsh outline */
+.book-spine-wrapper.just-uploaded .book-spine-container {
+  animation: just-uploaded-glow 2.6s ease-out 1;
+}
+
+@keyframes just-uploaded-glow {
+  0% {
+    box-shadow: 0 0 0 0 rgba(218, 165, 80, 0);
+  }
+  35% {
+    box-shadow: 0 0 22px 4px rgba(218, 165, 80, 0.5);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(218, 165, 80, 0);
   }
 }
 
