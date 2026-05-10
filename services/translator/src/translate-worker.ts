@@ -299,22 +299,44 @@ function buildGlossaryStr(text: string, glossary: Record<string, string>): strin
 }
 
 /**
+ * Strip URL-like content (full URLs, bare domains with optional paths,
+ * email addresses, and stray file extensions) so they don't pollute the
+ * residue analysis. Bibliography-heavy chapters were triggering retries
+ * because URL fragments like "nytimes.com/world/asia" pulled the CJK
+ * ratio below the threshold and seeded "english residue" tokens.
+ */
+function stripCitations(text: string): string {
+  return text
+    .replace(/https?:\/\/\S+/gi, ' ')
+    .replace(/\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b/g, ' ')
+    .replace(
+      /\b(?:[\w-]+\.)+(?:com|org|net|gov|edu|io|co|cn|jp|de|fr|uk|us|ru|au|tv|info|news|me)(?:\.[a-z]{2})?(?:\/[\w\-./?#=&%~+]*)?/gi,
+      ' ',
+    )
+    .replace(/\.(?:shtml|html?|pdf|txt|aspx?|jsp|php|csv|json|xml)\b/gi, ' ');
+}
+
+/**
  * Detect non-proper-noun English words left in a translation.
  * Returns the offending words, or an empty array if clean.
  */
-function detectEnglishResidue(text: string, glossary: Record<string, string>): string[] {
+export function detectEnglishResidue(text: string, glossary: Record<string, string>): string[] {
+  // Strip URLs/emails/file extensions first — citations and reference URLs
+  // legitimately remain verbatim and must not count as untranslated text.
+  const stripped = stripCitations(text);
+
   // For CJK targets, if the translation is already mostly target-language, trust it
   // and skip residue scanning. Threshold: ≥60% CJK chars among letter-or-CJK chars
   // means the model produced a real translation; sparse English is almost always
   // legitimate proper nouns the model couldn't transliterate.
-  const cjkCount = (text.match(/[　-鿿가-힯]/g) ?? []).length;
-  const latinCount = (text.match(/[a-zA-Z]/g) ?? []).length;
+  const cjkCount = (stripped.match(/[　-鿿가-힯]/g) ?? []).length;
+  const latinCount = (stripped.match(/[a-zA-Z]/g) ?? []).length;
   if (cjkCount > 0 && cjkCount / (cjkCount + latinCount) >= 0.6) {
     return [];
   }
 
   // Match sequences of 3+ ASCII letters (skip short ones like "OK", "vs")
-  const englishWords = text.match(/[a-zA-Z]{3,}/g);
+  const englishWords = stripped.match(/[a-zA-Z]{3,}/g);
   if (!englishWords) return [];
 
   // Build set of allowed English words from glossary keys + values
@@ -338,7 +360,7 @@ function detectEnglishResidue(text: string, glossary: Record<string, string>): s
     'seg', 'translate', 'context',  // XML tag residue from prompt
   ]);
 
-  return englishWords.filter(w => {
+  const residue = englishWords.filter(w => {
     const lower = w.toLowerCase();
     if (allowed.has(lower) || commonAllowed.has(lower)) return false;
     // All-uppercase tokens are almost always acronyms (NBA, BBC, MTK, CBF, FIFA, GDP)
@@ -346,6 +368,24 @@ function detectEnglishResidue(text: string, glossary: Record<string, string>): s
     if (/^[A-Z]+$/.test(w)) return false;
     return true;
   });
+
+  if (residue.length === 0) return [];
+
+  // If the segment has CJK content and every residue token looks proper-noun-ish
+  // (Title Case, e.g. "Hessler", or a Title-Case head followed by short lowercase
+  // pinyin syllables like "Feng", "tong", "xing"), it's a names list / pinyin
+  // transliteration the model legitimately preserved. Retrying won't change it
+  // and just costs another LLM call.
+  if (cjkCount > 0) {
+    const allTitleCase = residue.every(w => /^[A-Z][a-z]+$/.test(w));
+    const looksLikePinyin =
+      residue.length >= 2 &&
+      residue.some(w => /^[A-Z][a-z]+$/.test(w)) &&
+      residue.every(w => /^[A-Z][a-z]+$/.test(w) || /^[a-z]{1,5}$/.test(w));
+    if (allTitleCase || looksLikePinyin) return [];
+  }
+
+  return residue;
 }
 
 /** Rough token estimate: ~4 chars per token for English, ~2 for CJK */
