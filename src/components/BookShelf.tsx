@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
 import { SUPPORTED_LANGUAGES } from '../utils/translator';
 import { useUser } from '../contexts/UserContext';
 import { ApiError, fetchApi } from '../utils/api';
@@ -76,6 +76,8 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
   } | null>(null);
   const [uploadedBookUuid, setUploadedBookUuid] = useState<string | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const justUploadedSpineRef = useRef<HTMLDivElement | null>(null);
+  const calloutRef = useRef<HTMLDivElement | null>(null);
   const [estimating, setEstimating] = useState(false);
   const [reEstimating, setReEstimating] = useState(false);
   const [estimate, setEstimate] = useState<{
@@ -220,6 +222,29 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
     }
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showHelpMenu]);
+
+  // Position the upload callout in viewport coords so it can escape
+  // .books-grid's overflow:hidden. Recompute on resize and any scroll
+  // (the books grid scrolls horizontally).
+  useLayoutEffect(() => {
+    if (!uploadedBookUuid) return;
+    const update = () => {
+      const spine = justUploadedSpineRef.current;
+      const callout = calloutRef.current;
+      if (!spine || !callout) return;
+      const rect = spine.getBoundingClientRect();
+      callout.style.left = `${rect.left + rect.width / 2}px`;
+      callout.style.top = `${rect.top - callout.offsetHeight - 14}px`;
+    };
+    const raf = requestAnimationFrame(update);
+    window.addEventListener('resize', update);
+    window.addEventListener('scroll', update, true);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener('resize', update);
+      window.removeEventListener('scroll', update, true);
+    };
+  }, [uploadedBookUuid, books]);
 
   // Drive translation for books that are still processing.
   // Each call to /translate-next translates a chunk of ~25 paragraphs,
@@ -612,6 +637,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
             return (
               <div
                 key={book.uuid}
+                ref={isJustUploaded ? justUploadedSpineRef : undefined}
                 className={`book-spine-wrapper ${isProcessing ? 'processing' : ''} ${isJustUploaded ? 'just-uploaded' : ''}`}
                 onMouseEnter={() => {
                   if (!isMobile) {
@@ -632,6 +658,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                 {isJustUploaded && (
                   <div
                     className="upload-callout"
+                    ref={calloutRef}
                     onClick={(e) => {
                       e.stopPropagation();
                       setUploadedBookUuid(null);
