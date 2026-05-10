@@ -48,6 +48,11 @@ interface BilingualReaderV2Props {
 /**
  * Scope EPUB CSS rules under .epub-content to prevent them from
  * leaking to the reader's own layout elements (nav buttons, menus, etc.)
+ *
+ * `body`/`html` rules are dropped: EPUBs often inline per-page <style> blocks
+ * (e.g. titlepage.xhtml's `body { text-align: center }`) into individual xhtml
+ * files. The book parser concatenates all of them into one stylesheet, so a
+ * single titlepage rule would otherwise center every paragraph in the book.
  */
 function scopeEpubStyles(css: string): string {
   return css.replace(
@@ -59,12 +64,15 @@ function scopeEpubStyles(css: string): string {
         .split(',')
         .map((s: string) => {
           s = s.trim();
-          if (!s) return s;
-          // Skip body/html — remap to .epub-content itself
-          if (/^(body|html)$/i.test(s)) return '.epub-content';
+          if (!s) return null;
+          if (/^(body|html)$/i.test(s)) return null;
           return `.epub-content ${s}`;
         })
+        .filter((s): s is string => s !== null)
         .join(', ');
+      // If every selector was dropped, neutralize the rule with a no-match
+      // selector so the declaration block is still syntactically valid.
+      if (!scoped) return '.epub-content :not(*) {';
       return `${scoped} {`;
     }
   );
