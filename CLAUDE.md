@@ -125,8 +125,10 @@ TypeScript-first across frontend, backend, CLI, and translator service.
 
 ## Development Rules
 
-- **Branch off main** — `feature/` or `fix/` branches, PR back to main
-- **Never force push**
+- **Branch off latest main** — Always `git fetch origin && git checkout main && git pull` before creating a new branch. Branching off a stale local main produces PRs that conflict with or revert recently merged work.
+- **Rebase before opening a PR** — After committing on the feature branch, run `git fetch origin && git rebase origin/main` and resolve conflicts before `git push`. Do this for every PR, even small fixes — main moves fast and yesterday's base is already stale.
+- **Branch naming** — `feature/` or `fix/` branches, PR back to main.
+- **Never force push** to main. Force-push to your own feature branch (after rebase) is fine and expected.
 - **Tests required** — Run `yarn test` before submitting. New features need new tests.
 - **CI** — Push to main auto-deploys via GitHub Actions
 - **Railway** — Translator service auto-deploys on git push separately
