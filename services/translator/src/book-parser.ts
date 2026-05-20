@@ -121,6 +121,7 @@ const blockTags = new Set([
   'p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
   'li', 'blockquote', 'pre', 'td', 'th', 'dt', 'dd',
   'figcaption', 'article', 'section',
+  'table', 'tr', 'tbody', 'thead', 'tfoot',
 ]);
 
 const skipTags = new Set(['script', 'style', 'noscript', 'head', 'meta', 'link']);
