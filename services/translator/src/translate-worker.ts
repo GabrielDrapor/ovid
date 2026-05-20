@@ -53,6 +53,9 @@ const JOB_TIMEOUT_MS = 4 * 60 * 60 * 1000;
 /** Sentinel value written when a node permanently fails translation after retry */
 const TRANSLATION_FAILED_MARKER = '[Translation failed]';
 
+/** Threshold (in characters) above which a single text node is split into chunks for translation */
+const LARGE_NODE_CHAR_THRESHOLD = 3000;
+
 /** Column list for translations_v2 batch inserts */
 const TRANSLATIONS_V2_COLUMNS = ['chapter_id', 'xpath', 'original_text', 'original_html', 'translated_text', 'order_index'] as const;
 
@@ -279,6 +282,82 @@ ${glossaryStr}`,
   }
 
   return result;
+}
+
+/**
+ * Translate a large text node by splitting on paragraph boundaries (\n\n),
+ * translating each chunk independently, then joining the results.
+ * This prevents LLM output truncation for very long single nodes.
+ */
+async function translateLargeNode(
+  config: LLMConfig,
+  text: string,
+  glossary: Record<string, string>,
+  sourceLanguage: string,
+  targetLanguage: string,
+  bookUuid: string
+): Promise<string> {
+  // Split on double-newline (paragraph breaks)
+  const chunks = text.split(/\n\n+/).filter(c => c.trim().length > 0);
+
+  if (chunks.length <= 1) {
+    // No paragraph breaks found — try splitting on single newlines if text is very large
+    const fallbackChunks = text.split(/\n/).filter(c => c.trim().length > 0);
+    if (fallbackChunks.length <= 1) {
+      // Can't split — just translate as-is (will be truncated but nothing we can do)
+      console.warn(`[${bookUuid}] Large node (${text.length} chars) has no splittable boundaries`);
+      return translateText(config, text, glossary, sourceLanguage, targetLanguage);
+    }
+    return translateChunkedParagraphs(config, fallbackChunks, glossary, sourceLanguage, targetLanguage, bookUuid);
+  }
+
+  return translateChunkedParagraphs(config, chunks, glossary, sourceLanguage, targetLanguage, bookUuid);
+}
+
+/** Translate an array of paragraph chunks with concurrency, return joined result */
+async function translateChunkedParagraphs(
+  config: LLMConfig,
+  chunks: string[],
+  glossary: Record<string, string>,
+  sourceLanguage: string,
+  targetLanguage: string,
+  bookUuid: string
+): Promise<string> {
+  console.log(`[${bookUuid}] Splitting large node into ${chunks.length} chunks for translation`);
+
+  // Group chunks into batches of ~2000 chars to avoid too many LLM calls
+  const CHUNK_BATCH_SIZE = 2000;
+  const batches: string[][] = [];
+  let currentBatch: string[] = [];
+  let currentLen = 0;
+
+  for (const chunk of chunks) {
+    if (currentBatch.length > 0 && currentLen + chunk.length > CHUNK_BATCH_SIZE) {
+      batches.push(currentBatch);
+      currentBatch = [];
+      currentLen = 0;
+    }
+    currentBatch.push(chunk);
+    currentLen += chunk.length;
+  }
+  if (currentBatch.length > 0) batches.push(currentBatch);
+
+  // Translate batches with concurrency of 3
+  const CONCURRENCY = 3;
+  const translatedBatches: string[] = [];
+
+  for (let i = 0; i < batches.length; i += CONCURRENCY) {
+    const concurrent = batches.slice(i, i + CONCURRENCY);
+    const results = await Promise.all(
+      concurrent.map(batch => {
+        const batchText = batch.join('\n\n');
+        return translateText(config, batchText, glossary, sourceLanguage, targetLanguage);
+      })
+    );
+    translatedBatches.push(...results);
+  }
+
+  return translatedBatches.join('\n\n');
 }
 
 /** Build glossary string for relevant terms found in text */
@@ -606,10 +685,9 @@ export async function translateBook(
             if (batch.length === 1) {
               // Single node — use simple translateText (more reliable for short text)
               const { node } = batch[0];
-              const translated = await translateText(
-                llmConfig, node.text, glossary,
-                job.source_language, job.target_language
-              );
+              const translated = node.text.length > LARGE_NODE_CHAR_THRESHOLD
+                ? await translateLargeNode(llmConfig, node.text, glossary, job.source_language, job.target_language, bookUuid)
+                : await translateText(llmConfig, node.text, glossary, job.source_language, job.target_language);
               return new Map([[batch[0].index, { node, translated }]]);
             }
 
