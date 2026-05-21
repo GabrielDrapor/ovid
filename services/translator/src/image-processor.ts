@@ -72,18 +72,52 @@ export async function processSpine(imageBuffer: Buffer): Promise<Buffer> {
     trimmed = imageBuffer;
   }
 
-  // Conditionally rotate: only if the trimmed image is landscape (wider than tall).
-  // The prompt asks for a vertical spine rectangle, so if Gemini followed instructions
-  // the image is already portrait after trimming. But sometimes Gemini generates
-  // a horizontal banner instead — rotate only in that case.
+  // Orient: rotate 90° CW unless the trimmed image is clearly portrait.
+  // Gemini's spine generation is unpredictable — it sometimes returns a
+  // tall narrow portrait (the ideal), sometimes a 1024×1024 square with
+  // horizontal title text, sometimes a landscape banner. Rotating squares
+  // and landscape lands the title running top-to-bottom either way.
   const trimMeta = await sharp(trimmed).metadata();
   const trimW = trimMeta.width || 1;
   const trimH = trimMeta.height || 1;
-  const oriented = trimW > trimH
+  const oriented = trimW >= trimH
     ? await sharp(trimmed).rotate(90).png().toBuffer()
     : trimmed;
 
-  // Resize to target using 'cover' + centre — fills the full area, crops excess
+  // After orientation, decide how to fit into 114×607 (target aspect ≈ 0.188):
+  //   - If the source is narrower than the target (i.e. taller per unit width),
+  //     `fit: 'cover'` would scale-to-fill-width and crop top/bottom, which
+  //     chops the motif and author off the ends of a properly tall spine.
+  //     Instead, scale to fit height and pad the sides with the source's
+  //     edge background colour. Preserves the full design.
+  //   - Otherwise (source roughly target-aspect or wider after rotation),
+  //     'cover' centred is fine: it fills the frame and the slight side
+  //     crop is what we want.
+  const orientedMeta = await sharp(oriented).metadata();
+  const oW = orientedMeta.width || 1;
+  const oH = orientedMeta.height || 1;
+  const sourceAspect = oW / oH;
+  const targetAspect = SPINE_WIDTH / SPINE_HEIGHT;
+
+  if (sourceAspect < targetAspect * 0.85) {
+    const scaled = await sharp(oriented).resize({ height: SPINE_HEIGHT }).png().toBuffer();
+    const sm = await sharp(scaled).metadata();
+    const scaledW = sm.width || 1;
+    if (scaledW >= SPINE_WIDTH) {
+      return sharp(scaled).resize(SPINE_WIDTH, SPINE_HEIGHT, { fit: 'cover', position: 'centre' }).png().toBuffer();
+    }
+    // Sample a top-edge pixel for the background extension colour
+    const { data } = await sharp(scaled).resize({ width: 16 }).raw().toBuffer({ resolveWithObject: true });
+    const bg = { r: data[0], g: data[1], b: data[2] };
+    const totalPad = SPINE_WIDTH - scaledW;
+    const leftPad = Math.floor(totalPad / 2);
+    const rightPad = totalPad - leftPad;
+    return sharp(scaled)
+      .extend({ left: leftPad, right: rightPad, top: 0, bottom: 0, background: bg })
+      .png()
+      .toBuffer();
+  }
+
   return sharp(oriented)
     .resize(SPINE_WIDTH, SPINE_HEIGHT, { fit: 'cover', position: 'centre' })
     .png()
