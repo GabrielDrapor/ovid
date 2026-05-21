@@ -126,6 +126,112 @@ const blockTags = new Set([
 
 const skipTags = new Set(['script', 'style', 'noscript', 'head', 'meta', 'link']);
 
+/**
+ * Some EPUBs (notably Paul Graham essays) put a whole article inside a single
+ * leaf block such as `<td>` or `<font>` and separate paragraphs with `<br><br>`.
+ * Without intervention this becomes one giant text node that:
+ *   - exceeds LLM context for translation (gets truncated or fails entirely), and
+ *   - renders translated output as a wall of text (no visible paragraph breaks).
+ *
+ * Walk leaf blocks and, when a `<br><br>` (or longer) run is found, split the
+ * block's flattened content into multiple `<p>` siblings. Inline formatting is
+ * lost during the split — acceptable because the source already uses `<br>` for
+ * structure, so there is no semantic markup to preserve.
+ */
+function splitBrSeparatedParagraphs(body: any, doc: any) {
+  const hasBlockDescendant = (node: any): boolean => {
+    const children = node.childNodes;
+    if (!children) return false;
+    for (let i = 0; i < children.length; i++) {
+      const child = children[i];
+      if (child.nodeType !== 1) continue;
+      const tag = (child.nodeName || '').toLowerCase();
+      if (skipTags.has(tag)) continue;
+      if (blockTags.has(tag)) return true;
+      if (hasBlockDescendant(child)) return true;
+    }
+    return false;
+  };
+
+  const splitLeafBlock = (block: any) => {
+    // Flatten descendants into a sequence of (text|br) tokens
+    type Token = { kind: 'text'; text: string } | { kind: 'br' };
+    const tokens: Token[] = [];
+    const collect = (node: any) => {
+      const children = node.childNodes;
+      if (!children) return;
+      for (let i = 0; i < children.length; i++) {
+        const child = children[i];
+        if (child.nodeType === 3) {
+          const t = child.textContent || '';
+          if (t.length > 0) tokens.push({ kind: 'text', text: t });
+        } else if (child.nodeType === 1) {
+          const tag = (child.nodeName || '').toLowerCase();
+          if (skipTags.has(tag)) continue;
+          if (tag === 'br') tokens.push({ kind: 'br' });
+          else collect(child);
+        }
+      }
+    };
+    collect(block);
+
+    // Group tokens, splitting on runs of 2+ <br> (interleaved whitespace allowed)
+    const groups: string[][] = [[]];
+    let i = 0;
+    while (i < tokens.length) {
+      const tok = tokens[i];
+      if (tok.kind === 'br') {
+        // Count consecutive br/whitespace
+        let j = i;
+        let brCount = 0;
+        while (j < tokens.length) {
+          const t = tokens[j];
+          if (t.kind === 'br') { brCount++; j++; }
+          else if (t.kind === 'text' && !t.text.trim()) j++;
+          else break;
+        }
+        if (brCount >= 2) {
+          groups.push([]);
+        } else {
+          // single soft line break — treat as space
+          groups[groups.length - 1].push(' ');
+        }
+        i = j;
+      } else {
+        groups[groups.length - 1].push(tok.text);
+        i++;
+      }
+    }
+
+    const paragraphs = groups
+      .map(g => g.join('').replace(/\s+/g, ' ').trim())
+      .filter(p => p.length > 0);
+    if (paragraphs.length < 2) return; // nothing useful to split
+
+    while (block.firstChild) block.removeChild(block.firstChild);
+    for (const para of paragraphs) {
+      const p = doc.createElement('p');
+      p.appendChild(doc.createTextNode(para));
+      block.appendChild(p);
+    }
+  };
+
+  const walk = (node: any) => {
+    if (!node || node.nodeType !== 1) return;
+    const tag = (node.nodeName || '').toLowerCase();
+    if (skipTags.has(tag)) return;
+
+    if (blockTags.has(tag) && !hasBlockDescendant(node)) {
+      splitLeafBlock(node);
+      return;
+    }
+
+    const children = Array.from(node.childNodes as any[]);
+    for (const child of children) walk(child);
+  };
+  walk(body);
+}
+
 function parseHTMLChapter(
   html: string,
   chapterNumber: number,
@@ -133,6 +239,10 @@ function parseHTMLChapter(
   const doc = new DOMParser().parseFromString(html, 'text/html');
   const body = doc.getElementsByTagName('body')[0];
   if (!body) return null;
+
+  // Convert <br><br>-separated content inside leaf blocks into <p> siblings.
+  // Must run before rawHtml serialization so the reader gets the <p> structure.
+  splitBrSeparatedParagraphs(body, doc);
 
   let rawHtml = '';
   const bodyChildren = body.childNodes;
