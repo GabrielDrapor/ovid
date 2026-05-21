@@ -232,6 +232,45 @@ function splitBrSeparatedParagraphs(body: any, doc: any) {
   walk(body);
 }
 
+/**
+ * Browsers auto-insert a `<tbody>` whenever a `<table>` has `<tr>` direct
+ * children, but @xmldom/xmldom does not. That mismatch makes every stored
+ * XPath under a `<table>` (e.g. `/body/table/tr/td/p`) fail to resolve in
+ * the reader, which walks the browser DOM and produces
+ * `/body/table/tbody/tr/td/p`.
+ *
+ * Normalize at parse time by wrapping bare `<tr>` children in an explicit
+ * `<tbody>`. After this both `raw_html` and the XPaths stored in
+ * `text_nodes_json` contain the same `<tbody>` segment the browser will see.
+ */
+function normalizeTableBodies(body: any, doc: any) {
+  const tables = body.getElementsByTagName('table');
+  // Snapshot first — wrapping children mutates the live HTMLCollection.
+  const tableList: any[] = [];
+  for (let i = 0; i < tables.length; i++) tableList.push(tables[i]);
+
+  for (const table of tableList) {
+    const children = Array.from(table.childNodes as any[]);
+    // Already has a tbody (or thead/tfoot) wrapping its rows — leave it alone.
+    const hasSectionChild = children.some((c: any) =>
+      c.nodeType === 1 && ['tbody', 'thead', 'tfoot'].includes((c.nodeName || '').toLowerCase())
+    );
+    if (hasSectionChild) continue;
+
+    const looseRows = children.filter((c: any) =>
+      c.nodeType === 1 && (c.nodeName || '').toLowerCase() === 'tr'
+    );
+    if (looseRows.length === 0) continue;
+
+    const tbody = doc.createElement('tbody');
+    for (const row of looseRows) {
+      table.removeChild(row);
+      tbody.appendChild(row);
+    }
+    table.appendChild(tbody);
+  }
+}
+
 function parseHTMLChapter(
   html: string,
   chapterNumber: number,
@@ -239,6 +278,11 @@ function parseHTMLChapter(
   const doc = new DOMParser().parseFromString(html, 'text/html');
   const body = doc.getElementsByTagName('body')[0];
   if (!body) return null;
+
+  // Wrap loose <tr> children in <tbody> to match browser auto-insertion.
+  // Must run before rawHtml serialization and walkNode so XPaths line up
+  // with what the reader sees in the rendered DOM.
+  normalizeTableBodies(body, doc);
 
   // Convert <br><br>-separated content inside leaf blocks into <p> siblings.
   // Must run before rawHtml serialization so the reader gets the <p> structure.
