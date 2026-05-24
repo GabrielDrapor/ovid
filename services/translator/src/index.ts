@@ -184,6 +184,7 @@ interface UploadAndParseRequest {
   targetLanguage: string;
   userId: number;
   secret: string;
+  skipTranslation?: boolean;
 }
 
 app.post('/upload-and-parse', async (c) => {
@@ -214,9 +215,13 @@ async function processUpload(req: UploadAndParseRequest): Promise<void> {
     sourceLanguage,
     targetLanguage,
     userId,
+    skipTranslation = false,
   } = req;
+  const effectiveTargetLanguage = skipTranslation ? 'none' : targetLanguage;
 
-  console.log(`[upload] Starting parse for ${bookUuid} (${fileExtension})`);
+  console.log(
+    `[upload] Starting parse for ${bookUuid} (${fileExtension})${skipTranslation ? ' [skipTranslation]' : ''}`
+  );
 
   let creditsDeducted = 0; // Track for refund on failure
 
@@ -231,48 +236,50 @@ async function processUpload(req: UploadAndParseRequest): Promise<void> {
       `[upload] Parsed: "${bookData.title}" by ${bookData.author}, ${bookData.chapters.length} chapters`
     );
 
-    // 3. Calculate credits and check balance
-    const allTexts: string[] = [];
-    for (const chapter of bookData.chapters) {
-      for (const node of chapter.textNodes) {
-        allTexts.push(node.text);
+    // 3. Calculate credits and check balance (skipped when no translation requested)
+    if (!skipTranslation) {
+      const allTexts: string[] = [];
+      for (const chapter of bookData.chapters) {
+        for (const node of chapter.textNodes) {
+          allTexts.push(node.text);
+        }
       }
-    }
-    const requiredCredits = calculateBookCredits(allTexts, targetLanguage);
+      const requiredCredits = calculateBookCredits(allTexts, targetLanguage);
 
-    // Check user credits
-    const userRow = await db.first<{ credits: number }>(
-      'SELECT credits FROM users WHERE id = ?',
-      [userId]
-    );
-    const userCredits = userRow?.credits ?? 0;
-
-    if (userCredits < requiredCredits) {
-      console.error(
-        `[upload] Insufficient credits for ${bookUuid}: need ${requiredCredits}, have ${userCredits}`
+      // Check user credits
+      const userRow = await db.first<{ credits: number }>(
+        'SELECT credits FROM users WHERE id = ?',
+        [userId]
       );
-      // Clean up R2 file
-      await r2Delete(fileKey);
-      return;
-    }
+      const userCredits = userRow?.credits ?? 0;
 
-    // Deduct credits
-    await db.run('UPDATE users SET credits = credits - ? WHERE id = ?', [
-      requiredCredits,
-      userId,
-    ]);
-    creditsDeducted = requiredCredits;
-    await db.run(
-      `INSERT INTO credit_transactions (user_id, amount, type, description, book_uuid, balance_after)
-       VALUES (?, ?, 'deduction', ?, ?, (SELECT credits FROM users WHERE id = ?))`,
-      [
+      if (userCredits < requiredCredits) {
+        console.error(
+          `[upload] Insufficient credits for ${bookUuid}: need ${requiredCredits}, have ${userCredits}`
+        );
+        // Clean up R2 file
+        await r2Delete(fileKey);
+        return;
+      }
+
+      // Deduct credits
+      await db.run('UPDATE users SET credits = credits - ? WHERE id = ?', [
+        requiredCredits,
         userId,
-        -requiredCredits,
-        `Translation: ${bookData.title || 'Book'}`,
-        bookUuid,
-        userId,
-      ]
-    );
+      ]);
+      creditsDeducted = requiredCredits;
+      await db.run(
+        `INSERT INTO credit_transactions (user_id, amount, type, description, book_uuid, balance_after)
+         VALUES (?, ?, 'deduction', ?, ?, (SELECT credits FROM users WHERE id = ?))`,
+        [
+          userId,
+          -requiredCredits,
+          `Translation: ${bookData.title || 'Book'}`,
+          bookUuid,
+          userId,
+        ]
+      );
+    }
 
     // 4. Upload images to R2
     const imgRewriteMap = buildImgRewriteMap(bookUuid, bookData.images);
@@ -296,7 +303,7 @@ async function processUpload(req: UploadAndParseRequest): Promise<void> {
         bookData.title,
         bookData.title,
         bookData.author,
-        `${sourceLanguage}-${targetLanguage}`,
+        `${sourceLanguage}-${effectiveTargetLanguage}`,
         bookData.styles || '',
         userId,
         bookUuid,
@@ -313,17 +320,19 @@ async function processUpload(req: UploadAndParseRequest): Promise<void> {
         'SELECT COALESCE(MAX(display_order), 0) as max_order FROM books_v2'
       );
       const nextOrder = (maxOrderRow?.max_order || 0) + 1;
+      const initialStatus = skipTranslation ? 'ready' : 'processing';
       await db.run(
         `INSERT INTO books_v2 (uuid, title, original_title, author, language_pair, styles, user_id, status, display_order)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'processing', ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           bookUuid,
           bookData.title,
           bookData.title,
           bookData.author,
-          `${sourceLanguage}-${targetLanguage}`,
+          `${sourceLanguage}-${effectiveTargetLanguage}`,
           bookData.styles || '',
           userId,
+          initialStatus,
           nextOrder,
         ]
       );
@@ -374,28 +383,36 @@ async function processUpload(req: UploadAndParseRequest): Promise<void> {
       );
     }
 
-    // 6. Create translation job
-    await db.run(
-      `INSERT INTO translation_jobs (book_id, book_uuid, source_language, target_language, total_chapters, status)
-       VALUES (?, ?, ?, ?, ?, 'pending')`,
-      [
-        bookId,
+    if (skipTranslation) {
+      // No translation requested — mark book ready, skip job + translateBook call.
+      await db.run("UPDATE books_v2 SET status = 'ready' WHERE uuid = ?", [
         bookUuid,
-        sourceLanguage,
-        targetLanguage,
-        bookData.chapters.length,
-      ]
-    );
+      ]);
+      console.log(`[upload] Book ${bookUuid} imported without translation`);
+    } else {
+      // 6. Create translation job
+      await db.run(
+        `INSERT INTO translation_jobs (book_id, book_uuid, source_language, target_language, total_chapters, status)
+         VALUES (?, ?, ?, ?, ?, 'pending')`,
+        [
+          bookId,
+          bookUuid,
+          sourceLanguage,
+          targetLanguage,
+          bookData.chapters.length,
+        ]
+      );
 
-    console.log(
-      `[upload] Book shell inserted, starting translation for ${bookUuid}`
-    );
+      console.log(
+        `[upload] Book shell inserted, starting translation for ${bookUuid}`
+      );
 
-    // 7. Start translation immediately
-    const llmConfig = getLlmConfig();
-    translateBook(db, llmConfig, bookUuid).catch((err) => {
-      console.error(`[upload] Translation failed for ${bookUuid}:`, err);
-    });
+      // 7. Start translation immediately
+      const llmConfig = getLlmConfig();
+      translateBook(db, llmConfig, bookUuid).catch((err) => {
+        console.error(`[upload] Translation failed for ${bookUuid}:`, err);
+      });
+    }
 
     // 8. Generate cover images (if Gemini key available)
     const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';

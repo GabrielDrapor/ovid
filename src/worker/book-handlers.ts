@@ -54,6 +54,7 @@ export async function handleBookUpload(
     let r2Key: string;
     let targetLanguage = 'zh';
     let sourceLanguage = 'auto';
+    let skipTranslation = false;
     const bookUuid = crypto.randomUUID();
 
     if (contentType.includes('application/json')) {
@@ -62,6 +63,7 @@ export async function handleBookUpload(
         fileKey?: string;
         targetLanguage?: string;
         sourceLanguage?: string;
+        skipTranslation?: boolean;
       };
 
       if (!body.fileKey) {
@@ -73,6 +75,7 @@ export async function handleBookUpload(
 
       targetLanguage = body.targetLanguage || 'zh';
       sourceLanguage = body.sourceLanguage || 'auto';
+      skipTranslation = body.skipTranslation === true;
 
       // Derive extension from the temp key
       const supportedExtensions = ['.epub', '.mobi', '.azw3'];
@@ -111,6 +114,7 @@ export async function handleBookUpload(
       const file = formData.get('file') as File;
       targetLanguage = (formData.get('targetLanguage') as string) || 'zh';
       sourceLanguage = (formData.get('sourceLanguage') as string) || 'auto';
+      skipTranslation = formData.get('skipTranslation') === 'true';
 
       if (!file) {
         return new Response(JSON.stringify({ error: 'No file provided' }), {
@@ -140,16 +144,23 @@ export async function handleBookUpload(
       });
     }
 
-    // Create a placeholder book record so it appears on the shelf immediately
+    // Create a placeholder book record so it appears on the shelf immediately.
+    // `language_pair` uses 'none' as the target when the user opted to skip translation.
     const maxOrderRow = await env.DB.prepare(
       'SELECT COALESCE(MAX(display_order), 0) as max_order FROM books_v2'
     ).first<{ max_order: number }>();
     const nextOrder = (maxOrderRow?.max_order || 0) + 1;
+    const effectiveTargetLanguage = skipTranslation ? 'none' : targetLanguage;
     await env.DB.prepare(
       `INSERT INTO books_v2 (uuid, title, original_title, author, language_pair, user_id, status, display_order)
        VALUES (?, 'Processing...', '', '', ?, ?, 'processing', ?)`
     )
-      .bind(bookUuid, `${sourceLanguage}-${targetLanguage}`, user.id, nextOrder)
+      .bind(
+        bookUuid,
+        `${sourceLanguage}-${effectiveTargetLanguage}`,
+        user.id,
+        nextOrder
+      )
       .run();
 
     // Delegate everything to Railway (parsing, DB writes, credits, translation)
@@ -167,6 +178,7 @@ export async function handleBookUpload(
           targetLanguage,
           userId: user.id,
           secret: translatorSecret,
+          skipTranslation,
         }),
       }).catch((err) => {
         console.error(

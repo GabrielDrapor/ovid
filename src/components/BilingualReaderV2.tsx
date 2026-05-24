@@ -769,17 +769,19 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
                 Back to Shelf
               </button>
             )}
-            <button
-              className="fab-menu-item"
-              onClick={() => {
-                const next = !showOriginal;
-                setShowOriginal(next);
-                updateAllElements(next);
-                onShowOriginalChange?.(next);
-              }}
-            >
-              {showOriginal ? 'Show Translation' : 'Show Original'}
-            </button>
+            {translations.length > 0 && (
+              <button
+                className="fab-menu-item"
+                onClick={() => {
+                  const next = !showOriginal;
+                  setShowOriginal(next);
+                  updateAllElements(next);
+                  onShowOriginalChange?.(next);
+                }}
+              >
+                {showOriginal ? 'Show Translation' : 'Show Original'}
+              </button>
+            )}
             <button className="fab-menu-item" onClick={() => { setIsChaptersOpen(true); setIsMenuOpen(false); }}>
               Chapters
             </button>
