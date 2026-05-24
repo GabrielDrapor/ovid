@@ -1523,6 +1523,28 @@
   text-align: center;
 }
 
+.estimate-skip-translation {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 4px;
+  font-size: 13px;
+  color: #ccc;
+  cursor: pointer;
+  user-select: none;
+}
+
+.estimate-skip-translation input {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: #fbbf24;
+}
+
+.estimate-skip-translation input:disabled {
+  cursor: default;
+}
+
 .estimate-details {
   background: rgba(255, 255, 255, 0.03);
   border-radius: 10px;

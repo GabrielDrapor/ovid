@@ -80,6 +80,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
   const calloutRef = useRef<HTMLDivElement | null>(null);
   const [estimating, setEstimating] = useState(false);
   const [reEstimating, setReEstimating] = useState(false);
+  const [skipTranslation, setSkipTranslation] = useState(false);
   const [estimate, setEstimate] = useState<{
     file: File;
     title: string;
@@ -499,6 +500,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
             fileKey: estimate.fileKey,
             targetLanguage: estimate.targetLanguage,
             sourceLanguage: estimate.sourceLanguage,
+            skipTranslation,
           }),
         });
 
@@ -509,6 +511,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
           formData.append('file', estimate.file);
           formData.append('targetLanguage', estimate.targetLanguage);
           formData.append('sourceLanguage', estimate.sourceLanguage);
+          formData.append('skipTranslation', String(skipTranslation));
 
           response = await fetchApi('/api/books/upload', {
             method: 'POST',
@@ -521,6 +524,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
         formData.append('file', estimate.file);
         formData.append('targetLanguage', estimate.targetLanguage);
         formData.append('sourceLanguage', estimate.sourceLanguage);
+        formData.append('skipTranslation', String(skipTranslation));
 
         response = await fetchApi('/api/books/upload', {
           method: 'POST',
@@ -561,6 +565,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
       setUploadProgress('');
       setUploading(false);
       setEstimate(null);
+      setSkipTranslation(false);
 
       // Pin a callout to the new book on the shelf
       const uploadResult = (await response.json()) as { bookUuid?: string };
@@ -592,6 +597,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
   const handleCancelEstimate = () => {
     setEstimate(null);
     setUploadError(null);
+    setSkipTranslation(false);
   };
 
   const handleDeleteBook = async (bookUuid: string) => {
@@ -1283,45 +1289,66 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                         <span>Chapters:</span>
                         <span>{estimate.chapters}</span>
                       </div>
-                      <div className="estimate-row cost">
-                        <span>Translation cost:</span>
-                        <span
-                          className={
-                            estimate.canAfford ? 'affordable' : 'not-affordable'
-                          }
-                        >
-                          {reEstimating
-                            ? 'Recalculating…'
-                            : `${estimate.requiredCredits.toLocaleString()} credits`}
-                        </span>
-                      </div>
-                      <div className="estimate-row balance">
-                        <span>Your balance:</span>
-                        <span>
-                          {estimate.availableCredits.toLocaleString()} credits
-                        </span>
-                      </div>
-                      {!estimate.canAfford && !reEstimating && (
-                        <div className="estimate-row needed">
-                          <span>Need:</span>
-                          <span className="not-affordable">
-                            {(
-                              estimate.requiredCredits -
-                              estimate.availableCredits
-                            ).toLocaleString()}{' '}
-                            more credits
-                          </span>
-                        </div>
+                      {!skipTranslation && (
+                        <>
+                          <div className="estimate-row cost">
+                            <span>Translation cost:</span>
+                            <span
+                              className={
+                                estimate.canAfford ? 'affordable' : 'not-affordable'
+                              }
+                            >
+                              {reEstimating
+                                ? 'Recalculating…'
+                                : `${estimate.requiredCredits.toLocaleString()} credits`}
+                            </span>
+                          </div>
+                          <div className="estimate-row balance">
+                            <span>Your balance:</span>
+                            <span>
+                              {estimate.availableCredits.toLocaleString()} credits
+                            </span>
+                          </div>
+                          {!estimate.canAfford && !reEstimating && (
+                            <div className="estimate-row needed">
+                              <span>Need:</span>
+                              <span className="not-affordable">
+                                {(
+                                  estimate.requiredCredits -
+                                  estimate.availableCredits
+                                ).toLocaleString()}{' '}
+                                more credits
+                              </span>
+                            </div>
+                          )}
+                        </>
                       )}
                     </div>
-                    {estimate.sourceLanguage === estimate.targetLanguage && (
+                    <label className="estimate-skip-translation">
+                      <input
+                        type="checkbox"
+                        checked={skipTranslation}
+                        disabled={reEstimating}
+                        onChange={(e) => setSkipTranslation(e.target.checked)}
+                      />
+                      <span>Import without translation (read original only)</span>
+                    </label>
+                    {!skipTranslation && estimate.sourceLanguage === estimate.targetLanguage && (
                       <div className="estimate-language-warning">
                         Source and target language are the same. Change one to
                         continue.
                       </div>
                     )}
                     <div className="estimate-actions">
-                      {estimate.canAfford ? (
+                      {skipTranslation ? (
+                        <button
+                          className="confirm-upload-btn"
+                          onClick={handleConfirmUpload}
+                          disabled={uploading || reEstimating}
+                        >
+                          Import without Translation
+                        </button>
+                      ) : estimate.canAfford ? (
                         <button
                           className="confirm-upload-btn"
                           onClick={handleConfirmUpload}
@@ -1339,6 +1366,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                           onClick={() => {
                             setShowUploadModal(false);
                             setEstimate(null);
+                            setSkipTranslation(false);
                             setShowCreditsModal(true);
                           }}
                           disabled={reEstimating}
