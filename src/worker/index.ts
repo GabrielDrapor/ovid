@@ -49,7 +49,7 @@ import { checkRateLimit } from '../utils/rateLimiter';
 // Rate limiting state (per-worker instance, resets on cold start)
 const apiRequestCounts = new Map<string, number[]>();
 const uploadRequestCounts = new Map<string, number[]>();
-const API_RATE_LIMIT = 60; // requests per minute
+const API_RATE_LIMIT = 600; // requests per minute
 const UPLOAD_RATE_LIMIT = 5; // uploads per hour
 const MAX_UPLOAD_SIZE = 50 * 1024 * 1024; // 50MB
 
