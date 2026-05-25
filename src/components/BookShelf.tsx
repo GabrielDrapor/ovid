@@ -1363,46 +1363,40 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                         </div>
                       </div>
                     )}
-                    <div className="estimate-details">
-                      <div className="estimate-row">
-                        <span>Chapters:</span>
-                        <span>{estimate.chapters}</span>
+                    {!skipTranslation && (
+                      <div className="estimate-details">
+                        <div className="estimate-row cost">
+                          <span>Translation cost:</span>
+                          <span
+                            className={
+                              estimate.canAfford ? 'affordable' : 'not-affordable'
+                            }
+                          >
+                            {reEstimating
+                              ? 'Recalculating…'
+                              : `${estimate.requiredCredits.toLocaleString()} credits`}
+                          </span>
+                        </div>
+                        <div className="estimate-row balance">
+                          <span>Your balance:</span>
+                          <span>
+                            {estimate.availableCredits.toLocaleString()} credits
+                          </span>
+                        </div>
+                        {!estimate.canAfford && !reEstimating && (
+                          <div className="estimate-row needed">
+                            <span>Need:</span>
+                            <span className="not-affordable">
+                              {(
+                                estimate.requiredCredits -
+                                estimate.availableCredits
+                              ).toLocaleString()}{' '}
+                              more credits
+                            </span>
+                          </div>
+                        )}
                       </div>
-                      {!skipTranslation && (
-                        <>
-                          <div className="estimate-row cost">
-                            <span>Translation cost:</span>
-                            <span
-                              className={
-                                estimate.canAfford ? 'affordable' : 'not-affordable'
-                              }
-                            >
-                              {reEstimating
-                                ? 'Recalculating…'
-                                : `${estimate.requiredCredits.toLocaleString()} credits`}
-                            </span>
-                          </div>
-                          <div className="estimate-row balance">
-                            <span>Your balance:</span>
-                            <span>
-                              {estimate.availableCredits.toLocaleString()} credits
-                            </span>
-                          </div>
-                          {!estimate.canAfford && !reEstimating && (
-                            <div className="estimate-row needed">
-                              <span>Need:</span>
-                              <span className="not-affordable">
-                                {(
-                                  estimate.requiredCredits -
-                                  estimate.availableCredits
-                                ).toLocaleString()}{' '}
-                                more credits
-                              </span>
-                            </div>
-                          )}
-                        </>
-                      )}
-                    </div>
+                    )}
                     {!skipTranslation && estimate.sourceLanguage === estimate.targetLanguage && (
                       <div className="estimate-language-warning">
                         Source and target language are the same. Change one to
