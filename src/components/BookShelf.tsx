@@ -227,15 +227,54 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
   // Position the upload callout in viewport coords so it can escape
   // .books-grid's overflow:hidden. Recompute on resize and any scroll
   // (the books grid scrolls horizontally).
+  //
+  // Bottom-row spines sit near the avatar/upload buttons, so the box may
+  // need to slide sideways to clear them — the tail tracks the spine
+  // independently via --tail-left.
   useLayoutEffect(() => {
     if (!uploadedBookUuid) return;
     const update = () => {
       const spine = justUploadedSpineRef.current;
       const callout = calloutRef.current;
       if (!spine || !callout) return;
-      const rect = spine.getBoundingClientRect();
-      callout.style.left = `${rect.left + rect.width / 2}px`;
-      callout.style.top = `${rect.top - callout.offsetHeight - 14}px`;
+      const spineRect = spine.getBoundingClientRect();
+      const tw = callout.offsetWidth;
+      const th = callout.offsetHeight;
+      const margin = 8;
+      const viewportW = window.innerWidth;
+
+      const spineCenterX = spineRect.left + spineRect.width / 2;
+      const cy = spineRect.top - th - 14;
+      let cx = spineCenterX;
+
+      // If the box would collide with .shelf-actions (avatar + upload btn),
+      // slide it horizontally to whichever side has more room.
+      const actions = document.querySelector('.shelf-actions');
+      if (actions) {
+        const a = actions.getBoundingClientRect();
+        const vOverlap = cy + th > a.top && cy < a.bottom;
+        const boxLeft = cx - tw / 2;
+        const boxRight = cx + tw / 2;
+        const hOverlap = boxRight > a.left - margin && boxLeft < a.right + margin;
+        if (vOverlap && hOverlap) {
+          const roomLeft = a.left;
+          const roomRight = viewportW - a.right;
+          if (roomLeft >= roomRight) {
+            cx = Math.min(spineCenterX, a.left - tw / 2 - margin);
+          } else {
+            cx = Math.max(spineCenterX, a.right + tw / 2 + margin);
+          }
+        }
+      }
+
+      // Clamp inside viewport so the box never gets clipped off-screen.
+      cx = Math.max(tw / 2 + margin, Math.min(cx, viewportW - tw / 2 - margin));
+
+      callout.style.left = `${cx}px`;
+      callout.style.top = `${cy}px`;
+      // Position the tail at the spine even if the box has been shifted.
+      const tailOffsetPx = spineCenterX - cx;
+      callout.style.setProperty('--tail-left', `calc(50% + ${tailOffsetPx}px)`);
     };
     const raf = requestAnimationFrame(update);
     window.addEventListener('resize', update);
@@ -673,7 +712,9 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                   >
                     <strong>Book uploaded!</strong>
                     <span>
-                      Translation is in progress — you can safely close this page.
+                      {book.language_pair?.endsWith('-none')
+                        ? 'Ready to read — original language only.'
+                        : 'Translation is in progress — you can safely close this page.'}
                     </span>
                   </div>
                 )}
