@@ -1049,12 +1049,14 @@
   background: rgba(120, 80, 40, 0.4);
 }
 
-/* Triangle tail pointing down at the book spine */
+/* Triangle tail pointing down at the book spine.
+   --tail-left is set in JS so the tail can stay aligned with the spine
+   even when the box has been shifted sideways to clear other UI. */
 .upload-callout::after {
   content: '';
   position: absolute;
   top: calc(100% - 1px);
-  left: 50%;
+  left: var(--tail-left, 50%);
   transform: translateX(-50%);
   width: 0;
   height: 0;
