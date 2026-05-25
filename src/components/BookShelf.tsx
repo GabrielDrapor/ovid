@@ -1279,52 +1279,90 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                   </div>
                 ) : (
                   <>
-                    <div className="estimate-language-pickers">
-                      <div className="estimate-language-field">
-                        <label htmlFor="estimate-source-language">From</label>
-                        <select
-                          id="estimate-source-language"
-                          value={estimate.sourceLanguage}
+                    <div
+                      className="estimate-mode-selector"
+                      role="radiogroup"
+                      aria-label="Upload mode"
+                    >
+                      <label
+                        className={`estimate-mode-option ${!skipTranslation ? 'selected' : ''}`}
+                      >
+                        <input
+                          type="radio"
+                          name="upload-mode"
+                          checked={!skipTranslation}
                           disabled={reEstimating}
-                          onChange={(e) =>
-                            handleChangeSourceLanguage(e.target.value)
-                          }
-                        >
-                          {Object.entries(SUPPORTED_LANGUAGES).map(
-                            ([code, label]) => (
-                              <option key={code} value={code}>
-                                {label}
-                              </option>
-                            )
-                          )}
-                        </select>
-                        <span className="estimate-language-hint">
-                          {estimate.sourceLanguage ===
-                          estimate.detectedSourceLanguage
-                            ? 'Detected automatically — change if wrong.'
-                            : `Detected ${SUPPORTED_LANGUAGES[estimate.detectedSourceLanguage] || estimate.detectedSourceLanguage}.`}
-                        </span>
-                      </div>
-                      <div className="estimate-language-field">
-                        <label htmlFor="estimate-target-language">To</label>
-                        <select
-                          id="estimate-target-language"
-                          value={estimate.targetLanguage}
+                          onChange={() => setSkipTranslation(false)}
+                        />
+                        <div className="estimate-mode-text">
+                          <strong>Translate this book</strong>
+                          <span>Bilingual reading with paragraph-level toggle.</span>
+                        </div>
+                      </label>
+                      <label
+                        className={`estimate-mode-option ${skipTranslation ? 'selected' : ''}`}
+                      >
+                        <input
+                          type="radio"
+                          name="upload-mode"
+                          checked={skipTranslation}
                           disabled={reEstimating}
-                          onChange={(e) =>
-                            handleChangeTargetLanguage(e.target.value)
-                          }
-                        >
-                          {Object.entries(SUPPORTED_LANGUAGES).map(
-                            ([code, label]) => (
-                              <option key={code} value={code}>
-                                {label}
-                              </option>
-                            )
-                          )}
-                        </select>
-                      </div>
+                          onChange={() => setSkipTranslation(true)}
+                        />
+                        <div className="estimate-mode-text">
+                          <strong>Import without translation</strong>
+                          <span>Read the original text only. No credits charged.</span>
+                        </div>
+                      </label>
                     </div>
+                    {!skipTranslation && (
+                      <div className="estimate-language-pickers">
+                        <div className="estimate-language-field">
+                          <label htmlFor="estimate-source-language">From</label>
+                          <select
+                            id="estimate-source-language"
+                            value={estimate.sourceLanguage}
+                            disabled={reEstimating}
+                            onChange={(e) =>
+                              handleChangeSourceLanguage(e.target.value)
+                            }
+                          >
+                            {Object.entries(SUPPORTED_LANGUAGES).map(
+                              ([code, label]) => (
+                                <option key={code} value={code}>
+                                  {label}
+                                </option>
+                              )
+                            )}
+                          </select>
+                          <span className="estimate-language-hint">
+                            {estimate.sourceLanguage ===
+                            estimate.detectedSourceLanguage
+                              ? 'Detected automatically — change if wrong.'
+                              : `Detected ${SUPPORTED_LANGUAGES[estimate.detectedSourceLanguage] || estimate.detectedSourceLanguage}.`}
+                          </span>
+                        </div>
+                        <div className="estimate-language-field">
+                          <label htmlFor="estimate-target-language">To</label>
+                          <select
+                            id="estimate-target-language"
+                            value={estimate.targetLanguage}
+                            disabled={reEstimating}
+                            onChange={(e) =>
+                              handleChangeTargetLanguage(e.target.value)
+                            }
+                          >
+                            {Object.entries(SUPPORTED_LANGUAGES).map(
+                              ([code, label]) => (
+                                <option key={code} value={code}>
+                                  {label}
+                                </option>
+                              )
+                            )}
+                          </select>
+                        </div>
+                      </div>
+                    )}
                     <div className="estimate-details">
                       <div className="estimate-row">
                         <span>Chapters:</span>
@@ -1365,15 +1403,6 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                         </>
                       )}
                     </div>
-                    <label className="estimate-skip-translation">
-                      <input
-                        type="checkbox"
-                        checked={skipTranslation}
-                        disabled={reEstimating}
-                        onChange={(e) => setSkipTranslation(e.target.checked)}
-                      />
-                      <span>Import without translation (read original only)</span>
-                    </label>
                     {!skipTranslation && estimate.sourceLanguage === estimate.targetLanguage && (
                       <div className="estimate-language-warning">
                         Source and target language are the same. Change one to
