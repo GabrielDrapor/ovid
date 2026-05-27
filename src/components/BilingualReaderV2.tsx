@@ -338,18 +338,118 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
     return () => container.removeEventListener('click', handleLinkClick);
   }, [rawHtml]);
 
-  // Apply translations when content changes
-  useEffect(() => {
-    if (rawHtml && translations.length > 0) {
-      // Small delay to ensure DOM is ready
-      const timer = setTimeout(() => {
-        applyTranslations();
-        // Signal that translations are ready for observer setup
-        setTranslationsReady((c) => c + 1);
-      }, 100);
-      return () => clearTimeout(timer);
+  /**
+   * Register block-level elements for scroll tracking, without bilingual toggle
+   * behavior. Used for books uploaded with "Import without translation" — the
+   * IntersectionObserver still needs elementsRef populated to compute the
+   * current xpath, otherwise reading progress never gets saved.
+   *
+   * Registers only leaf block elements (block tags with no block descendants)
+   * to match the paragraph-level granularity that translated books get
+   * naturally via translation-matched walks.
+   */
+  const registerElementsForTracking = useCallback(() => {
+    if (!contentRef.current) return;
+    elementsRef.current.clear();
+
+    const blockTags = new Set([
+      'p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+      'li', 'blockquote', 'pre', 'td', 'th', 'dt', 'dd',
+      'figcaption', 'article', 'section', 'aside', 'header', 'footer'
+    ]);
+
+    const hasBlockDescendant = (el: Element): boolean => {
+      for (const child of Array.from(el.children)) {
+        if (blockTags.has(child.tagName.toLowerCase())) return true;
+        if (hasBlockDescendant(child)) return true;
+      }
+      return false;
+    };
+
+    // data-xpath fast path: reconstructed HTML annotates elements with their
+    // canonical xpath, so we don't need to compute it.
+    const annotated = contentRef.current.querySelectorAll('[data-xpath]');
+    if (annotated.length > 0) {
+      annotated.forEach((el) => {
+        const xpath = el.getAttribute('data-xpath');
+        if (!xpath) return;
+        elementsRef.current.set(xpath, {
+          element: el as HTMLElement,
+          originalHtml: '',
+          translated: '',
+          showingOriginal: true,
+        });
+      });
+      return;
     }
-  }, [rawHtml, translations, applyTranslations]);
+
+    const walk = (node: Node, pathSegments: string[]) => {
+      if (node.nodeType !== Node.ELEMENT_NODE) return;
+      const el = node as HTMLElement;
+      const nodeName = el.tagName.toLowerCase();
+      if (nodeName === 'script' || nodeName === 'style') return;
+
+      let elementIndex = 1;
+      let sibling: Node | null = node.previousSibling;
+      while (sibling) {
+        if (sibling.nodeType === Node.ELEMENT_NODE) {
+          const sibEl = sibling as Element;
+          if (sibEl.tagName.toLowerCase() === nodeName) elementIndex++;
+        }
+        sibling = sibling.previousSibling;
+      }
+
+      const currentPath = [...pathSegments, `${nodeName}[${elementIndex}]`];
+      const xpath = '/' + currentPath.join('/');
+
+      if (blockTags.has(nodeName) && !hasBlockDescendant(el)) {
+        elementsRef.current.set(xpath, {
+          element: el,
+          originalHtml: '',
+          translated: '',
+          showingOriginal: true,
+        });
+        return; // Leaf block — don't recurse
+      }
+
+      const children = node.childNodes;
+      for (let i = 0; i < children.length; i++) {
+        walk(children[i], currentPath);
+      }
+    };
+
+    const contentDiv = contentRef.current;
+    const bodyElement: Element | null = contentDiv.querySelector('body');
+    const startingPoint = bodyElement || contentDiv;
+    const children = startingPoint.childNodes;
+    for (let i = 0; i < children.length; i++) {
+      const child = children[i];
+      if (child.nodeType === Node.ELEMENT_NODE) {
+        const el = child as Element;
+        const nodeName = el.tagName.toLowerCase();
+        if (nodeName === 'script' || nodeName === 'style') continue;
+        walk(child, ['body[1]']);
+      }
+    }
+  }, []);
+
+  // Apply translations (or just register elements for tracking) when content
+  // changes. Skip-translation books need elementsRef populated too so the
+  // IntersectionObserver can fire onProgressChange and save reading position.
+  useEffect(() => {
+    if (!rawHtml) return;
+    // Small delay to ensure DOM is ready
+    const timer = setTimeout(() => {
+      if (translations.length > 0) {
+        applyTranslations();
+      } else {
+        registerElementsForTracking();
+      }
+      // Signal that elements are ready for observer setup
+      setTranslationsReady((c) => c + 1);
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [rawHtml, translations, applyTranslations, registerElementsForTracking]);
 
   // Update text when showOriginal changes
   useEffect(() => {
