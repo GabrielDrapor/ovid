@@ -78,6 +78,16 @@ function scopeEpubStyles(css: string): string {
   );
 }
 
+const TYPOGRAPHY_KEY = 'ovid_typography';
+
+function loadTypographyDefaults(): Record<string, number> {
+  try {
+    const saved = localStorage.getItem(TYPOGRAPHY_KEY);
+    if (saved) return JSON.parse(saved);
+  } catch {}
+  return {};
+}
+
 /**
  * BilingualReaderV2 - XPath-based bilingual reader
  *
@@ -113,16 +123,23 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
   const showOriginalRef = useRef(showOriginal);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isChaptersOpen, setIsChaptersOpen] = useState(false);
-  const [paragraphSpacing, setParagraphSpacing] = useState(0);
-  const [lineHeight, setLineHeight] = useState(1.6);
-  const [letterSpacing, setLetterSpacing] = useState(-0.03);
-  const [wordSpacing, setWordSpacing] = useState(0);
-  const [fontWeight, setFontWeight] = useState(450);
-  const [fontSize, setFontSize] = useState(19);
+  const [typographyDefaults] = useState(loadTypographyDefaults);
+  const [paragraphSpacing, setParagraphSpacing] = useState(typographyDefaults.paragraphSpacing ?? 0);
+  const [lineHeight, setLineHeight] = useState(typographyDefaults.lineHeight ?? 1.6);
+  const [letterSpacing, setLetterSpacing] = useState(typographyDefaults.letterSpacing ?? -0.03);
+  const [wordSpacing, setWordSpacing] = useState(typographyDefaults.wordSpacing ?? 0);
+  const [fontWeight, setFontWeight] = useState(typographyDefaults.fontWeight ?? 450);
+  const [fontSize, setFontSize] = useState(typographyDefaults.fontSize ?? 19);
   const [isMarkingComplete, setIsMarkingComplete] = useState(false);
   const [markCompleteError, setMarkCompleteError] = useState<string | null>(null);
   const [isTypographyOpen, setIsTypographyOpen] = useState(false);
   const [isSharing, setIsSharing] = useState(false);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(TYPOGRAPHY_KEY, JSON.stringify({ paragraphSpacing, lineHeight, letterSpacing, wordSpacing, fontWeight, fontSize }));
+    } catch {}
+  }, [paragraphSpacing, lineHeight, letterSpacing, wordSpacing, fontWeight, fontSize]);
   const [shareCopied, setShareCopied] = useState(false);
   const [showOnboardingTooltip, setShowOnboardingTooltip] = useState(false);
 
