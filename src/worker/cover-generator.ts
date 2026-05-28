@@ -203,19 +203,25 @@ Requirements:
   const coverBuf = await generateImage(apiKey, coverPrompt);
 
   // --- Step 3: Generate spine on green screen (reuse style info directly) ---
-  const spinePrompt = `A flat front-facing book spine on bright solid lime green (#00FF00) background. The spine is a narrow vertical rectangle, centered, with green space on all sides.
+  const spinePrompt = `A single flat book spine — just the narrow vertical strip seen on the edge of a book — centered on a solid lime green (#00FF00) background.
+
+ABSOLUTE RULES (these matter most):
+- Show ONLY the spine: exactly ONE narrow vertical rectangle, and nothing else on the green.
+- Do NOT draw the front cover, the back cover, a dust jacket, an open book, a stack of books, or a 3D/angled book. Flat, face-on, no perspective, no thickness.
+- There is exactly ONE rectangle in the whole image — no second panel, no mockup, no bookshelf, no hands, no border frame around the canvas.
+- The rectangle is surrounded on all four sides by empty lime-green space.
 
 Design for "${title}" by ${author}:
 - Visual style: ${style.name}
 - Color palette: ${style.palette}
 - Typography: ${style.textStyle}
-- Title "${title.toUpperCase()}" running vertically in LARGE BOLD capitals — must be readable at thumbnail size
-- Author "${author.toUpperCase()}" at the bottom, also reasonably large
+- Title "${title.toUpperCase()}" running vertically in LARGE BOLD capitals — readable at thumbnail size
+- Author "${author.toUpperCase()}" near the bottom, also reasonably large
 - A small decorative motif at the top
 - Keep decoration MINIMAL — prioritize text legibility
-- The rectangle should be about 1/6 the width of the total image
-- Sharp edges, no shadows, no 3D effects, no page edges visible
-- CRITICAL: All text must be FULLY CONTAINED within the spine rectangle with generous margins on ALL sides. Leave at least 10% padding on left and right sides.`;
+- The rectangle is tall and narrow, about 1/6 of the image width
+- Sharp edges, no shadows, no 3D effects
+- All text FULLY CONTAINED within the rectangle with at least 10% padding on the left and right.`;
 
   const spineBuf = await generateImage(apiKey, spinePrompt);
 
