@@ -78,9 +78,9 @@ function scopeEpubStyles(css: string): string {
   );
 }
 
-const TYPOGRAPHY_KEY = 'ovid_typography';
+export const TYPOGRAPHY_KEY = 'ovid_typography';
 
-function loadTypographyDefaults(): Record<string, number> {
+export function loadTypographyDefaults(): Record<string, number> {
   try {
     const saved = localStorage.getItem(TYPOGRAPHY_KEY);
     if (saved) return JSON.parse(saved);
