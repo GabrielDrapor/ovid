@@ -2,9 +2,9 @@
  * Image post-processing for book covers and spines.
  *
  * Spine processing pipeline:
- * 1. Extract the spine's bounding box from the lime-green screen
- * 2. Rotate 90° CW only if it came out landscape
- * 3. Fit into 114×607 with 'contain' (pad, never crop) so text isn't clipped
+ * 1. Trim any accidental border from the generated horizontal banner
+ * 2. Rotate 90° CW for vertical spine orientation
+ * 3. Resize to target dimensions (114×607)
  * 4. Encode as PNG
  */
 
@@ -16,120 +16,76 @@ const COVER_WIDTH = 437;
 const COVER_HEIGHT = 606;
 
 /**
- * Median color of a buffer's outer border — used as the pad color so the
- * side/top bars added by 'contain' blend with the spine's own edges.
- */
-async function borderColor(buf: Buffer): Promise<{ r: number; g: number; b: number }> {
-  const m = await sharp(buf).metadata();
-  const w = m.width || 1;
-  const h = m.height || 1;
-  const ch = m.channels || 3;
-  const raw = await sharp(buf).raw().toBuffer();
-  const rs: number[] = [], gs: number[] = [], bs: number[] = [];
-  const push = (x: number, y: number) => {
-    const i = (y * w + x) * ch;
-    rs.push(raw[i]); gs.push(raw[i + 1]); bs.push(raw[i + 2]);
-  };
-  const ys = Math.max(1, Math.floor(h / 60));
-  const xs = Math.max(1, Math.floor(w / 60));
-  for (let y = 0; y < h; y += ys) { push(0, y); push(w - 1, y); }
-  for (let x = 0; x < w; x += xs) { push(x, 0); push(x, h - 1); }
-  // Drop any lime-green fringe samples so a white/light spine doesn't get
-  // greenish pad bars from residual anti-aliasing at the screen boundary.
-  const keep: number[] = [];
-  for (let i = 0; i < rs.length; i++) {
-    if (gs[i] > 140 && gs[i] - rs[i] > 40 && gs[i] - bs[i] > 40) continue;
-    keep.push(i);
-  }
-  const idx = keep.length ? keep : rs.map((_, i) => i);
-  const med = (a: number[]) => a.slice().sort((p, q) => p - q)[a.length >> 1] || 0;
-  return { r: med(idx.map(i => rs[i])), g: med(idx.map(i => gs[i])), b: med(idx.map(i => bs[i])) };
-}
-
-/**
- * Process a spine image: extract from green screen → orient → fit to 114×607.
+ * Process a spine image:
+ * trim border → rotate 90° → resize to 114×607.
  */
 export async function processSpine(imageBuffer: Buffer): Promise<Buffer> {
-  // Gemini draws a narrow vertical spine centered on a solid lime-green (#00FF00)
-  // field. Extract it as the bounding box of every non-green pixel, then fit that
-  // into the target slot with 'contain' (pad, never crop) so the title, author,
-  // and motif at the spine's ends are never clipped.
+  // No more green-screen extraction — the prompt now generates the spine directly
+  // filling the entire canvas. Just trim any accidental white/green border and resize.
 
   const metadata = await sharp(imageBuffer).metadata();
   const width = metadata.width || 1024;
   const height = metadata.height || 1024;
   const channels = metadata.channels || 3;
+
+  // Trim any uniform-color border (white, green) that Gemini might still add
   const raw = await sharp(imageBuffer).raw().toBuffer();
-
-  const at = (x: number, y: number): [number, number, number] => {
-    const i = (y * width + x) * channels;
-    return [raw[i], raw[i + 1], raw[i + 2]];
-  };
-
-  // Calibrate the screen color from the four corners (the spine is centered and
-  // narrow, so corners are reliably background).
-  const med = (a: number[]) => a.slice().sort((p, q) => p - q)[a.length >> 1];
-  const corners = [at(2, 2), at(width - 3, 2), at(2, height - 3), at(width - 3, height - 3)];
-  const bgR = med(corners.map(c => c[0]));
-  const bgG = med(corners.map(c => c[1]));
-  const bgB = med(corners.map(c => c[2]));
-  const greenScreen = bgG > bgR + 40 && bgG > bgB + 40;
-
-  const TOL = 70;
   const isBg = (x: number, y: number): boolean => {
-    const [r, g, b] = at(x, y);
-    // Close to the sampled screen color.
-    if (Math.abs(r - bgR) < TOL && Math.abs(g - bgG) < TOL && Math.abs(b - bgB) < TOL) return true;
-    // Anti-aliased green fringe hugging the spine edge.
-    if (greenScreen && g > 140 && g - r > 50 && g - b > 50) return true;
+    const idx = (y * width + x) * channels;
+    const r = raw[idx], g = raw[idx + 1], b = raw[idx + 2];
+    if (r > 240 && g > 240 && b > 240) return true;
+    if (g > 60 && (g - r) > 15 && (g - b) > 15) return true;
     return false;
   };
 
-  // Bounding box of all non-background pixels — the full spine, however narrow.
-  let minX = width, minY = height, maxX = -1, maxY = -1;
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      if (!isBg(x, y)) {
-        if (x < minX) minX = x;
-        if (x > maxX) maxX = x;
-        if (y < minY) minY = y;
-        if (y > maxY) maxY = y;
-      }
-    }
+  const sampleYs = Array.from({ length: 30 }, (_, i) =>
+    Math.floor(height * 0.1) + Math.floor((height * 0.8 * i) / 29)
+  );
+  const sampleXs = Array.from({ length: 30 }, (_, i) =>
+    Math.floor(width * 0.1) + Math.floor((width * 0.8 * i) / 29)
+  );
+
+  let left = 0, right = width - 1, top = 0, bottom = height - 1;
+  for (let x = 0; x < Math.floor(width * 0.4); x++) {
+    if (sampleYs.filter(y => isBg(x, y)).length > sampleYs.length * 0.7) left = x + 1; else break;
+  }
+  for (let x = width - 1; x > Math.floor(width * 0.6); x--) {
+    if (sampleYs.filter(y => isBg(x, y)).length > sampleYs.length * 0.7) right = x - 1; else break;
+  }
+  for (let y = 0; y < Math.floor(height * 0.4); y++) {
+    if (sampleXs.filter(x => isBg(x, y)).length > sampleXs.length * 0.7) top = y + 1; else break;
+  }
+  for (let y = height - 1; y > Math.floor(height * 0.6); y--) {
+    if (sampleXs.filter(x => isBg(x, y)).length > sampleXs.length * 0.7) bottom = y - 1; else break;
   }
 
-  const boxW = maxX - minX + 1;
-  const boxH = maxY - minY + 1;
-  const validBox =
-    maxX >= 0 &&
-    boxW >= width * 0.02 &&
-    boxH >= height * 0.05 &&
-    (boxW < width * 0.97 || boxH < height * 0.97);
+  const cropW = Math.max(1, right - left + 1);
+  const cropH = Math.max(1, bottom - top + 1);
 
-  let spine: Buffer;
-  if (validBox) {
-    // Inset a few px to drop the anti-aliased green fringe; clamp to bounds.
-    const inset = 3;
-    const left = Math.min(minX + inset, width - 1);
-    const top = Math.min(minY + inset, height - 1);
-    const w = Math.max(1, Math.min(boxW - inset * 2, width - left));
-    const h = Math.max(1, Math.min(boxH - inset * 2, height - top));
-    spine = await sharp(imageBuffer).extract({ left, top, width: w, height: h }).png().toBuffer();
+  let trimmed: Buffer;
+  if (cropW < width * 0.95 || cropH < height * 0.95) {
+    trimmed = await sharp(imageBuffer)
+      .extract({ left, top, width: cropW, height: cropH })
+      .png()
+      .toBuffer();
   } else {
-    spine = imageBuffer;
+    trimmed = imageBuffer;
   }
 
-  // Rotate only if the extracted spine is landscape (Gemini occasionally emits a
-  // horizontal banner with no green screen).
-  const sm = await sharp(spine).metadata();
-  if ((sm.width || 1) > (sm.height || 1)) {
-    spine = await sharp(spine).rotate(90).png().toBuffer();
-  }
+  // Conditionally rotate: only if the trimmed image is landscape (wider than tall).
+  // The prompt asks for a vertical spine rectangle, so if Gemini followed instructions
+  // the image is already portrait after trimming. But sometimes Gemini generates
+  // a horizontal banner instead — rotate only in that case.
+  const trimMeta = await sharp(trimmed).metadata();
+  const trimW = trimMeta.width || 1;
+  const trimH = trimMeta.height || 1;
+  const oriented = trimW > trimH
+    ? await sharp(trimmed).rotate(90).png().toBuffer()
+    : trimmed;
 
-  // Fit into the target slot without cropping; pad with the spine's border color.
-  const padBg = await borderColor(spine);
-  return sharp(spine)
-    .resize(SPINE_WIDTH, SPINE_HEIGHT, { fit: 'contain', background: padBg })
+  // Resize to target using 'cover' + centre — fills the full area, crops excess
+  return sharp(oriented)
+    .resize(SPINE_WIDTH, SPINE_HEIGHT, { fit: 'cover', position: 'centre' })
     .png()
     .toBuffer();
 }
