@@ -601,14 +601,23 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
     if (!translationsReady || !initialXpath || elementsRef.current.size === 0) return;
 
     const data = elementsRef.current.get(initialXpath);
-    if (data?.element) {
-      // Small delay to ensure layout is complete
-      setTimeout(() => {
-        data.element.scrollIntoView({ behavior: 'auto', block: 'start' });
-        // Offset a bit from the very top for better UX
-        window.scrollBy(0, -20);
-      }, 150);
-    }
+    if (!data?.element) return;
+
+    const el = data.element;
+    const doScroll = () => {
+      el.scrollIntoView({ behavior: 'auto', block: 'start' });
+      window.scrollBy(0, -20);
+    };
+
+    // First attempt after initial layout settles
+    const t1 = setTimeout(doScroll, 200);
+    // Second attempt handles books where images/web-fonts shift layout after the first scroll
+    const t2 = setTimeout(() => {
+      if (Math.abs(el.getBoundingClientRect().top) > 100) {
+        doScroll();
+      }
+    }, 1000);
+    return () => { clearTimeout(t1); clearTimeout(t2); };
   }, [translationsReady, initialXpath]);
 
   const toggleMenu = () => setIsMenuOpen(!isMenuOpen);
