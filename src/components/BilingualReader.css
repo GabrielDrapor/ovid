@@ -81,7 +81,7 @@
 
 .fab-container {
   position: fixed;
-  bottom: 20px;
+  bottom: calc(20px + env(safe-area-inset-bottom, 0px) + var(--fab-vv-offset, 0px));
   right: 20px;
   z-index: 1000;
 }
@@ -568,7 +568,7 @@ h3.chapter-text {
   }
 
   .fab-container {
-    bottom: 20px;
+    bottom: calc(20px + env(safe-area-inset-bottom, 0px) + var(--fab-vv-offset, 0px));
     right: 16px;
   }
 
