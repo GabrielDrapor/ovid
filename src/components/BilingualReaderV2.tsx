@@ -718,6 +718,25 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
     return () => window.removeEventListener('keydown', onKey);
   }, [goToPreviousChapter, goToNextChapter, isMenuOpen, isChaptersOpen, isTypographyOpen]);
 
+  // iOS Safari standalone PWA: position:fixed anchors to the layout viewport, so when the
+  // visual viewport shifts during scroll (toolbar show/hide, rubber-band overscroll) the FAB
+  // appears to drift. Track the gap between the two and expose it as a CSS var.
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const update = () => {
+      const offset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+      document.documentElement.style.setProperty('--fab-vv-offset', `${offset}px`);
+    };
+    update();
+    vv.addEventListener('resize', update);
+    vv.addEventListener('scroll', update);
+    return () => {
+      vv.removeEventListener('resize', update);
+      vv.removeEventListener('scroll', update);
+    };
+  }, []);
+
   return (
     <div className="bilingual-reader">
       {/* Inject EPUB CSS styles — scoped to .epub-content to prevent leaking */}
