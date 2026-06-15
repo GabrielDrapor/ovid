@@ -5,6 +5,7 @@ import { ApiError, fetchApi } from '../utils/api';
 import './BookShelf.css';
 
 const DEFAULT_TARGET_LANGUAGE = 'zh';
+const BOOKS_PER_ROW = 8;
 
 interface Book {
   id: number;
@@ -65,6 +66,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
     actionsTop: '48%',
     actionsLeft: '250px',
   });
+  const [currentPage, setCurrentPage] = useState(0);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showCreditsModal, setShowCreditsModal] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -211,6 +213,46 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
     observer.observe(wall);
     return () => observer.disconnect();
   }, []);
+
+  // Vertical swipe to paginate the shelf on touch devices.
+  useEffect(() => {
+    const wall = wallRef.current;
+    if (!wall) return;
+    const safeBooks = Array.isArray(books) ? books : [];
+    const userBookCount = safeBooks.filter((b) => !!b.user_id).length;
+    const overflow = Math.max(0, userBookCount - BOOKS_PER_ROW);
+    const maxPage = Math.ceil(overflow / (BOOKS_PER_ROW * 2));
+    let startY = 0;
+    let startX = 0;
+    let tracking = false;
+    const SWIPE_THRESHOLD = 60;
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length !== 1) return;
+      startY = e.touches[0].clientY;
+      startX = e.touches[0].clientX;
+      tracking = true;
+    };
+    const onTouchEnd = (e: TouchEvent) => {
+      if (!tracking) return;
+      tracking = false;
+      const t = e.changedTouches[0];
+      const dy = t.clientY - startY;
+      const dx = t.clientX - startX;
+      if (Math.abs(dy) < SWIPE_THRESHOLD) return;
+      if (Math.abs(dx) > Math.abs(dy)) return;
+      // dy < 0 = swiped up = next page; dy > 0 = swiped down = previous page
+      setCurrentPage((p) => {
+        const next = dy < 0 ? p + 1 : p - 1;
+        return Math.max(0, Math.min(maxPage, next));
+      });
+    };
+    wall.addEventListener('touchstart', onTouchStart, { passive: true });
+    wall.addEventListener('touchend', onTouchEnd, { passive: true });
+    return () => {
+      wall.removeEventListener('touchstart', onTouchStart);
+      wall.removeEventListener('touchend', onTouchEnd);
+    };
+  }, [books]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -665,6 +707,15 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
     );
   }
 
+  const safeBooks = Array.isArray(books) ? books : [];
+  const publicBooks = safeBooks.filter((b) => !b.user_id);
+  const userBooks = safeBooks.filter((b) => !!b.user_id);
+  // Page 0 shows publicBooks on row 1 and userBooks[0:8] on row 2.
+  // Subsequent pages drop the public row and use both rows for user books.
+  const userOverflow = Math.max(0, userBooks.length - BOOKS_PER_ROW);
+  const totalPages = 1 + Math.ceil(userOverflow / (BOOKS_PER_ROW * 2));
+  const page = Math.min(currentPage, totalPages - 1);
+
   return (
     <div className="bookshelf-container">
       <div
@@ -673,9 +724,16 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
         style={{ backgroundImage: 'url(/bookcase_bg.jpeg)' }}
       >
         {(() => {
-          const safeBooks = Array.isArray(books) ? books : [];
-          const publicBooks = safeBooks.filter((b) => !b.user_id);
-          const userBooks = safeBooks.filter((b) => !!b.user_id);
+          let row1Books: Book[];
+          let row2Books: Book[];
+          if (page === 0) {
+            row1Books = publicBooks;
+            row2Books = userBooks.slice(0, BOOKS_PER_ROW);
+          } else {
+            const startIdx = BOOKS_PER_ROW + (page - 1) * BOOKS_PER_ROW * 2;
+            row1Books = userBooks.slice(startIdx, startIdx + BOOKS_PER_ROW);
+            row2Books = userBooks.slice(startIdx + BOOKS_PER_ROW, startIdx + BOOKS_PER_ROW * 2);
+          }
           const renderBook = (book: Book) => {
             const isProcessing = book.status === 'processing';
             const isJustUploaded = book.uuid === uploadedBookUuid;
@@ -756,12 +814,12 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                 transition: 'opacity 0.5s ease-in-out',
               }}
             >
-              {publicBooks.length > 0 && (
+              {row1Books.length > 0 && (
                 <div
                   className="books-grid"
                   style={{ bottom: shelfPos.row1Bottom }}
                 >
-                  {publicBooks.map(renderBook)}
+                  {row1Books.map(renderBook)}
                 </div>
               )}
               <div
@@ -916,12 +974,37 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                   )}
                 </div>
               </div>
-              {userBooks.length > 0 && (
+              {row2Books.length > 0 && (
                 <div
                   className="books-grid"
                   style={{ bottom: shelfPos.row2Bottom }}
                 >
-                  {userBooks.map(renderBook)}
+                  {row2Books.map(renderBook)}
+                </div>
+              )}
+              {totalPages > 1 && (
+                <div className="shelf-pagination">
+                  <button
+                    type="button"
+                    className="shelf-page-btn"
+                    aria-label="Previous shelf page"
+                    onClick={() => setCurrentPage((p) => Math.max(0, p - 1))}
+                    disabled={page === 0}
+                  >
+                    ‹
+                  </button>
+                  <span className="shelf-page-indicator">
+                    {page + 1} / {totalPages}
+                  </span>
+                  <button
+                    type="button"
+                    className="shelf-page-btn"
+                    aria-label="Next shelf page"
+                    onClick={() => setCurrentPage((p) => Math.min(totalPages - 1, p + 1))}
+                    disabled={page >= totalPages - 1}
+                  >
+                    ›
+                  </button>
                 </div>
               )}
             </div>
