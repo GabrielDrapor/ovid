@@ -5,6 +5,7 @@ import { ApiError, fetchApi } from '../utils/api';
 import './BookShelf.css';
 
 const DEFAULT_TARGET_LANGUAGE = 'zh';
+const BOOKS_PER_ROW = 8;
 
 interface Book {
   id: number;
@@ -65,6 +66,8 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
     actionsTop: '48%',
     actionsLeft: '250px',
   });
+  const [currentPage, setCurrentPage] = useState(0);
+  const [pageDir, setPageDir] = useState<'up' | 'down'>('up');
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showCreditsModal, setShowCreditsModal] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -211,6 +214,86 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
     observer.observe(wall);
     return () => observer.disconnect();
   }, []);
+
+  // Move the shelf by one page, clamping to the available range and recording
+  // the direction so the slide animation knows which way to move.
+  const goPage = useCallback(
+    (delta: number) => {
+      const safeBooks = Array.isArray(books) ? books : [];
+      const overflow = Math.max(
+        0,
+        safeBooks.filter((b) => !!b.user_id).length - BOOKS_PER_ROW
+      );
+      const maxPage = Math.ceil(overflow / (BOOKS_PER_ROW * 2));
+      setCurrentPage((p) => {
+        const next = Math.max(0, Math.min(maxPage, p + delta));
+        if (next !== p) setPageDir(delta > 0 ? 'up' : 'down');
+        return next;
+      });
+    },
+    [books]
+  );
+
+  // Vertical swipe (touch) + trackpad/wheel (desktop) to paginate the shelf.
+  useEffect(() => {
+    const wall = wallRef.current;
+    if (!wall) return;
+    let startY = 0;
+    let startX = 0;
+    let tracking = false;
+    const SWIPE_THRESHOLD = 60;
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length !== 1) return;
+      startY = e.touches[0].clientY;
+      startX = e.touches[0].clientX;
+      tracking = true;
+    };
+    const onTouchEnd = (e: TouchEvent) => {
+      if (!tracking) return;
+      tracking = false;
+      const t = e.changedTouches[0];
+      const dy = t.clientY - startY;
+      const dx = t.clientX - startX;
+      if (Math.abs(dy) < SWIPE_THRESHOLD) return;
+      if (Math.abs(dx) > Math.abs(dy)) return;
+      // dy < 0 = swiped up = next page; dy > 0 = swiped down = previous page
+      goPage(dy < 0 ? 1 : -1);
+    };
+
+    // Trackpad / mouse-wheel: accumulate vertical intent, one page per gesture
+    // with a short cooldown so a single swipe doesn't skip multiple pages.
+    let accum = 0;
+    let cooldown = false;
+    let resetTimer: ReturnType<typeof setTimeout> | null = null;
+    const WHEEL_THRESHOLD = 80;
+    const onWheel = (e: WheelEvent) => {
+      if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+      if (cooldown) return;
+      accum += e.deltaY;
+      if (resetTimer) clearTimeout(resetTimer);
+      resetTimer = setTimeout(() => {
+        accum = 0;
+      }, 200);
+      if (Math.abs(accum) >= WHEEL_THRESHOLD) {
+        goPage(accum > 0 ? 1 : -1);
+        accum = 0;
+        cooldown = true;
+        setTimeout(() => {
+          cooldown = false;
+        }, 600);
+      }
+    };
+
+    wall.addEventListener('touchstart', onTouchStart, { passive: true });
+    wall.addEventListener('touchend', onTouchEnd, { passive: true });
+    wall.addEventListener('wheel', onWheel, { passive: true });
+    return () => {
+      wall.removeEventListener('touchstart', onTouchStart);
+      wall.removeEventListener('touchend', onTouchEnd);
+      wall.removeEventListener('wheel', onWheel);
+      if (resetTimer) clearTimeout(resetTimer);
+    };
+  }, [goPage]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -665,6 +748,15 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
     );
   }
 
+  const safeBooks = Array.isArray(books) ? books : [];
+  const publicBooks = safeBooks.filter((b) => !b.user_id);
+  const userBooks = safeBooks.filter((b) => !!b.user_id);
+  // Page 0 shows publicBooks on row 1 and userBooks[0:8] on row 2.
+  // Subsequent pages drop the public row and use both rows for user books.
+  const userOverflow = Math.max(0, userBooks.length - BOOKS_PER_ROW);
+  const totalPages = 1 + Math.ceil(userOverflow / (BOOKS_PER_ROW * 2));
+  const page = Math.min(currentPage, totalPages - 1);
+
   return (
     <div className="bookshelf-container">
       <div
@@ -673,9 +765,16 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
         style={{ backgroundImage: 'url(/bookcase_bg.jpeg)' }}
       >
         {(() => {
-          const safeBooks = Array.isArray(books) ? books : [];
-          const publicBooks = safeBooks.filter((b) => !b.user_id);
-          const userBooks = safeBooks.filter((b) => !!b.user_id);
+          let row1Books: Book[];
+          let row2Books: Book[];
+          if (page === 0) {
+            row1Books = publicBooks;
+            row2Books = userBooks.slice(0, BOOKS_PER_ROW);
+          } else {
+            const startIdx = BOOKS_PER_ROW + (page - 1) * BOOKS_PER_ROW * 2;
+            row1Books = userBooks.slice(startIdx, startIdx + BOOKS_PER_ROW);
+            row2Books = userBooks.slice(startIdx + BOOKS_PER_ROW, startIdx + BOOKS_PER_ROW * 2);
+          }
           const renderBook = (book: Book) => {
             const isProcessing = book.status === 'processing';
             const isJustUploaded = book.uuid === uploadedBookUuid;
@@ -756,12 +855,13 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                 transition: 'opacity 0.5s ease-in-out',
               }}
             >
-              {publicBooks.length > 0 && (
+              {row1Books.length > 0 && (
                 <div
-                  className="books-grid"
+                  key={`row1-${page}`}
+                  className={`books-grid shelf-slide-${pageDir}`}
                   style={{ bottom: shelfPos.row1Bottom }}
                 >
-                  {publicBooks.map(renderBook)}
+                  {row1Books.map(renderBook)}
                 </div>
               )}
               <div
@@ -916,12 +1016,38 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                   )}
                 </div>
               </div>
-              {userBooks.length > 0 && (
+              {row2Books.length > 0 && (
                 <div
-                  className="books-grid"
+                  key={`row2-${page}`}
+                  className={`books-grid shelf-slide-${pageDir}`}
                   style={{ bottom: shelfPos.row2Bottom }}
                 >
-                  {userBooks.map(renderBook)}
+                  {row2Books.map(renderBook)}
+                </div>
+              )}
+              {totalPages > 1 && (
+                <div className="shelf-pagination">
+                  <button
+                    type="button"
+                    className="shelf-page-btn"
+                    aria-label="Previous shelf page"
+                    onClick={() => goPage(-1)}
+                    disabled={page === 0}
+                  >
+                    ‹
+                  </button>
+                  <span className="shelf-page-indicator">
+                    {page + 1} / {totalPages}
+                  </span>
+                  <button
+                    type="button"
+                    className="shelf-page-btn"
+                    aria-label="Next shelf page"
+                    onClick={() => goPage(1)}
+                    disabled={page >= totalPages - 1}
+                  >
+                    ›
+                  </button>
                 </div>
               )}
             </div>
