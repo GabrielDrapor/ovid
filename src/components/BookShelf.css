@@ -408,6 +408,46 @@
   display: none;
 }
 
+/* Page-turn slide. Going to a later page (dir "up") lets books rise into view
+   from below — as if your eyes move down to a lower shelf. Going back (dir
+   "down") brings them in from above. */
+.shelf-slide-up {
+  animation: shelf-rise-in 0.42s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+.shelf-slide-down {
+  animation: shelf-drop-in 0.42s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+@keyframes shelf-rise-in {
+  from {
+    transform: translateY(18%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes shelf-drop-in {
+  from {
+    transform: translateY(-18%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shelf-slide-up,
+  .shelf-slide-down {
+    animation: none;
+  }
+}
+
 /* Shelf action buttons row — position set dynamically via JS */
 .shelf-actions {
   position: absolute;
