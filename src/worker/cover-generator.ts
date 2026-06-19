@@ -111,11 +111,14 @@ async function generateImage(apiKey: string, prompt: string, maxRetries = 2): Pr
         generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
       };
 
+      // Tall-spine prompts (~400×2500) take Gemini noticeably longer than the
+      // old square output — measured 55-70s end-to-end. 90s leaves headroom
+      // without flooring against the Worker's 30s CPU budget (the fetch is I/O).
       const resp = await fetch(`${GEMINI_API_URL}?key=${apiKey}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(25000),
+        signal: AbortSignal.timeout(90000),
       });
 
       if (!resp.ok) {
@@ -202,20 +205,26 @@ Requirements:
 
   const coverBuf = await generateImage(apiKey, coverPrompt);
 
-  // --- Step 3: Generate spine on green screen (reuse style info directly) ---
-  const spinePrompt = `A flat front-facing book spine on bright solid lime green (#00FF00) background. The spine is a narrow vertical rectangle, centered, with green space on all sides.
+  // --- Step 3: Generate spine art ---
+  // Ask Gemini directly for a tall narrow spine. When it cooperates we get a
+  // ~384×2736 portrait that processSpine scales straight to 114×607 with no
+  // content loss. When it doesn't (square, landscape, or full book-cover
+  // mockup), processSpine's rotate + scale-or-cover-fit pipeline still
+  // produces something readable.
+  const spinePrompt = `A book spine for "${title}" by ${author} — a tall narrow vertical image, like a real book seen edge-on from the shelf.
 
-Design for "${title}" by ${author}:
-- Visual style: ${style.name}
-- Color palette: ${style.palette}
-- Typography: ${style.textStyle}
-- Title "${title.toUpperCase()}" running vertically in LARGE BOLD capitals — must be readable at thumbnail size
-- Author "${author.toUpperCase()}" at the bottom, also reasonably large
-- A small decorative motif at the top
-- Keep decoration MINIMAL — prioritize text legibility
-- The rectangle should be about 1/6 the width of the total image
-- Sharp edges, no shadows, no 3D effects, no page edges visible
-- CRITICAL: All text must be FULLY CONTAINED within the spine rectangle with generous margins on ALL sides. Leave at least 10% padding on left and right sides.`;
+Visual style: ${style.name} — ${style.cover}
+Color palette: ${style.palette}
+Typography: ${style.textStyle}
+
+Requirements:
+- The entire image IS the spine — no surrounding book cover, no back cover, no mockup, no 3D perspective
+- Tall and narrow, portrait orientation, roughly 1:6 width-to-height ratio
+- Title "${title.toUpperCase()}" running vertically along the spine, reading bottom-to-top in LARGE BOLD capitals
+- Author "${author.toUpperCase()}" at the bottom of the spine, smaller, also rotated to read along the spine
+- A small thematic motif at the top of the spine
+- Background and decoration fill the ENTIRE image edge to edge — no white borders, no green-screen, no frame
+- Sharp edges, no shadows, no 3D effects, no page edges, no fanned pages visible`;
 
   const spineBuf = await generateImage(apiKey, spinePrompt);
 
