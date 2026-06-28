@@ -7,7 +7,10 @@ import { Hono } from 'hono';
 import { D1Client } from './d1-client.js';
 import { translateBook, activeJobs } from './translate-worker.js';
 import { processSpine, processCover } from './image-processor.js';
-import { composeBookImages } from './cover-composer.js';
+import {
+  composeBookImages,
+  spineThicknessFromLength,
+} from './cover-composer.js';
 import { generatePreview, PREVIEW_HTML, LOGIN_HTML } from './cover-preview.js';
 import { parseBook, type BookDataV2 } from './book-parser.js';
 import { calculateBookCredits, TOKENS_PER_CREDIT } from './token-counter.js';
@@ -549,19 +552,6 @@ function normalizeAuthorName(author: string): string {
  *
  * This is pure image compositing (Sharp); no AI call happens at request time.
  */
-/**
- * Map a book's total source length (sum of chapter raw_html chars) to a spine
- * width multiplier — thicker books get visibly wider spines on the shelf. The
- * sqrt curve compresses the wide range of book lengths into a tasteful band.
- */
-function spineThicknessFromLength(htmlLen: number): number {
-  const LO = 150000;
-  const HI = 900000;
-  const t =
-    (Math.sqrt(Math.max(0, htmlLen)) - Math.sqrt(LO)) /
-    (Math.sqrt(HI) - Math.sqrt(LO));
-  return Math.max(0.7, Math.min(1.7, 0.7 + t));
-}
 
 async function generateCoversForBook(
   title: string,

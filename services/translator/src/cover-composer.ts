@@ -50,6 +50,21 @@ interface Box {
 const MAX_COVER_HEIGHT = 900;
 const MAX_SPINE_HEIGHT = 900;
 
+/**
+ * Map a book's total source length (sum of chapter raw_html chars) to a spine
+ * width multiplier — thicker books get visibly wider spines on the shelf. The
+ * sqrt curve compresses the wide range of book lengths into a tasteful band,
+ * clamped to [0.7, 1.7]× the template's native width.
+ */
+export function spineThicknessFromLength(htmlLen: number): number {
+  const LO = 150000;
+  const HI = 900000;
+  const t =
+    (Math.sqrt(Math.max(0, htmlLen)) - Math.sqrt(LO)) /
+    (Math.sqrt(HI) - Math.sqrt(LO));
+  return Math.max(0.7, Math.min(1.7, 0.7 + t));
+}
+
 const escapeXml = (s: string): string =>
   s
     .replace(/&/g, '&amp;')
@@ -194,7 +209,11 @@ function glyphAdvance(text: string, fontSize: number): number {
 }
 
 /** Greedy word-wrap to a max pixel width (no truncation — callers size to fit). */
-function wrapText(text: string, fontSize: number, maxWidth: number): string[] {
+export function wrapText(
+  text: string,
+  fontSize: number,
+  maxWidth: number
+): string[] {
   const hasSpaces = /\s/.test(text.trim());
   const units = hasSpaces ? text.trim().split(/\s+/) : Array.from(text.trim());
   const sep = hasSpaces ? ' ' : '';
@@ -217,7 +236,7 @@ function wrapText(text: string, fontSize: number, maxWidth: number): string[] {
  * Largest font size (≤ start) at which `text`, wrapped to `maxWidth`, fits
  * within `maxHeight`. Shrinks so the WHOLE title shows rather than truncating.
  */
-function fitWrapped(
+export function fitWrapped(
   text: string,
   startSize: number,
   maxWidth: number,
