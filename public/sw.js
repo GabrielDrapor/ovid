@@ -13,8 +13,17 @@ const CACHE = `ovid-${VERSION}`;
 const SHELL = '/index.html';
 
 self.addEventListener('install', (event) => {
-  self.skipWaiting();
+  // Note: we do NOT skipWaiting() here. A new SW stays in "waiting" until the
+  // app asks it to activate (see the SKIP_WAITING message) — that powers the
+  // "new version available, tap to refresh" prompt.
   event.waitUntil(caches.open(CACHE).then((c) => c.add(SHELL).catch(() => {})));
+});
+
+// The page posts this when the user accepts an update.
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
 });
 
 self.addEventListener('activate', (event) => {
