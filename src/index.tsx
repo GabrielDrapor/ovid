@@ -11,3 +11,13 @@ root.render(
     <App />
   </React.StrictMode>
 );
+
+// PWA: register the service worker in production builds only (dev runs under
+// `wrangler dev`, where SW caching would interfere with reloads).
+if ('serviceWorker' in navigator && process.env.NODE_ENV === 'production') {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch((err) => {
+      console.warn('Service worker registration failed:', err);
+    });
+  });
+}
