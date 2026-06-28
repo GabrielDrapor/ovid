@@ -7,6 +7,7 @@ import { Hono } from 'hono';
 import { D1Client } from './d1-client.js';
 import { translateBook, activeJobs } from './translate-worker.js';
 import { processSpine, processCover } from './image-processor.js';
+import { composeBookImages } from './cover-composer.js';
 import { generatePreview, PREVIEW_HTML, LOGIN_HTML } from './cover-preview.js';
 import { parseBook, type BookDataV2 } from './book-parser.js';
 import { calculateBookCredits, TOKENS_PER_CREDIT } from './token-counter.js';
@@ -92,6 +93,62 @@ async function r2Delete(key: string): Promise<void> {
   }).catch(() => {
     /* best effort */
   });
+}
+
+// ---- Blank cover/spine template pool ----
+// Pre-generated cloth hardcover mockups live in R2 under blanks/. A book's
+// cover/spine is composited onto a randomly-chosen colour at upload time.
+// See scripts/generate-blanks.ts.
+
+interface BlankManifest {
+  colors: string[];
+}
+
+let blankManifestCache: BlankManifest | null = null;
+const blankTemplateCache = new Map<string, { cover: Buffer; spine: Buffer }>();
+
+async function getBlankManifest(): Promise<BlankManifest> {
+  if (blankManifestCache) return blankManifestCache;
+  try {
+    const buf = await r2Download('blanks/manifest.json');
+    const parsed = JSON.parse(buf.toString('utf-8')) as BlankManifest;
+    if (Array.isArray(parsed.colors) && parsed.colors.length > 0) {
+      blankManifestCache = parsed;
+      return parsed;
+    }
+  } catch (err) {
+    console.warn(
+      '[cover] blanks/manifest.json missing — falling back to gray',
+      err
+    );
+  }
+  blankManifestCache = { colors: ['gray'] };
+  return blankManifestCache;
+}
+
+async function getBlankTemplate(
+  color: string
+): Promise<{ cover: Buffer; spine: Buffer }> {
+  const cached = blankTemplateCache.get(color);
+  if (cached) return cached;
+  const [cover, spine] = await Promise.all([
+    r2Download(`blanks/${color}_cover.png`),
+    r2Download(`blanks/${color}_spine.png`),
+  ]);
+  const pair = { cover, spine };
+  blankTemplateCache.set(color, pair);
+  return pair;
+}
+
+async function pickRandomTemplate(): Promise<{
+  color: string;
+  cover: Buffer;
+  spine: Buffer;
+}> {
+  const { colors } = await getBlankManifest();
+  const color = colors[Math.floor(Math.random() * colors.length)];
+  const { cover, spine } = await getBlankTemplate(color);
+  return { color, cover, spine };
 }
 
 // ---- Image rewriting helper ----
@@ -414,18 +471,15 @@ async function processUpload(req: UploadAndParseRequest): Promise<void> {
       });
     }
 
-    // 8. Generate cover images (if Gemini key available)
-    const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
-    if (GEMINI_API_KEY) {
-      generateCoversForBook(
-        GEMINI_API_KEY,
-        bookData.title,
-        bookData.author,
-        bookUuid
-      ).catch((err) => {
-        console.warn(`[upload] Cover generation failed for ${bookUuid}:`, err);
-      });
-    }
+    // 8. Generate cover images — composite onto a blank cloth template (no AI at runtime)
+    generateCoversForBook(
+      bookData.title,
+      bookData.author,
+      bookUuid,
+      bookData.coverImage
+    ).catch((err) => {
+      console.warn(`[upload] Cover generation failed for ${bookUuid}:`, err);
+    });
 
     // 9. Clean up raw upload from R2
     await r2Delete(fileKey);
@@ -468,167 +522,6 @@ async function processUpload(req: UploadAndParseRequest): Promise<void> {
   }
 }
 
-/**
- * Curated style pool — each entry defines a distinct visual direction.
- * The generator picks one at random per book to ensure diversity.
- * Ported from src/worker/cover-generator.ts.
- */
-const COVER_STYLE_POOL = [
-  {
-    name: 'Woodblock Print',
-    cover:
-      'Japanese ukiyo-e woodblock print style. Bold outlines, flat color areas, traditional compositions. Limited palette of 4-5 colors.',
-    palette: 'muted indigo, vermillion, cream, and sage green',
-    textStyle: 'bold serif capitals in cream or white',
-  },
-  {
-    name: 'Swiss Modernist',
-    cover:
-      'Swiss International Typographic Style. Strong grid layout, bold sans-serif type as the main visual element, geometric shapes. Clean and austere.',
-    palette:
-      'white background with black, one bold accent color (red or yellow)',
-    textStyle: 'large Helvetica-style sans-serif in black or the accent color',
-  },
-  {
-    name: 'Risograph Illustration',
-    cover:
-      'Risograph-style illustration with visible grain, limited ink colors, slight misregistration. Playful, indie, tactile feel.',
-    palette:
-      'two-tone risograph inks — e.g. fluorescent pink and teal, or orange and blue',
-    textStyle:
-      'hand-drawn or chunky sans-serif lettering in one of the ink colors',
-  },
-  {
-    name: 'Vintage Penguin',
-    cover:
-      'Classic Penguin paperback design: horizontal color bands, clean typography, minimal illustration. Simple and iconic.',
-    palette:
-      'three horizontal bands — a signature color (orange, green, or blue) with white/cream center band',
-    textStyle: 'clean serif type centered on the white band',
-  },
-  {
-    name: 'Watercolor Botanical',
-    cover:
-      'Soft watercolor botanical illustration. Delicate plant/flower motifs framing the title. Airy, light, organic.',
-    palette: 'soft greens, dusty rose, warm cream, touches of gold',
-    textStyle: 'elegant thin serif in dark green or brown',
-  },
-  {
-    name: 'Soviet Constructivist',
-    cover:
-      'Soviet Constructivist poster style. Bold diagonal compositions, photomontage feel, strong geometric shapes, propaganda-poster energy.',
-    palette: 'red, black, cream/off-white',
-    textStyle:
-      'bold angular sans-serif in red or black, tilted at dynamic angles',
-  },
-  {
-    name: 'Psychedelic 60s',
-    cover:
-      'Late 1960s psychedelic poster art. Flowing organic lettering, vibrant saturated colors, swirling patterns, op-art influences.',
-    palette: 'electric purple, hot pink, acid green, orange',
-    textStyle:
-      'flowing Art Nouveau-inspired hand lettering that melts into the illustration',
-  },
-  {
-    name: 'Minimal Geometric',
-    cover:
-      "Ultra-minimal design. One or two geometric shapes as metaphor for the book's theme. Maximum negative space. Conceptual.",
-    palette:
-      'monochrome with one accent — e.g. all black with a single red circle',
-    textStyle: 'small, understated sans-serif in a corner or along an edge',
-  },
-  {
-    name: 'Noir Paperback',
-    cover:
-      'Pulp noir paperback style from the 1940s-50s. Dramatic shadows, venetian blind lighting, moody atmospheric scene.',
-    palette: 'deep shadows, muted yellows and blues, smoky grays',
-    textStyle: 'bold condensed type in yellow or white, slightly distressed',
-  },
-  {
-    name: 'Folk Art Pattern',
-    cover:
-      'Eastern European or Scandinavian folk art. Symmetrical decorative patterns, stylized animals or flowers, naive flat perspective.',
-    palette:
-      'rich folk colors — deep red, forest green, cobalt blue, gold accents on dark background',
-    textStyle: 'decorative serif or slab-serif centered in a clear cartouche',
-  },
-  {
-    name: 'Collage Mixed Media',
-    cover:
-      'Cut-paper collage style. Torn edges, layered textures, mixed found imagery. Handmade, editorial, contemporary.',
-    palette:
-      'varied paper textures — newsprint, colored paper, kraft brown, pops of bright color',
-    textStyle:
-      'ransom-note style mixed typefaces or clean modern type contrasting with the collage',
-  },
-  {
-    name: 'Line Drawing',
-    cover:
-      'Single continuous line drawing or fine pen illustration. White or light background, intricate detail, intellectual feel.',
-    palette:
-      'white background with black or dark ink lines, optional one spot color',
-    textStyle: 'refined serif type, well-spaced, in black',
-  },
-];
-
-/**
- * Call Gemini image generation API with retry logic.
- */
-async function generateImageWithRetry(
-  apiUrl: string,
-  prompt: string,
-  maxRetries = 2
-): Promise<Buffer> {
-  let lastError: Error | null = null;
-
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try {
-      if (attempt > 0) {
-        const delay = 1000 * Math.pow(2, attempt - 1);
-        console.log(`[cover] Retry attempt ${attempt} after ${delay}ms`);
-        await new Promise((r) => setTimeout(r, delay));
-      }
-
-      const resp = await fetch(apiUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
-        }),
-      });
-
-      if (!resp.ok) {
-        const errText = await resp.text();
-        throw new Error(
-          `Gemini API error ${resp.status}: ${errText.slice(0, 300)}`
-        );
-      }
-
-      const data = (await resp.json()) as any;
-      for (const candidate of data.candidates || []) {
-        for (const part of candidate.content?.parts || []) {
-          if (part.inlineData?.data) {
-            const buf = Buffer.from(part.inlineData.data, 'base64');
-            if (buf.length < 1000) {
-              throw new Error(
-                `Generated image too small (${buf.length} bytes)`
-              );
-            }
-            return buf;
-          }
-        }
-      }
-      throw new Error('No image in Gemini response');
-    } catch (err) {
-      lastError = err instanceof Error ? err : new Error(String(err));
-      console.warn(`[cover] Attempt ${attempt} failed:`, lastError.message);
-    }
-  }
-
-  throw lastError || new Error('Image generation failed');
-}
-
 function slugify(text: string): string {
   return text
     .toLowerCase()
@@ -637,10 +530,6 @@ function slugify(text: string): string {
     .slice(0, 40);
 }
 
-/**
- * Generate cover and spine for a book, upload to R2, post-process, and update D1.
- * Full logic ported from src/worker/cover-generator.ts.
- */
 /**
  * Normalize "Last, First" author format to "First Last" for display on covers/spines.
  */
@@ -653,96 +542,79 @@ function normalizeAuthorName(author: string): string {
   return author;
 }
 
+/**
+ * Compose a book's cover + spine by placing it on a pre-generated blank cloth
+ * hardcover template (see scripts/generate-blanks.ts) and typesetting the
+ * title/author — with the EPUB's own cover inset on the front when present.
+ *
+ * This is pure image compositing (Sharp); no AI call happens at request time.
+ */
+/**
+ * Map a book's total source length (sum of chapter raw_html chars) to a spine
+ * width multiplier — thicker books get visibly wider spines on the shelf. The
+ * sqrt curve compresses the wide range of book lengths into a tasteful band.
+ */
+function spineThicknessFromLength(htmlLen: number): number {
+  const LO = 150000;
+  const HI = 900000;
+  const t =
+    (Math.sqrt(Math.max(0, htmlLen)) - Math.sqrt(LO)) /
+    (Math.sqrt(HI) - Math.sqrt(LO));
+  return Math.max(0.7, Math.min(1.7, 0.7 + t));
+}
+
 async function generateCoversForBook(
-  geminiApiKey: string,
   title: string,
   author: string,
-  bookUuid: string
+  bookUuid: string,
+  coverImage?: { data: Uint8Array; mediaType: string }
 ): Promise<void> {
   // Normalize author name from catalog format ("Allen, David") to natural ("David Allen")
   author = normalizeAuthorName(author);
 
-  const GEMINI_MODEL = 'gemini-2.5-flash-image';
-  const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${geminiApiKey}`;
-
   const slug = slugify(title);
   const uid = crypto.randomUUID().slice(0, 8);
   const keyPrefix = `${slug}_${uid}`;
-
-  // Pick a random style
-  const style =
-    COVER_STYLE_POOL[Math.floor(Math.random() * COVER_STYLE_POOL.length)];
-  console.log(`[cover] Style for ${bookUuid}: ${style.name}`);
+  const db = getDb();
 
   try {
-    // --- Generate cover ---
-    const coverPrompt = `Book cover for "${title}" by ${author}. Portrait orientation, approximately 3:4 ratio.
+    const template = await pickRandomTemplate();
 
-Visual style: ${style.name} — ${style.cover}
-Color palette: ${style.palette}
-Typography: ${style.textStyle}
-
-Requirements:
-- Title "${title.toUpperCase()}" prominently displayed
-- Author "${author.toUpperCase()}" at the bottom in smaller text
-- The design must fill the ENTIRE image edge to edge with NO white borders
-- Commit fully to the ${style.name} aesthetic — do NOT default to Art Deco or dark blue/gold`;
-
-    const coverBuf = await generateImageWithRetry(GEMINI_API_URL, coverPrompt);
-
-    // --- Generate spine ---
-    // Generate a HORIZONTAL banner that will be rotated 90° CW in post-processing.
-    // Gemini can't generate rotated text, so we ask for a horizontal design
-    // and rotate it ourselves to create a vertical book spine.
-    const spinePrompt = `Generate a wide horizontal banner image for a book. The ENTIRE image IS the design — no background, no border, no frame. The design fills every pixel edge-to-edge.
-
-Book: "${title}" by ${author}
-Visual style: ${style.name}
-Color palette: ${style.palette}
-Typography: ${style.textStyle}
-
-CRITICAL REQUIREMENTS:
-- This is a HORIZONTAL LANDSCAPE image (wider than tall)
-- The design/color/texture fills the ENTIRE canvas edge-to-edge with NO margins or borders
-- Title "${title.toUpperCase()}" as a single horizontal line in LARGE BOLD capitals, centered
-- Author "${author.toUpperCase()}" in smaller text to the right of the title
-- A small decorative motif (optional, on the left side)
-- Keep decoration MINIMAL — prioritize text legibility
-- The background color/texture of the design extends to ALL edges
-- Sharp, clean design. No 3D effects, no shadows.
-- This will be rotated 90° to become a vertical book spine, so design accordingly`;
-
-    const spineBuf = await generateImageWithRetry(GEMINI_API_URL, spinePrompt);
-
-    // --- Upload raw images to R2 ---
-    const rawCoverKey = `raw/${keyPrefix}_cover.png`;
-    const rawSpineKey = `raw/${keyPrefix}_spine.png`;
-
-    const [rawCoverUrl, rawSpineUrl] = await Promise.all([
-      r2UploadBuffer(rawCoverKey, coverBuf, 'image/png'),
-      r2UploadBuffer(rawSpineKey, spineBuf, 'image/png'),
-    ]);
+    // Derive spine thickness from how long the book is.
+    let spineThickness = 1;
+    try {
+      const row = await db.first<{ len: number }>(
+        "SELECT COALESCE(SUM(LENGTH(COALESCE(raw_html,''))), 0) AS len FROM chapters_v2 WHERE book_id = (SELECT id FROM books_v2 WHERE uuid = ?)",
+        [bookUuid]
+      );
+      if (row && row.len > 0)
+        spineThickness = spineThicknessFromLength(row.len);
+    } catch (e) {
+      console.warn(`[cover] thickness query failed for ${bookUuid}:`, e);
+    }
 
     console.log(
-      `[cover] Raw images uploaded for ${bookUuid}: cover=${rawCoverUrl}, spine=${rawSpineUrl}`
+      `[cover] Composing ${bookUuid} on '${template.color}' template, thickness ${spineThickness.toFixed(2)}` +
+        (coverImage ? ' with embedded cover inset' : ' (typeset only)')
     );
 
-    // --- Post-process: crop, despill, resize via existing pipeline ---
-    const [finalCover, finalSpine] = await Promise.all([
-      processCover(coverBuf),
-      processSpine(spineBuf),
-    ]);
+    const { cover: finalCover, spine: finalSpine } = await composeBookImages({
+      templateCover: template.cover,
+      templateSpine: template.spine,
+      originalCover: coverImage ? Buffer.from(coverImage.data) : null,
+      title,
+      author,
+      spineThickness,
+    });
 
     const coverKey = `${keyPrefix}_cover.png`;
     const spineKey = `${keyPrefix}_spine.png`;
-
     const [coverUrl, spineUrl] = await Promise.all([
       r2UploadBuffer(coverKey, finalCover, 'image/png'),
       r2UploadBuffer(spineKey, finalSpine, 'image/png'),
     ]);
 
     // --- Update D1 ---
-    const db = getDb();
     await db.run(
       "UPDATE books_v2 SET book_cover_img_url = ?, book_spine_img_url = ?, updated_at = datetime('now') WHERE uuid = ?",
       [coverUrl, spineUrl, bookUuid]
@@ -880,11 +752,6 @@ app.post('/admin/regenerate-cover', async (c) => {
     return c.json({ error: 'Missing bookUuid' }, 400);
   }
 
-  const apiKey = process.env.GEMINI_API_KEY || '';
-  if (!apiKey) {
-    return c.json({ error: 'GEMINI_API_KEY not configured' }, 500);
-  }
-
   const db = getDb();
   const book = await db.first<{
     title: string;
@@ -897,12 +764,14 @@ app.post('/admin/regenerate-cover', async (c) => {
     return c.json({ error: 'Book not found' }, 404);
   }
 
-  // Use original_title for cover/spine generation (not the translated title)
+  // Use original_title for cover/spine generation (not the translated title).
+  // Note: regeneration has no access to the original EPUB, so there is no
+  // embedded-cover inset here — the cover is typeset onto the blank template.
   const coverTitle = book.original_title || book.title;
 
   // Run synchronously so caller gets the result
   try {
-    await generateCoversForBook(apiKey, coverTitle, book.author, body.bookUuid);
+    await generateCoversForBook(coverTitle, book.author, body.bookUuid);
     const updated = await db.first<{
       book_cover_img_url: string;
       book_spine_img_url: string;
