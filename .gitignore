@@ -81,3 +81,6 @@ epubs
 # Cover generation temp files
 .tmp_covers/
 .wrangler
+
+# Eval output
+eval-results/

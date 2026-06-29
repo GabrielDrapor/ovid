@@ -39,9 +39,20 @@ export interface BookDataV2 {
   chapters: ChapterV2[];
   styles?: string;
   images?: EpubImage[];
+  coverImage?: EpubImage;
 }
 
 // ---- Helpers ----
+
+/** Collapse ./ and ../ segments in a zip path for reliable matching. */
+function normalizeZipPath(p: string): string {
+  const out: string[] = [];
+  for (const seg of p.split('/')) {
+    if (seg === '..') out.pop();
+    else if (seg !== '.' && seg !== '') out.push(seg);
+  }
+  return out.join('/');
+}
 
 function decodeEntities(text: string): string {
   return text
@@ -118,13 +129,39 @@ function getInnerHtml(node: any): string {
 // ---- Chapter parsing ----
 
 const blockTags = new Set([
-  'p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
-  'li', 'blockquote', 'pre', 'td', 'th', 'dt', 'dd',
-  'figcaption', 'article', 'section',
-  'table', 'tr', 'tbody', 'thead', 'tfoot',
+  'p',
+  'div',
+  'h1',
+  'h2',
+  'h3',
+  'h4',
+  'h5',
+  'h6',
+  'li',
+  'blockquote',
+  'pre',
+  'td',
+  'th',
+  'dt',
+  'dd',
+  'figcaption',
+  'article',
+  'section',
+  'table',
+  'tr',
+  'tbody',
+  'thead',
+  'tfoot',
 ]);
 
-const skipTags = new Set(['script', 'style', 'noscript', 'head', 'meta', 'link']);
+const skipTags = new Set([
+  'script',
+  'style',
+  'noscript',
+  'head',
+  'meta',
+  'link',
+]);
 
 /**
  * Some EPUBs (notably Paul Graham essays) put a whole article inside a single
@@ -186,8 +223,10 @@ function splitBrSeparatedParagraphs(body: any, doc: any) {
         let brCount = 0;
         while (j < tokens.length) {
           const t = tokens[j];
-          if (t.kind === 'br') { brCount++; j++; }
-          else if (t.kind === 'text' && !t.text.trim()) j++;
+          if (t.kind === 'br') {
+            brCount++;
+            j++;
+          } else if (t.kind === 'text' && !t.text.trim()) j++;
           else break;
         }
         if (brCount >= 2) {
@@ -204,8 +243,8 @@ function splitBrSeparatedParagraphs(body: any, doc: any) {
     }
 
     const paragraphs = groups
-      .map(g => g.join('').replace(/\s+/g, ' ').trim())
-      .filter(p => p.length > 0);
+      .map((g) => g.join('').replace(/\s+/g, ' ').trim())
+      .filter((p) => p.length > 0);
     if (paragraphs.length < 2) return; // nothing useful to split
 
     while (block.firstChild) block.removeChild(block.firstChild);
@@ -252,13 +291,15 @@ function normalizeTableBodies(body: any, doc: any) {
   for (const table of tableList) {
     const children = Array.from(table.childNodes as any[]);
     // Already has a tbody (or thead/tfoot) wrapping its rows — leave it alone.
-    const hasSectionChild = children.some((c: any) =>
-      c.nodeType === 1 && ['tbody', 'thead', 'tfoot'].includes((c.nodeName || '').toLowerCase())
+    const hasSectionChild = children.some(
+      (c: any) =>
+        c.nodeType === 1 &&
+        ['tbody', 'thead', 'tfoot'].includes((c.nodeName || '').toLowerCase())
     );
     if (hasSectionChild) continue;
 
-    const looseRows = children.filter((c: any) =>
-      c.nodeType === 1 && (c.nodeName || '').toLowerCase() === 'tr'
+    const looseRows = children.filter(
+      (c: any) => c.nodeType === 1 && (c.nodeName || '').toLowerCase() === 'tr'
     );
     if (looseRows.length === 0) continue;
 
@@ -273,8 +314,13 @@ function normalizeTableBodies(body: any, doc: any) {
 
 function parseHTMLChapter(
   html: string,
-  chapterNumber: number,
-): { title: string; originalTitle: string; rawHtml: string; textNodes: ContentItemV2[] } | null {
+  chapterNumber: number
+): {
+  title: string;
+  originalTitle: string;
+  rawHtml: string;
+  textNodes: ContentItemV2[];
+} | null {
   const doc = new DOMParser().parseFromString(html, 'text/html');
   const body = doc.getElementsByTagName('body')[0];
   if (!body) return null;
@@ -293,7 +339,8 @@ function parseHTMLChapter(
   for (let i = 0; i < bodyChildren.length; i++) {
     const child = bodyChildren[i];
     if (child.nodeType === 1) rawHtml += serializeNode(child);
-    else if (child.nodeType === 3 && child.textContent?.trim()) rawHtml += child.textContent;
+    else if (child.nodeType === 3 && child.textContent?.trim())
+      rawHtml += child.textContent;
   }
 
   // Extract chapter title
@@ -331,7 +378,11 @@ function parseHTMLChapter(
     let elementIndex = 1;
     let sibling = node.previousSibling;
     while (sibling) {
-      if (sibling.nodeType === 1 && (sibling.nodeName || '').toLowerCase() === tagName) elementIndex++;
+      if (
+        sibling.nodeType === 1 &&
+        (sibling.nodeName || '').toLowerCase() === tagName
+      )
+        elementIndex++;
       sibling = sibling.previousSibling;
     }
 
@@ -341,7 +392,8 @@ function parseHTMLChapter(
       if (hasChildBlockElements(node)) {
         const children = node.childNodes;
         if (children) {
-          for (let i = 0; i < children.length; i++) walkNode(children[i], currentPath);
+          for (let i = 0; i < children.length; i++)
+            walkNode(children[i], currentPath);
         }
         return;
       }
@@ -360,7 +412,8 @@ function parseHTMLChapter(
 
     const children = node.childNodes;
     if (children) {
-      for (let i = 0; i < children.length; i++) walkNode(children[i], currentPath);
+      for (let i = 0; i < children.length; i++)
+        walkNode(children[i], currentPath);
     }
   };
 
@@ -386,16 +439,25 @@ function parseHTMLChapter(
           const grandchildren = child.childNodes;
           if (grandchildren) {
             for (let j = 0; j < grandchildren.length; j++) {
-              if (grandchildren[j].nodeType === 1 && blockTags.has((grandchildren[j].nodeName || '').toLowerCase())) {
+              if (
+                grandchildren[j].nodeType === 1 &&
+                blockTags.has((grandchildren[j].nodeName || '').toLowerCase())
+              ) {
                 hasChildBlocks = true;
                 break;
               }
             }
           }
-          if (hasChildBlocks) { scanForHeadings(child); continue; }
+          if (hasChildBlocks) {
+            scanForHeadings(child);
+            continue;
+          }
           const text = (child.textContent || '').replace(/\s+/g, ' ').trim();
           if (text.length >= 1 && text.length <= 50) headingParts.push(text);
-          else if (text.length > 50) { stopScanning = true; return; }
+          else if (text.length > 50) {
+            stopScanning = true;
+            return;
+          }
         } else {
           scanForHeadings(child);
         }
@@ -405,7 +467,12 @@ function parseHTMLChapter(
     chapterTitle = headingParts.join(' \u2013 ') || `Chapter ${chapterNumber}`;
   }
 
-  return { title: chapterTitle, originalTitle: chapterTitle, rawHtml, textNodes };
+  return {
+    title: chapterTitle,
+    originalTitle: chapterTitle,
+    rawHtml,
+    textNodes,
+  };
 }
 
 // ---- TOC parsing ----
@@ -451,7 +518,10 @@ function parseNCX(ncxContent: string): TocEntry[] {
  * Parse nav.xhtml to extract TOC entries.
  */
 function parseNavXhtml(navContent: string): TocEntry[] {
-  const doc = new DOMParser().parseFromString(navContent, 'application/xhtml+xml');
+  const doc = new DOMParser().parseFromString(
+    navContent,
+    'application/xhtml+xml'
+  );
   const entries: TocEntry[] = [];
 
   // Find nav element with epub:type="toc"
@@ -460,7 +530,9 @@ function parseNavXhtml(navContent: string): TocEntry[] {
   for (let i = 0; i < navElements.length; i++) {
     const nav = navElements[i];
     // Check both epub:type and plain type attribute
-    const epubType = nav.getAttribute('epub:type') || nav.getAttributeNS('http://www.idpf.org/2007/ops', 'type');
+    const epubType =
+      nav.getAttribute('epub:type') ||
+      nav.getAttributeNS('http://www.idpf.org/2007/ops', 'type');
     if (epubType === 'toc') {
       tocNav = nav;
       break;
@@ -491,10 +563,15 @@ function parseNavXhtml(navContent: string): TocEntry[] {
  * Build a map from spine file path (without fragment) to TOC entry title.
  * If multiple TOC entries point to the same file, use the first one.
  */
-function buildTocTitleMap(tocEntries: TocEntry[], basePath: string): Map<string, string> {
+function buildTocTitleMap(
+  tocEntries: TocEntry[],
+  basePath: string
+): Map<string, string> {
   const map = new Map<string, string>();
   for (const entry of tocEntries) {
-    const fullPath = entry.src.startsWith('/') ? entry.src.substring(1) : basePath + entry.src;
+    const fullPath = entry.src.startsWith('/')
+      ? entry.src.substring(1)
+      : basePath + entry.src;
     if (!map.has(fullPath)) {
       map.set(fullPath, entry.title);
     }
@@ -507,11 +584,15 @@ function buildTocTitleMap(tocEntries: TocEntry[], basePath: string): Map<string,
 /**
  * Parse an EPUB file into BookDataV2.
  */
-export async function parseEPUB(buffer: ArrayBuffer | Buffer): Promise<BookDataV2> {
+export async function parseEPUB(
+  buffer: ArrayBuffer | Buffer
+): Promise<BookDataV2> {
   const zip = new JSZip();
   const zipContent = await zip.loadAsync(buffer);
 
-  const opfFile = Object.keys(zipContent.files).find((name) => name.endsWith('.opf'));
+  const opfFile = Object.keys(zipContent.files).find((name) =>
+    name.endsWith('.opf')
+  );
 
   let title = 'Unknown Title';
   let author = 'Unknown Author';
@@ -519,6 +600,7 @@ export async function parseEPUB(buffer: ArrayBuffer | Buffer): Promise<BookDataV
   let globalStyles = '';
   let imageManifestEntries: { href: string; mediaType: string }[] = [];
   let tocTitleMap = new Map<string, string>();
+  let coverHref: string | null = null;
 
   if (opfFile) {
     const opfContent = await zipContent.files[opfFile].async('text');
@@ -532,6 +614,7 @@ export async function parseEPUB(buffer: ArrayBuffer | Buffer): Promise<BookDataV
 
     const manifestElements = doc.getElementsByTagName('item');
     const manifestMap = new Map<string, string>();
+    const manifestById = new Map<string, { href: string; mediaType: string }>();
     imageManifestEntries = [];
 
     let ncxHref: string | null = null;
@@ -543,6 +626,18 @@ export async function parseEPUB(buffer: ArrayBuffer | Buffer): Promise<BookDataV
       const href = item.getAttribute('href');
       const id = item.getAttribute('id');
       const properties = item.getAttribute('properties');
+
+      if (id && href && mediaType) manifestById.set(id, { href, mediaType });
+
+      // EPUB3 cover: <item properties="cover-image">
+      if (
+        properties &&
+        properties.split(/\s+/).includes('cover-image') &&
+        href &&
+        mediaType?.startsWith('image/')
+      ) {
+        coverHref = href;
+      }
 
       // Detect NCX
       if (mediaType === 'application/x-dtbncx+xml' && href) {
@@ -563,7 +658,9 @@ export async function parseEPUB(buffer: ArrayBuffer | Buffer): Promise<BookDataV
             const cssContent = await cssFile.async('text');
             globalStyles += `/* ${href} */\n${cssContent}\n`;
           }
-        } catch { /* skip */ }
+        } catch {
+          /* skip */
+        }
       }
 
       // HTML manifest
@@ -577,26 +674,54 @@ export async function parseEPUB(buffer: ArrayBuffer | Buffer): Promise<BookDataV
       }
     }
 
+    // EPUB2 cover: <meta name="cover" content="{manifest-id}">
+    if (!coverHref) {
+      const metas = doc.getElementsByTagName('meta');
+      for (let i = 0; i < metas.length; i++) {
+        if (metas[i].getAttribute('name') === 'cover') {
+          const cid = metas[i].getAttribute('content');
+          const it = cid ? manifestById.get(cid) : undefined;
+          if (it && it.mediaType.startsWith('image/')) {
+            coverHref = it.href;
+            break;
+          }
+        }
+      }
+    }
+    // Last resort: an image whose filename looks like a cover.
+    if (!coverHref) {
+      const guess = imageManifestEntries.find((e) => /cover/i.test(e.href));
+      if (guess) coverHref = guess.href;
+    }
+
     // Parse TOC: prefer nav.xhtml, fall back to NCX
     let tocEntries: TocEntry[] = [];
     if (navHref) {
-      const navPath = navHref.startsWith('/') ? navHref.substring(1) : basePath + navHref;
+      const navPath = navHref.startsWith('/')
+        ? navHref.substring(1)
+        : basePath + navHref;
       const navFile = zipContent.files[navPath];
       if (navFile) {
         try {
           const navContent = await navFile.async('text');
           tocEntries = parseNavXhtml(navContent);
-        } catch { /* skip */ }
+        } catch {
+          /* skip */
+        }
       }
     }
     if (tocEntries.length === 0 && ncxHref) {
-      const ncxPath = ncxHref.startsWith('/') ? ncxHref.substring(1) : basePath + ncxHref;
+      const ncxPath = ncxHref.startsWith('/')
+        ? ncxHref.substring(1)
+        : basePath + ncxHref;
       const ncxFile = zipContent.files[ncxPath];
       if (ncxFile) {
         try {
           const ncxContent = await ncxFile.async('text');
           tocEntries = parseNCX(ncxContent);
-        } catch { /* skip */ }
+        } catch {
+          /* skip */
+        }
       }
     }
     if (tocEntries.length > 0) {
@@ -609,7 +734,9 @@ export async function parseEPUB(buffer: ArrayBuffer | Buffer): Promise<BookDataV
       const idref = spineItems[i].getAttribute('idref');
       if (idref && manifestMap.has(idref)) {
         const href = manifestMap.get(idref)!;
-        const fullPath = href.startsWith('/') ? href.substring(1) : basePath + href;
+        const fullPath = href.startsWith('/')
+          ? href.substring(1)
+          : basePath + href;
         htmlFiles.push(fullPath);
       }
     }
@@ -631,7 +758,8 @@ export async function parseEPUB(buffer: ArrayBuffer | Buffer): Promise<BookDataV
     const styleTags = doc.getElementsByTagName('style');
     for (let i = 0; i < styleTags.length; i++) {
       const styleContent = styleTags[i].textContent;
-      if (styleContent) globalStyles += `/* Internal from ${htmlPath} */\n${styleContent}\n`;
+      if (styleContent)
+        globalStyles += `/* Internal from ${htmlPath} */\n${styleContent}\n`;
     }
 
     if (chapterData && chapterData.textNodes.length > 0) {
@@ -647,17 +775,40 @@ export async function parseEPUB(buffer: ArrayBuffer | Buffer): Promise<BookDataV
 
   // Extract images
   const images: EpubImage[] = [];
-  const basePath = opfFile ? opfFile.substring(0, opfFile.lastIndexOf('/') + 1) : '';
+  const basePath = opfFile
+    ? opfFile.substring(0, opfFile.lastIndexOf('/') + 1)
+    : '';
   for (const entry of imageManifestEntries) {
-    const imgPath = entry.href.startsWith('/') ? entry.href.substring(1) : basePath + entry.href;
+    const imgPath = entry.href.startsWith('/')
+      ? entry.href.substring(1)
+      : basePath + entry.href;
     const imgFile = zipContent.files[imgPath];
     if (imgFile) {
       try {
         const data = await imgFile.async('uint8array');
         const filename = entry.href.split('/').pop() || entry.href;
-        images.push({ zipPath: imgPath, filename, mediaType: entry.mediaType, data });
-      } catch { /* skip */ }
+        images.push({
+          zipPath: imgPath,
+          filename,
+          mediaType: entry.mediaType,
+          data,
+        });
+      } catch {
+        /* skip */
+      }
     }
+  }
+
+  // Resolve the detected cover href to one of the extracted images.
+  let coverImage: EpubImage | undefined;
+  if (coverHref) {
+    const target = normalizeZipPath(
+      coverHref.startsWith('/') ? coverHref.slice(1) : basePath + coverHref
+    );
+    const coverFilename = coverHref.split('/').pop();
+    coverImage =
+      images.find((img) => normalizeZipPath(img.zipPath) === target) ||
+      images.find((img) => img.filename === coverFilename);
   }
 
   return {
@@ -668,13 +819,17 @@ export async function parseEPUB(buffer: ArrayBuffer | Buffer): Promise<BookDataV
     chapters,
     styles: globalStyles,
     images: images.length > 0 ? images : undefined,
+    coverImage,
   };
 }
 
 /**
  * Parse a MOBI/AZW3 file into BookDataV2.
  */
-export async function parseMOBI(buffer: ArrayBuffer | Buffer, fileExtension: string): Promise<BookDataV2> {
+export async function parseMOBI(
+  buffer: ArrayBuffer | Buffer,
+  fileExtension: string
+): Promise<BookDataV2> {
   // Dynamic import — @lingo-reader/mobi-parser may not be installed
   let initMobiFile: any, initKf8File: any;
   try {
@@ -683,9 +838,12 @@ export async function parseMOBI(buffer: ArrayBuffer | Buffer, fileExtension: str
     initMobiFile = mod.initMobiFile;
     initKf8File = mod.initKf8File;
   } catch {
-    throw new Error('MOBI/AZW3 parsing not supported — @lingo-reader/mobi-parser not installed');
+    throw new Error(
+      'MOBI/AZW3 parsing not supported — @lingo-reader/mobi-parser not installed'
+    );
   }
-  const uint8 = buffer instanceof Buffer ? new Uint8Array(buffer) : new Uint8Array(buffer);
+  const uint8 =
+    buffer instanceof Buffer ? new Uint8Array(buffer) : new Uint8Array(buffer);
 
   const isKf8 = fileExtension === '.azw3';
 
@@ -695,7 +853,9 @@ export async function parseMOBI(buffer: ArrayBuffer | Buffer, fileExtension: str
       const result = parseMOBIInternal(parser);
       if (result.chapters.length >= 1) return result;
       parser.destroy();
-    } catch { /* fall through to MOBI parser */ }
+    } catch {
+      /* fall through to MOBI parser */
+    }
   }
 
   const parser = await initMobiFile(uint8);
@@ -707,9 +867,10 @@ function parseMOBIInternal(parser: any): BookDataV2 {
   const spine = parser.getSpine();
 
   const title = metadata.title || 'Unknown Title';
-  const author = (metadata.author && metadata.author.length > 0)
-    ? metadata.author.join(', ')
-    : 'Unknown Author';
+  const author =
+    metadata.author && metadata.author.length > 0
+      ? metadata.author.join(', ')
+      : 'Unknown Author';
 
   const chapters: ChapterV2[] = [];
   let chapterNumber = 1;
@@ -718,7 +879,9 @@ function parseMOBIInternal(parser: any): BookDataV2 {
     let loaded;
     try {
       loaded = parser.loadChapter(spineItem.id);
-    } catch { continue; }
+    } catch {
+      continue;
+    }
     if (!loaded) continue;
 
     const html = loaded.html;
@@ -752,7 +915,10 @@ function parseMOBIInternal(parser: any): BookDataV2 {
 /**
  * Parse any supported book format.
  */
-export async function parseBook(buffer: ArrayBuffer | Buffer, fileExtension: string): Promise<BookDataV2> {
+export async function parseBook(
+  buffer: ArrayBuffer | Buffer,
+  fileExtension: string
+): Promise<BookDataV2> {
   if (fileExtension === '.epub') return parseEPUB(buffer);
   return parseMOBI(buffer, fileExtension);
 }

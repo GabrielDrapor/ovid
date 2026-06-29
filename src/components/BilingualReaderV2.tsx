@@ -601,14 +601,23 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
     if (!translationsReady || !initialXpath || elementsRef.current.size === 0) return;
 
     const data = elementsRef.current.get(initialXpath);
-    if (data?.element) {
-      // Small delay to ensure layout is complete
-      setTimeout(() => {
-        data.element.scrollIntoView({ behavior: 'auto', block: 'start' });
-        // Offset a bit from the very top for better UX
-        window.scrollBy(0, -20);
-      }, 150);
-    }
+    if (!data?.element) return;
+
+    const el = data.element;
+    const doScroll = () => {
+      el.scrollIntoView({ behavior: 'auto', block: 'start' });
+      window.scrollBy(0, -20);
+    };
+
+    // First attempt after initial layout settles
+    const t1 = setTimeout(doScroll, 200);
+    // Second attempt handles books where images/web-fonts shift layout after the first scroll
+    const t2 = setTimeout(() => {
+      if (Math.abs(el.getBoundingClientRect().top) > 100) {
+        doScroll();
+      }
+    }, 1000);
+    return () => { clearTimeout(t1); clearTimeout(t2); };
   }, [translationsReady, initialXpath]);
 
   const toggleMenu = () => setIsMenuOpen(!isMenuOpen);
@@ -708,6 +717,25 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [goToPreviousChapter, goToNextChapter, isMenuOpen, isChaptersOpen, isTypographyOpen]);
+
+  // iOS Safari standalone PWA: position:fixed anchors to the layout viewport, so when the
+  // visual viewport shifts during scroll (toolbar show/hide, rubber-band overscroll) the FAB
+  // appears to drift. Track the gap between the two and expose it as a CSS var.
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const update = () => {
+      const offset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+      document.documentElement.style.setProperty('--fab-vv-offset', `${offset}px`);
+    };
+    update();
+    vv.addEventListener('resize', update);
+    vv.addEventListener('scroll', update);
+    return () => {
+      vv.removeEventListener('resize', update);
+      vv.removeEventListener('scroll', update);
+    };
+  }, []);
 
   return (
     <div className="bilingual-reader">

@@ -38,13 +38,15 @@ TypeScript-first across frontend, backend, CLI, and translator service.
 
 ### Components
 - **React SPA** (`src/components/`) — BookShelf, BilingualReaderV2, ErrorBoundary
-- **CF Worker** (`src/worker/`) — API server: auth, book-handlers, cover-generator, credits, db, types
+- **CF Worker** (`src/worker/`) — API server: auth, book-handlers, credits, db, types
 - **Railway Translator** (`services/translator/`) — Long-running translation service (Hono + Sharp)
   - Receives webhook from Worker on EPUB upload
   - Translates via OpenAI-compatible API (default: gpt-4o-mini), 5 concurrent chapters
   - Reads/writes D1 via REST API, supports checkpoint resume
-  - Also handles cover/spine AI generation (Gemini 2.5 Flash Image) and image processing
-- **CLI Scripts** (`scripts/`) — import-book, list-books, remove-book, sync-remote-book, generate-cover
+  - Generates each book's cover + spine by compositing onto a pre-made blank
+    cloth-hardcover template (pure Sharp, no AI at request time) — see
+    `cover-composer.ts`. Spine width scales with book length.
+- **CLI Scripts** (`scripts/`) — import-book, list-books, remove-book, sync-remote-book, generate-blanks
 - **D1 SQLite** — Users, sessions, books, chapters, content_items, credits, reading progress
 - **R2 Storage** — Cover images, spine images, in-book images (`books/{uuid}/images/`)
 
@@ -52,7 +54,6 @@ TypeScript-first across frontend, backend, CLI, and translator service.
 - `src/worker/index.ts` — Main Worker entry, routing, middleware
 - `src/worker/auth.ts` — Google OAuth flow
 - `src/worker/book-handlers.ts` — Book CRUD, upload, chapter content
-- `src/worker/cover-generator.ts` — AI cover/spine generation
 - `src/worker/credits.ts` — Credit balance, Stripe checkout/webhooks
 - `src/worker/db.ts` — Database helpers, migrations
 - `src/components/BilingualReaderV2.tsx` — Main reader (scroll nav, paragraph toggle, progress)
@@ -62,7 +63,9 @@ TypeScript-first across frontend, backend, CLI, and translator service.
 - `services/translator/src/index.ts` — Railway service entry (Hono routes)
 - `services/translator/src/translate-worker.ts` — Translation logic
 - `services/translator/src/d1-client.ts` — D1 REST API client
-- `services/translator/src/image-processor.ts` — Cover/spine image processing (Sharp)
+- `services/translator/src/cover-composer.ts` — Composes cover + spine onto blank cloth templates (Sharp): book-face detection, original-cover inset, title/author typesetting, length-based spine thickness
+- `services/translator/src/book-parser.ts` — EPUB parsing; also extracts the embedded cover (used as the cover inset)
+- `services/translator/src/image-processor.ts` — Legacy cover/spine image processing (Sharp), used by the cover-preview debug page
 - `services/translator/src/cover-preview.ts` — Password-protected cover preview page
 
 ## API Endpoints

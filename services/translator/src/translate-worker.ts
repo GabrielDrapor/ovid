@@ -201,8 +201,7 @@ Return ONLY a valid JSON object. Be concise — short values, no commentary. Exa
     }
   }
 
-  console.warn('[glossary] All attempts failed — proceeding with empty glossary');
-  return {};
+  throw new Error('All glossary extraction attempts failed (empty LLM response)');
 }
 
 /**
@@ -587,12 +586,19 @@ export async function translateBook(
         }
       }
 
-      glossary = await extractGlossary(llmConfig, allTexts, job.source_language, job.target_language);
-      console.log(`[${bookUuid}] Glossary: ${Object.keys(glossary).length} terms`);
+      let glossaryWarning: string | null = null;
+      try {
+        glossary = await extractGlossary(llmConfig, allTexts, job.source_language, job.target_language);
+        console.log(`[${bookUuid}] Glossary: ${Object.keys(glossary).length} terms`);
+      } catch (err) {
+        glossaryWarning = `Glossary extraction failed: ${(err as Error).message}. Proceeding without glossary.`;
+        console.warn(`[${bookUuid}] ${glossaryWarning}`);
+        glossary = {};
+      }
 
       await db.run(
-        "UPDATE translation_jobs SET glossary_json = ?, glossary_extracted = 1, status = 'translating', current_chapter = 1, current_item_offset = 0, updated_at = CURRENT_TIMESTAMP WHERE book_uuid = ?",
-        [JSON.stringify(glossary), bookUuid]
+        "UPDATE translation_jobs SET glossary_json = ?, glossary_extracted = 1, status = 'translating', current_chapter = 1, current_item_offset = 0, error_message = ?, updated_at = CURRENT_TIMESTAMP WHERE book_uuid = ?",
+        [JSON.stringify(glossary), glossaryWarning, bookUuid]
       );
     } else if (job.glossary_json) {
       glossary = JSON.parse(job.glossary_json);
