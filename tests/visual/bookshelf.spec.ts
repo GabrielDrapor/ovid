@@ -49,14 +49,30 @@ const MOCK_USER_BOOKS = [
   },
 ];
 
+// The classic 2D shelf is now only a fallback for browsers without WebGL.
+// Snapshot tests force that path by stubbing out the WebGL contexts; the 3D
+// closet gets a smoke test (WebGL output is not pixel-stable enough for
+// snapshot comparison).
+const disableWebGL = () => {
+  const original = HTMLCanvasElement.prototype.getContext;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (HTMLCanvasElement.prototype as any).getContext = function (
+    type: string,
+    ...args: unknown[]
+  ) {
+    if (
+      type === 'webgl' ||
+      type === 'webgl2' ||
+      type === 'experimental-webgl'
+    ) {
+      return null;
+    }
+    return (original as any).call(this, type, ...args);
+  };
+};
+
 test.describe('Bookshelf Visual Regression', () => {
   test.beforeEach(async ({ page }) => {
-    // Pin the classic 2D shelf: the 3D closet renders via WebGL and is not
-    // pixel-stable enough for snapshot comparison.
-    await page.addInitScript(() => {
-      localStorage.setItem('ovid:shelfView', 'classic');
-    });
-
     // Mock the books API
     await page.route('**/api/v2/books', (route) => {
       route.fulfill({
@@ -77,6 +93,7 @@ test.describe('Bookshelf Visual Regression', () => {
   });
 
   test('bookshelf layout - books aligned on shelves', async ({ page }) => {
+    await page.addInitScript(disableWebGL);
     await page.goto('/');
     // Wait for books to render (opacity transition)
     await page.waitForTimeout(1000);
@@ -91,6 +108,7 @@ test.describe('Bookshelf Visual Regression', () => {
   test('book spine positions relative to shelf background', async ({
     page,
   }) => {
+    await page.addInitScript(disableWebGL);
     await page.goto('/');
     await page.waitForTimeout(1000);
 
@@ -105,6 +123,7 @@ test.describe('Bookshelf Visual Regression', () => {
   });
 
   test('full page screenshot', async ({ page }) => {
+    await page.addInitScript(disableWebGL);
     await page.goto('/');
     await page.waitForTimeout(1000);
 
@@ -113,34 +132,18 @@ test.describe('Bookshelf Visual Regression', () => {
     });
   });
 
-  test('3d closet view renders a WebGL canvas', async ({ page }) => {
-    await page.addInitScript(() => {
-      localStorage.setItem('ovid:shelfView', '3d');
-    });
+  test('3d closet view renders a WebGL canvas by default', async ({ page }) => {
     await page.goto('/');
 
     // The closet is lazy-loaded; wait for its canvas to appear.
     await expect(page.locator('.closet3d-root canvas')).toBeVisible({
       timeout: 15000,
     });
-    // View toggle is present and Closet is active
-    await expect(page.locator('.shelf-view-toggle button.active')).toHaveText(
-      'Closet'
-    );
   });
 
-  test('view toggle switches back to the classic shelf', async ({ page }) => {
-    await page.addInitScript(() => {
-      localStorage.setItem('ovid:shelfView', '3d');
-    });
+  test('falls back to the classic shelf without WebGL', async ({ page }) => {
+    await page.addInitScript(disableWebGL);
     await page.goto('/');
-    await expect(page.locator('.closet3d-root canvas')).toBeVisible({
-      timeout: 15000,
-    });
-
-    await page
-      .locator('.shelf-view-toggle button', { hasText: 'Classic' })
-      .click();
     await expect(
       page.locator('.bookshelf-wall:not(.closet-mode)')
     ).toBeVisible();

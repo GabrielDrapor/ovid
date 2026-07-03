@@ -17,10 +17,6 @@ const BookShelf3D = React.lazy(() => import('./shelf3d/BookShelf3D'));
 const DEFAULT_TARGET_LANGUAGE = 'zh';
 const BOOKS_PER_ROW = 8;
 
-const SHELF_VIEW_STORAGE_KEY = 'ovid:shelfView';
-
-type ShelfViewMode = '3d' | 'classic';
-
 function isWebGLAvailable(): boolean {
   try {
     const canvas = document.createElement('canvas');
@@ -58,15 +54,6 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
   );
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
   const [webglOk] = useState(isWebGLAvailable);
-  const [viewMode, setViewMode] = useState<ShelfViewMode>(() => {
-    try {
-      const saved = localStorage.getItem(SHELF_VIEW_STORAGE_KEY);
-      if (saved === '3d' || saved === 'classic') return saved;
-    } catch {
-      /* storage unavailable */
-    }
-    return window.innerWidth <= 768 ? 'classic' : '3d';
-  });
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showHelpMenu, setShowHelpMenu] = useState(false);
   const helpRef = useRef<HTMLDivElement>(null);
@@ -203,16 +190,9 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  const use3D = viewMode === '3d' && webglOk;
-
-  const switchView = (mode: ShelfViewMode) => {
-    setViewMode(mode);
-    try {
-      localStorage.setItem(SHELF_VIEW_STORAGE_KEY, mode);
-    } catch {
-      /* storage unavailable */
-    }
-  };
+  // The 3D closet is the shelf view; the classic 2D wall remains only as a
+  // fallback for browsers without WebGL.
+  const use3D = webglOk;
 
   // Dynamically compute shelf positions based on background-size: cover scaling
   useEffect(() => {
@@ -931,28 +911,6 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                     onDelete={handleDeleteBook}
                   />
                 </Suspense>
-              )}
-              {webglOk && (
-                <div
-                  className="shelf-view-toggle"
-                  role="group"
-                  aria-label="Shelf view"
-                >
-                  <button
-                    type="button"
-                    className={use3D ? 'active' : ''}
-                    onClick={() => switchView('3d')}
-                  >
-                    Closet
-                  </button>
-                  <button
-                    type="button"
-                    className={!use3D ? 'active' : ''}
-                    onClick={() => switchView('classic')}
-                  >
-                    Classic
-                  </button>
-                </div>
               )}
               {!use3D && row1Books.length > 0 && (
                 <div

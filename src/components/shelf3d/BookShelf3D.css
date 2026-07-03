@@ -7,6 +7,8 @@
 
 .closet3d-root canvas {
   display: block;
+  /* the canvas owns all touch gestures (drag pan / pinch zoom) */
+  touch-action: none;
 }
 
 /* soft vignette over the scene */

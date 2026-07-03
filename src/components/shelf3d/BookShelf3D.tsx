@@ -6,6 +6,7 @@ import React, {
   useState,
 } from 'react';
 import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { Canvas, useFrame, useThree, ThreeEvent } from '@react-three/fiber';
 import { Book, UserBookProgress, TranslationProgress } from './types';
 import {
@@ -27,7 +28,6 @@ import {
 } from './fallbackTextures';
 import {
   makeCavityShadeCanvas,
-  makeFloorCanvas,
   makePanelCanvas,
   makeWoodCanvas,
   seededRandom,
@@ -104,6 +104,8 @@ interface BookMeshProps {
   anySelected: boolean;
   onSelect: (uuid: string) => void;
   onSpineRatio: (uuid: string, ratio: number) => void;
+  /** Accumulated touch-drag distance; large values suppress the tap-click. */
+  dragDist: React.MutableRefObject<number>;
 }
 
 function BookMesh({
@@ -114,6 +116,7 @@ function BookMesh({
   anySelected,
   onSelect,
   onSpineRatio,
+  dragDist,
 }: BookMeshProps) {
   const group = useRef<THREE.Group>(null);
   const mesh = useRef<THREE.Mesh>(null);
@@ -246,15 +249,25 @@ function BookMesh({
   const handleClick = useCallback(
     (e: ThreeEvent<MouseEvent>) => {
       e.stopPropagation();
+      // A touch pan that ends on a book must not count as a tap.
+      if (dragDist.current > 12) return;
       onSelect(book.uuid);
     },
-    [book.uuid, onSelect]
+    [book.uuid, onSelect, dragDist]
   );
+
+  // Slightly rounded edges — hardcovers aren't razor-sharp boxes.
+  const geometry = useMemo(
+    () => new RoundedBoxGeometry(width, bookHeight, BOOK_DEPTH, 2, 0.022),
+    [width, bookHeight]
+  );
+  useEffect(() => () => geometry.dispose(), [geometry]);
 
   return (
     <group ref={group}>
       <mesh
         ref={mesh}
+        geometry={geometry}
         castShadow
         receiveShadow
         onClick={handleClick}
@@ -264,7 +277,6 @@ function BookMesh({
         }}
         onPointerOut={() => setHovered(false)}
       >
-        <boxGeometry args={[width, bookHeight, BOOK_DEPTH]} />
         {/* +x: front cover (faces camera when the book turns out) */}
         <meshStandardMaterial
           attach="material-0"
@@ -336,6 +348,8 @@ function Bookcase({
     t.colorSpace = THREE.SRGBColorSpace;
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
     t.anisotropy = 8;
+    // Tile the grain along long boards instead of stretching one plank.
+    t.repeat.set(2.6, 1);
     return t;
   }, []);
   const sideTex = useMemo(() => {
@@ -348,6 +362,18 @@ function Bookcase({
     t.rotation = Math.PI / 2;
     return t;
   }, []);
+  // The exposed back of the case: vertical planks with seams, like the
+  // veneer back panels of real wall units.
+  const backTex = useMemo(() => {
+    const t = new THREE.CanvasTexture(makePanelCanvas('ovid-back'));
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.anisotropy = 8;
+    return t;
+  }, []);
+  useEffect(() => {
+    backTex.repeat.set(width / 3.2, (height + boardT) / 3.2);
+  }, [backTex, width, height, boardT]);
   const cavityTex = useMemo(
     () => new THREE.CanvasTexture(makeCavityShadeCanvas()),
     []
@@ -356,9 +382,10 @@ function Bookcase({
     () => () => {
       boardTex.dispose();
       sideTex.dispose();
+      backTex.dispose();
       cavityTex.dispose();
     },
-    [boardTex, sideTex, cavityTex]
+    [boardTex, sideTex, backTex, cavityTex]
   );
 
   return (
@@ -366,7 +393,7 @@ function Bookcase({
       {/* back panel — the case's own back, covering the wall behind it */}
       <mesh position={[0, midY, -BOOK_DEPTH / 2 - 0.09]} receiveShadow>
         <boxGeometry args={[width, height + boardT, 0.06]} />
-        <meshStandardMaterial map={boardTex} color="#b9a897" roughness={0.92} />
+        <meshStandardMaterial map={backTex} color="#a2907e" roughness={0.88} />
       </mesh>
       {/* end stiles flush against the side walls */}
       {[-1, 1].map((side) => (
@@ -428,237 +455,69 @@ function Bookcase({
   );
 }
 
-/** Repeating canvas texture with proper color space and wrapping. */
-function useTiledTexture(
-  make: () => HTMLCanvasElement,
-  repeatX: number,
-  repeatY: number
-): THREE.Texture {
-  const tex = useMemo(() => {
-    const t = new THREE.CanvasTexture(make());
-    t.colorSpace = THREE.SRGBColorSpace;
-    t.wrapS = t.wrapT = THREE.RepeatWrapping;
-    t.anisotropy = 8;
-    return t;
-    // eslint-disable-next-line
-  }, []);
-  useEffect(() => {
-    tex.repeat.set(repeatX, repeatY);
-  }, [tex, repeatX, repeatY]);
-  useEffect(() => () => tex.dispose(), [tex]);
-  return tex;
-}
-
 /**
- * Walk-in closet room around the bookcase: paneled walls on all sides,
- * floorboards and a ceiling, so the view never falls off into a void.
- */
-function ClosetRoom({
-  totalRows,
-  roomW,
-}: {
-  totalRows: number;
-  roomW: number;
-}) {
-  const rows = rowYCenters(totalRows);
-  const boardT = 0.09;
-  const headroom = 0.18;
-  const topY = rows[0] + BOOK_HEIGHT / 2 + headroom + boardT;
-  const bottomY = rows[rows.length - 1] - BOOK_HEIGHT / 2 - boardT;
-
-  const floorY = bottomY;
-  // Built-in: the ceiling rests right on the case's top cap.
-  const ceilY = topY + 0.02;
-  const roomH = ceilY - floorY;
-  const zBack = -1.35;
-  const zFront = 13.5;
-  const zMid = (zBack + zFront) / 2;
-  const roomD = zFront - zBack;
-  // Side moldings start in front of the case so they don't clip through it.
-  const zTrim = 0.6;
-  const zTrimMid = (zTrim + zFront) / 2;
-  const trimD = zFront - zTrim;
-
-  const backTex = useTiledTexture(
-    () => makePanelCanvas('ovid-wall-back'),
-    roomW / 4,
-    roomH / 4
-  );
-  const leftTex = useTiledTexture(
-    () => makePanelCanvas('ovid-wall-left'),
-    roomD / 4,
-    roomH / 4
-  );
-  const rightTex = useTiledTexture(
-    () => makePanelCanvas('ovid-wall-right'),
-    roomD / 4,
-    roomH / 4
-  );
-  const floorTex = useTiledTexture(
-    () => makeFloorCanvas('ovid-floor'),
-    roomW / 4,
-    roomD / 4
-  );
-
-  const wallY = floorY + roomH / 2;
-  const WALL_TINT = '#8d7e6f'; // walls sit back tonally so the case pops
-
-  return (
-    <group>
-      {/* back wall */}
-      <mesh position={[0, wallY, zBack]} receiveShadow>
-        <planeGeometry args={[roomW, roomH]} />
-        <meshStandardMaterial map={backTex} color={WALL_TINT} roughness={0.9} />
-      </mesh>
-      {/* side walls */}
-      <mesh
-        position={[-roomW / 2, wallY, zMid]}
-        rotation={[0, Math.PI / 2, 0]}
-        receiveShadow
-      >
-        <planeGeometry args={[roomD, roomH]} />
-        <meshStandardMaterial map={leftTex} color={WALL_TINT} roughness={0.9} />
-      </mesh>
-      <mesh
-        position={[roomW / 2, wallY, zMid]}
-        rotation={[0, -Math.PI / 2, 0]}
-        receiveShadow
-      >
-        <planeGeometry args={[roomD, roomH]} />
-        <meshStandardMaterial
-          map={rightTex}
-          color={WALL_TINT}
-          roughness={0.9}
-        />
-      </mesh>
-      {/* floor — low roughness for a subtle sheen under the lights */}
-      <mesh
-        position={[0, floorY, zMid]}
-        rotation={[-Math.PI / 2, 0, 0]}
-        receiveShadow
-      >
-        <planeGeometry args={[roomW, roomD]} />
-        <meshStandardMaterial
-          map={floorTex}
-          roughness={0.34}
-          metalness={0.16}
-        />
-      </mesh>
-      {/* ceiling */}
-      <mesh position={[0, ceilY, zMid]} rotation={[Math.PI / 2, 0, 0]}>
-        <planeGeometry args={[roomW, roomD]} />
-        <meshStandardMaterial color="#48382a" roughness={0.95} />
-      </mesh>
-      {/* crown molding along the side walls (the case meets the ceiling) */}
-      {[-1, 1].map((side) => (
-        <mesh
-          key={`crown-${side}`}
-          position={[side * (roomW / 2 - 0.04), ceilY - 0.07, zTrimMid]}
-        >
-          <boxGeometry args={[0.07, 0.14, trimD]} />
-          <meshStandardMaterial color="#3f2b19" roughness={0.7} />
-        </mesh>
-      ))}
-      {/* baseboards along the side walls */}
-      {[-1, 1].map((side) => (
-        <mesh
-          key={side}
-          position={[side * (roomW / 2 - 0.03), floorY + 0.08, zTrimMid]}
-        >
-          <boxGeometry args={[0.05, 0.16, trimD]} />
-          <meshStandardMaterial color="#3a2817" roughness={0.7} />
-        </mesh>
-      ))}
-      {/* soft ceiling glow pooling down the walls */}
-      <pointLight
-        position={[-roomW * 0.28, ceilY - 0.3, 2]}
-        decay={0}
-        intensity={0.3}
-        color="#efe0cb"
-      />
-      <pointLight
-        position={[roomW * 0.28, ceilY - 0.3, 2]}
-        decay={0}
-        intensity={0.3}
-        color="#efe0cb"
-      />
-      {/* washers brightening the upper side walls and ceiling edge */}
-      <pointLight
-        position={[-(roomW / 2 - 0.7), ceilY - 0.5, 3]}
-        decay={0}
-        intensity={0.14}
-        color="#ece0cd"
-      />
-      <pointLight
-        position={[roomW / 2 - 0.7, ceilY - 0.5, 3]}
-        decay={0}
-        intensity={0.14}
-        color="#ece0cd"
-      />
-      <pointLight
-        position={[0, floorY + 1.2, 9]}
-        decay={0}
-        intensity={0.12}
-        color="#eaddca"
-      />
-    </group>
-  );
-}
-
-/**
- * Mouse-move gaze + wheel dolly. Frames the content bays on load; panning
- * with the pointer can reach the ring of empty bays around the content but
- * never past the closet's walls.
+ * Camera control. The view is always clamped to the wall: panning stops at
+ * the wall edges and zooming out stops once the wall fills the frame.
+ * Desktop: mouse-move gaze + wheel dolly. Touch: one-finger drag pans,
+ * two-finger pinch zooms; small taps still select books.
  */
 function CameraRig({
   focused,
   contentW,
   contentH,
-  roomW,
-  wallH,
-  centerY,
+  wallW,
+  caseTop,
+  caseBottom,
+  dragDist,
 }: {
   focused: boolean;
   contentW: number;
   contentH: number;
-  roomW: number;
-  wallH: number;
-  centerY: number;
+  wallW: number;
+  caseTop: number;
+  caseBottom: number;
+  dragDist: React.MutableRefObject<number>;
 }) {
   const { camera, gl, size } = useThree();
   const zoom = useRef<number | null>(null);
   const userZoomed = useRef(false);
+  const touchMode = useRef(false);
+  const pan = useRef({ x: 0, y: (caseTop + caseBottom) / 2 });
+  const pointers = useRef(new Map<number, { x: number; y: number }>());
+  const pinchDist = useRef(0);
 
   const tanHalf = Math.tan((38 / 2) * (Math.PI / 180));
   const aspect = size.width / size.height;
+  const wallH = caseTop - caseBottom;
+  const wallMidY = (caseTop + caseBottom) / 2;
+
+  // Zooming out stops once the wall fills the frame in one dimension.
+  const maxZoom = useMemo(() => {
+    if (!wallW) return 8;
+    const zForWidth = wallW / 2 / (tanHalf * aspect);
+    const zForHeight = wallH / 2 / tanHalf;
+    return Math.max(MIN_ZOOM + 0.5, Math.min(zForWidth, zForHeight));
+  }, [wallW, wallH, tanHalf, aspect]);
+  const maxZoomRef = useRef(maxZoom);
+  maxZoomRef.current = maxZoom;
 
   // Distance at which the content bays fit in view, with some margin.
   const fitZ = useMemo(() => {
     if (!contentW) return 6;
     const zForWidth = (contentW / 2 + 0.55) / (tanHalf * aspect);
     const zForHeight = contentH / 2 / tanHalf + 0.9;
-    return THREE.MathUtils.clamp(Math.max(zForWidth, zForHeight), MIN_ZOOM, 11);
-  }, [contentW, contentH, tanHalf, aspect]);
-
-  // Zooming out stops roughly when the whole wall (incl. the empty ring)
-  // fills the view.
-  const maxZoom = useMemo(() => {
-    const zForWidth = (roomW / 2 + 0.2) / (tanHalf * aspect);
-    const zForHeight = wallH / 2 / tanHalf + 0.6;
     return THREE.MathUtils.clamp(
-      Math.max(zForWidth, zForHeight, fitZ + 0.8),
-      MIN_ZOOM + 1,
-      11.5
+      Math.max(zForWidth, zForHeight),
+      MIN_ZOOM,
+      maxZoom
     );
-  }, [roomW, wallH, fitZ, tanHalf, aspect]);
+  }, [contentW, contentH, tanHalf, aspect, maxZoom]);
 
   // Follow layout changes until the user takes over the wheel.
   useEffect(() => {
     if (!userZoomed.current) zoom.current = fitZ;
   }, [fitZ]);
 
-  const maxZoomRef = useRef(maxZoom);
-  maxZoomRef.current = maxZoom;
   useEffect(() => {
     const el = gl.domElement;
     const onWheel = (e: WheelEvent) => {
@@ -674,23 +533,99 @@ function CameraRig({
     return () => el.removeEventListener('wheel', onWheel);
   }, [gl]);
 
+  // Touch gestures: drag to pan, pinch to zoom. dragDist lets book meshes
+  // tell a pan apart from a tap.
+  useEffect(() => {
+    const el = gl.domElement;
+    const onPointerDown = (e: PointerEvent) => {
+      if (e.pointerType !== 'touch') return;
+      touchMode.current = true;
+      dragDist.current = 0;
+      pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pointers.current.size === 2) {
+        const [a, b] = Array.from(pointers.current.values());
+        pinchDist.current = Math.hypot(a.x - b.x, a.y - b.y);
+      }
+    };
+    const onPointerMove = (e: PointerEvent) => {
+      if (e.pointerType !== 'touch') return;
+      const prev = pointers.current.get(e.pointerId);
+      if (!prev) return;
+      const dx = e.clientX - prev.x;
+      const dy = e.clientY - prev.y;
+      pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pointers.current.size >= 2) {
+        const [a, b] = Array.from(pointers.current.values());
+        const d = Math.hypot(a.x - b.x, a.y - b.y);
+        if (pinchDist.current > 0 && d > 0) {
+          userZoomed.current = true;
+          zoom.current = THREE.MathUtils.clamp(
+            (zoom.current ?? 6) * (pinchDist.current / d),
+            MIN_ZOOM,
+            maxZoomRef.current
+          );
+        }
+        pinchDist.current = d;
+        dragDist.current += 100; // a pinch is never a tap
+        return;
+      }
+      dragDist.current += Math.abs(dx) + Math.abs(dy);
+      // Convert pixel deltas to world units at the wall plane.
+      const worldPerPx =
+        (2 * Math.tan((38 / 2) * (Math.PI / 180)) * camera.position.z) /
+        size.height;
+      pan.current.x -= dx * worldPerPx;
+      pan.current.y += dy * worldPerPx;
+    };
+    const onPointerUp = (e: PointerEvent) => {
+      if (e.pointerType !== 'touch') return;
+      pointers.current.delete(e.pointerId);
+      if (pointers.current.size < 2) pinchDist.current = 0;
+    };
+    el.addEventListener('pointerdown', onPointerDown);
+    el.addEventListener('pointermove', onPointerMove);
+    el.addEventListener('pointerup', onPointerUp);
+    el.addEventListener('pointercancel', onPointerUp);
+    return () => {
+      el.removeEventListener('pointerdown', onPointerDown);
+      el.removeEventListener('pointermove', onPointerMove);
+      el.removeEventListener('pointerup', onPointerUp);
+      el.removeEventListener('pointercancel', onPointerUp);
+    };
+  }, [gl, camera, size, dragDist]);
+
   useFrame((state, delta) => {
     const k = 1 - Math.exp(-delta * 4);
-    // While a book is presented, quiet the gaze so the pose feels stable.
-    const gaze = focused ? 0.18 : 1;
-    // Pan range: far enough to reach the empty ring, never past the walls.
-    const xRange = Math.max(1.2, roomW / 2 - 2.1);
-    const yRange = Math.max(0.45, wallH / 2 - 1.15);
-    const tx = state.pointer.x * xRange * gaze;
-    const ty = centerY + state.pointer.y * yRange * gaze;
+    const z = zoom.current ?? fitZ;
+    // Clamp the pan so the frustum never leaves the wall.
+    const visHalfH = tanHalf * z;
+    const visHalfW = visHalfH * aspect;
+    const xMax = Math.max(0, wallW / 2 - visHalfW);
+    let yMin = caseBottom + visHalfH;
+    let yMax = caseTop - visHalfH;
+    if (yMin > yMax) yMin = yMax = wallMidY;
+
+    let tx: number;
+    let ty: number;
+    if (touchMode.current) {
+      pan.current.x = THREE.MathUtils.clamp(pan.current.x, -xMax, xMax);
+      pan.current.y = THREE.MathUtils.clamp(pan.current.y, yMin, yMax);
+      tx = pan.current.x;
+      ty = pan.current.y;
+    } else {
+      // While a book is presented, quiet the gaze so the pose feels stable.
+      const gaze = focused ? 0.18 : 1;
+      tx = state.pointer.x * xMax * gaze;
+      ty = THREE.MathUtils.clamp(
+        wallMidY + state.pointer.y * ((yMax - yMin) / 2) * gaze,
+        yMin,
+        yMax
+      );
+    }
     camera.position.x += (tx - camera.position.x) * k;
     camera.position.y += (ty - camera.position.y) * k;
-    camera.position.z += ((zoom.current ?? fitZ) - camera.position.z) * k;
-    camera.lookAt(
-      camera.position.x * 1.12,
-      centerY + (camera.position.y - centerY) * 0.8,
-      0
-    );
+    camera.position.z += (z - camera.position.z) * k;
+    camera.lookAt(camera.position.x, camera.position.y, 0);
   });
 
   return null;
@@ -730,12 +665,12 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
     wallWidth,
   } = useMemo(() => layoutBooks(books, spineRatios), [books, spineRatios]);
   const rowCenters = useMemo(() => rowYCenters(totalRows), [totalRows]);
-  const roomW = wallWidth;
   const caseTop =
     totalRows > 0 ? rowCenters[0] + BOOK_HEIGHT / 2 + 0.18 + 0.09 : 3;
-  // Content rows sit in the middle of the ring, so their center is y = 0.
-  const contentMidY =
-    contentRows > 0 ? (rowCenters[1] + rowCenters[totalRows - 2]) / 2 : 0;
+  const caseBottom =
+    totalRows > 0 ? rowCenters[totalRows - 1] - BOOK_HEIGHT / 2 - 0.09 : -3;
+  // Books ignore taps that were actually the tail end of a touch pan.
+  const dragDist = useRef(0);
   const bookByUuid = useMemo(
     () => new Map(books.map((b) => [b.uuid, b])),
     [books]
@@ -773,10 +708,11 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
           gl.toneMapping = THREE.ACESFilmicToneMapping;
           gl.toneMappingExposure = 1.15;
         }}
-        onPointerMissed={() => setSelectedUuid(null)}
+        onPointerMissed={() => {
+          if (dragDist.current <= 12) setSelectedUuid(null);
+        }}
       >
         <color attach="background" args={[ROOM]} />
-        <fog attach="fog" args={[ROOM, 12, 40]} />
         <ambientLight intensity={0.62} color="#f4ede3" />
         {/* key light just below the ceiling, the only shadow caster */}
         <spotLight
@@ -804,10 +740,7 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
         />
 
         {totalRows > 0 && (
-          <>
-            <ClosetRoom totalRows={totalRows} roomW={roomW} />
-            <Bookcase totalRows={totalRows} totalCols={totalCols} />
-          </>
+          <Bookcase totalRows={totalRows} totalCols={totalCols} />
         )}
 
         {placements.map((p) => {
@@ -824,6 +757,7 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
               anySelected={selectedUuid !== null}
               onSelect={setSelectedUuid}
               onSpineRatio={handleSpineRatio}
+              dragDist={dragDist}
             />
           );
         })}
@@ -832,9 +766,10 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
           focused={selectedUuid !== null}
           contentW={contentCols * BAY_PITCH}
           contentH={contentRows * ROW_HEIGHT}
-          roomW={roomW}
-          wallH={totalRows * ROW_HEIGHT}
-          centerY={contentMidY}
+          wallW={wallWidth}
+          caseTop={caseTop}
+          caseBottom={caseBottom}
+          dragDist={dragDist}
         />
       </Canvas>
 

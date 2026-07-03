@@ -57,7 +57,7 @@ TypeScript-first across frontend, backend, CLI, and translator service.
 - `src/worker/credits.ts` — Credit balance, Stripe checkout/webhooks
 - `src/worker/db.ts` — Database helpers, migrations
 - `src/components/BilingualReaderV2.tsx` — Main reader (scroll nav, paragraph toggle, progress)
-- `src/components/BookShelf.tsx` — Library UI (spines, covers, previews); hosts the Closet/Classic view toggle
+- `src/components/BookShelf.tsx` — Library UI: hosts the 3D closet (default) with the classic 2D wall as no-WebGL fallback
 - `src/components/shelf3d/BookShelf3D.tsx` — 3D closet view (three + @react-three/fiber, lazy-loaded): gaze/zoom camera, click-to-fly-out book with info panel. Requires CORS on the R2 assets domain (configured on bucket `ovid`)
 - `src/components/shelf3d/layout.ts` — Pure shelf-packing math for the 3D view (adaptive case width, unit-tested)
 - `src/components/ErrorBoundary.tsx` — Error boundary wrapper

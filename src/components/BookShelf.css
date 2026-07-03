@@ -1927,41 +1927,6 @@
   background: #171210;
 }
 
-.shelf-view-toggle {
-  position: absolute;
-  top: 16px;
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
-  gap: 2px;
-  padding: 3px;
-  border-radius: 999px;
-  background: rgba(20, 15, 12, 0.6);
-  border: 1px solid rgba(255, 235, 205, 0.16);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  z-index: 70;
-}
-
-.shelf-view-toggle button {
-  border: none;
-  background: none;
-  color: rgba(244, 234, 217, 0.6);
-  font-size: 12px;
-  letter-spacing: 0.06em;
-  padding: 6px 14px;
-  border-radius: 999px;
-  cursor: pointer;
-  transition:
-    background 0.2s ease,
-    color 0.2s ease;
-}
-
-.shelf-view-toggle button.active {
-  background: rgba(244, 234, 217, 0.92);
-  color: #241a10;
-}
-
 .shelf-actions--floating {
   top: 14px;
   right: 18px;

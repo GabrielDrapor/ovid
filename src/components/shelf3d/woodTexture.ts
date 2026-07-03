@@ -65,8 +65,8 @@ export function makeWoodCanvas(
     const amp = 1 + rand() * 4;
     const wl = 90 + rand() * 260;
     const phase = rand() * Math.PI * 2;
-    const alpha = 0.03 + rand() * 0.09;
-    const light = rand() > 0.72;
+    const alpha = 0.05 + rand() * 0.12;
+    const light = rand() > 0.68;
     ctx.strokeStyle = light
       ? `rgba(158,118,86,${alpha})`
       : `rgba(30,18,11,${alpha})`;
