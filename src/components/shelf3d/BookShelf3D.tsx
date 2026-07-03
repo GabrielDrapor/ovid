@@ -9,15 +9,22 @@ import * as THREE from 'three';
 import { Canvas, useFrame, useThree, ThreeEvent } from '@react-three/fiber';
 import { Book, UserBookProgress, TranslationProgress } from './types';
 import {
+  BAY_PITCH,
   BOOK_DEPTH,
   BOOK_HEIGHT,
   DEFAULT_SPINE_RATIO,
+  DIVIDER_T,
   ROW_HEIGHT,
   clampSpineRatio,
   layoutBooks,
   rowYCenters,
 } from './layout';
-import { makeCoverCanvas, makeSpineCanvas } from './fallbackTextures';
+import {
+  averageColor,
+  makeCoverCanvas,
+  makePageEdgesCanvas,
+  makeSpineCanvas,
+} from './fallbackTextures';
 import {
   makeCavityShadeCanvas,
   makeFloorCanvas,
@@ -38,10 +45,9 @@ interface BookShelf3DProps {
 }
 
 const ROOM = '#171210';
-const PAGES = '#efe5cc';
+const CLOTH_FALLBACK = '#3a3026';
 
 const MIN_ZOOM = 2.5;
-const MAX_ZOOM = 9;
 
 /** Loads an image texture, falling back to generated canvas artwork. */
 function useArtTexture(
@@ -128,19 +134,38 @@ function BookMesh({
   // Keep the bottom edge on the board regardless of height.
   const shelfY = position[1] - (BOOK_HEIGHT - bookHeight) / 2;
 
+  // Cloth color (back cover, page rims) sampled from the spine art.
+  const [cloth, setCloth] = useState(CLOTH_FALLBACK);
+
   const spineTex = useArtTexture(
     book.book_spine_img_url,
     () => makeSpineCanvas(book.original_title || book.title),
     (tex) => {
-      const img = tex.image as { width?: number; height?: number };
+      const img = tex.image as HTMLImageElement;
       if (img?.width && img?.height) {
         onSpineRatio(book.uuid, clampSpineRatio(img.width / img.height));
+        setCloth(averageColor(img, CLOTH_FALLBACK));
       }
     }
   );
   const coverTex = useArtTexture(book.book_cover_img_url, () =>
     makeCoverCanvas(book.original_title || book.title, book.author)
   );
+  const pagesTex = useMemo(() => {
+    const t = new THREE.CanvasTexture(makePageEdgesCanvas(cloth));
+    t.colorSpace = THREE.SRGBColorSpace;
+    return t;
+  }, [cloth]);
+  useEffect(() => () => pagesTex.dispose(), [pagesTex]);
+  // Base tints per material slot; the dim animation multiplies these instead
+  // of overwriting them (overwriting is what used to bleach the back cover).
+  const baseColors = useMemo(() => {
+    const white = new THREE.Color('#ffffff');
+    const clothC = new THREE.Color(cloth);
+    // [cover, back cover, top, bottom, spine, fore edge]
+    return [white, clothC, white, white, white, white];
+  }, [cloth]);
+  const dim = useRef(1);
 
   useEffect(() => {
     document.body.style.cursor = hovered ? 'pointer' : '';
@@ -203,9 +228,15 @@ function BookMesh({
       else if (processing) {
         target = 0.55 + Math.sin(state.clock.elapsedTime * 2.5) * 0.12;
       }
-      for (const mat of m.material as THREE.MeshStandardMaterial[]) {
-        const v = mat.color.r + (target - mat.color.r) * k;
-        mat.color.setScalar(v);
+      dim.current += (target - dim.current) * k;
+      const mats = m.material as THREE.MeshStandardMaterial[];
+      for (let i = 0; i < mats.length; i++) {
+        const base = baseColors[i] ?? baseColors[0];
+        mats[i].color.setRGB(
+          base.r * dim.current,
+          base.g * dim.current,
+          base.b * dim.current
+        );
       }
     }
   });
@@ -238,21 +269,21 @@ function BookMesh({
           map={coverTex}
           roughness={0.62}
         />
-        {/* -x: back cover */}
+        {/* -x: back cover, cloth colored to match the spine art */}
         <meshStandardMaterial
           attach="material-1"
-          color="#3a3026"
-          roughness={0.7}
+          color={cloth}
+          roughness={0.68}
         />
-        {/* +y / -y: page block */}
+        {/* +y / -y: page block with striations and a cloth rim */}
         <meshStandardMaterial
           attach="material-2"
-          color={PAGES}
+          map={pagesTex}
           roughness={0.9}
         />
         <meshStandardMaterial
           attach="material-3"
-          color={PAGES}
+          map={pagesTex}
           roughness={0.9}
         />
         {/* +z: spine, -z: fore edge */}
@@ -263,7 +294,7 @@ function BookMesh({
         />
         <meshStandardMaterial
           attach="material-5"
-          color={PAGES}
+          map={pagesTex}
           roughness={0.9}
         />
       </mesh>
@@ -271,18 +302,16 @@ function BookMesh({
   );
 }
 
-/** Built-in wall unit: shelves spanning the full room width, floor to ceiling. */
+/** Built-in wall unit: a uniform grid of bays, floor to ceiling. */
 function Bookcase({
   totalRows,
-  roomW,
-  contentWidth,
+  totalCols,
 }: {
   totalRows: number;
-  roomW: number;
-  contentWidth: number;
+  totalCols: number;
 }) {
   const rows = rowYCenters(totalRows);
-  const width = roomW;
+  const width = totalCols * BAY_PITCH + DIVIDER_T;
   const boardT = 0.09;
   const depth = BOOK_DEPTH + 0.3;
   const headroom = 0.18;
@@ -291,20 +320,14 @@ function Bookcase({
   const height = topY - bottomY;
   const midY = (topY + bottomY) / 2;
 
-  // Vertical dividers: one pair framing the content bay, then more toward
-  // the walls so wide side sections split into believable bays.
+  // A divider on every internal bay boundary — all bays the same width.
   const dividerXs = useMemo(() => {
     const xs: number[] = [];
-    let x = contentWidth / 2 + 0.1;
-    if (width / 2 - x > 0.5) {
-      xs.push(x);
-      while (width / 2 - x > 2.7) {
-        x += 2.2;
-        xs.push(x);
-      }
+    for (let i = 1; i < totalCols; i++) {
+      xs.push((i - totalCols / 2) * BAY_PITCH);
     }
     return xs;
-  }, [contentWidth, width]);
+  }, [totalCols]);
 
   const boardTex = useMemo(() => {
     const t = new THREE.CanvasTexture(makeWoodCanvas('ovid-boards'));
@@ -356,19 +379,17 @@ function Bookcase({
         </mesh>
       ))}
       {/* vertical dividers between bays */}
-      {dividerXs.map((x) =>
-        [-1, 1].map((side) => (
-          <mesh
-            key={`div-${side * x}`}
-            position={[side * x, midY + boardT / 2, -0.03]}
-            castShadow
-            receiveShadow
-          >
-            <boxGeometry args={[0.11, height + boardT, depth - 0.06]} />
-            <meshStandardMaterial map={sideTex} roughness={0.8} />
-          </mesh>
-        ))
-      )}
+      {dividerXs.map((x) => (
+        <mesh
+          key={`div-${x.toFixed(3)}`}
+          position={[x, midY + boardT / 2, -0.03]}
+          castShadow
+          receiveShadow
+        >
+          <boxGeometry args={[DIVIDER_T, height + boardT, depth - 0.06]} />
+          <meshStandardMaterial map={sideTex} roughness={0.8} />
+        </mesh>
+      ))}
       {/* top cap meets the ceiling */}
       <mesh position={[0, topY + boardT / 2, -0.02]} castShadow receiveShadow>
         <boxGeometry args={[width, boardT, depth]} />
@@ -524,7 +545,7 @@ function ClosetRoom({
       {/* ceiling */}
       <mesh position={[0, ceilY, zMid]} rotation={[Math.PI / 2, 0, 0]}>
         <planeGeometry args={[roomW, roomD]} />
-        <meshStandardMaterial color="#3c2e21" roughness={0.95} />
+        <meshStandardMaterial color="#48382a" roughness={0.95} />
       </mesh>
       {/* crown molding along the side walls (the case meets the ceiling) */}
       {[-1, 1].map((side) => (
@@ -582,41 +603,60 @@ function ClosetRoom({
   );
 }
 
-/** Mouse-move gaze + wheel dolly, framing the bookcase on load. */
+/**
+ * Mouse-move gaze + wheel dolly. Frames the content bays on load; panning
+ * with the pointer can reach the ring of empty bays around the content but
+ * never past the closet's walls.
+ */
 function CameraRig({
   focused,
-  caseWidth,
-  rowCount,
+  contentW,
+  contentH,
+  roomW,
+  wallH,
   centerY,
 }: {
   focused: boolean;
-  caseWidth: number;
-  rowCount: number;
+  contentW: number;
+  contentH: number;
+  roomW: number;
+  wallH: number;
   centerY: number;
 }) {
   const { camera, gl, size } = useThree();
   const zoom = useRef<number | null>(null);
   const userZoomed = useRef(false);
 
-  // Distance at which the whole bookcase fits in view, with some margin.
+  const tanHalf = Math.tan((38 / 2) * (Math.PI / 180));
+  const aspect = size.width / size.height;
+
+  // Distance at which the content bays fit in view, with some margin.
   const fitZ = useMemo(() => {
-    if (!caseWidth || !rowCount) return 6;
-    const tanHalf = Math.tan((38 / 2) * (Math.PI / 180));
-    const aspect = size.width / size.height;
-    const zForWidth = (caseWidth / 2 + 0.75) / (tanHalf * aspect);
-    const zForHeight = (rowCount * ROW_HEIGHT) / 2 / tanHalf + 0.9;
+    if (!contentW) return 6;
+    const zForWidth = (contentW / 2 + 0.55) / (tanHalf * aspect);
+    const zForHeight = contentH / 2 / tanHalf + 0.9;
+    return THREE.MathUtils.clamp(Math.max(zForWidth, zForHeight), MIN_ZOOM, 11);
+  }, [contentW, contentH, tanHalf, aspect]);
+
+  // Zooming out stops roughly when the whole wall (incl. the empty ring)
+  // fills the view.
+  const maxZoom = useMemo(() => {
+    const zForWidth = (roomW / 2 + 0.2) / (tanHalf * aspect);
+    const zForHeight = wallH / 2 / tanHalf + 0.6;
     return THREE.MathUtils.clamp(
-      Math.max(zForWidth, zForHeight),
-      MIN_ZOOM,
-      MAX_ZOOM
+      Math.max(zForWidth, zForHeight, fitZ + 0.8),
+      MIN_ZOOM + 1,
+      11.5
     );
-  }, [caseWidth, rowCount, size]);
+  }, [roomW, wallH, fitZ, tanHalf, aspect]);
 
   // Follow layout changes until the user takes over the wheel.
   useEffect(() => {
     if (!userZoomed.current) zoom.current = fitZ;
   }, [fitZ]);
 
+  const maxZoomRef = useRef(maxZoom);
+  maxZoomRef.current = maxZoom;
   useEffect(() => {
     const el = gl.domElement;
     const onWheel = (e: WheelEvent) => {
@@ -625,7 +665,7 @@ function CameraRig({
       zoom.current = THREE.MathUtils.clamp(
         (zoom.current ?? 6) + e.deltaY * 0.005,
         MIN_ZOOM,
-        MAX_ZOOM
+        maxZoomRef.current
       );
     };
     el.addEventListener('wheel', onWheel, { passive: false });
@@ -636,14 +676,17 @@ function CameraRig({
     const k = 1 - Math.exp(-delta * 4);
     // While a book is presented, quiet the gaze so the pose feels stable.
     const gaze = focused ? 0.18 : 1;
-    const tx = state.pointer.x * 1.55 * gaze;
-    const ty = centerY + state.pointer.y * 0.5 * gaze;
+    // Pan range: far enough to reach the empty ring, never past the walls.
+    const xRange = Math.max(1.2, roomW / 2 - 2.1);
+    const yRange = Math.max(0.45, wallH / 2 - 1.15);
+    const tx = state.pointer.x * xRange * gaze;
+    const ty = centerY + state.pointer.y * yRange * gaze;
     camera.position.x += (tx - camera.position.x) * k;
     camera.position.y += (ty - camera.position.y) * k;
     camera.position.z += ((zoom.current ?? fitZ) - camera.position.z) * k;
     camera.lookAt(
-      camera.position.x * 1.35,
-      centerY + (camera.position.y - centerY) * 0.75,
+      camera.position.x * 1.12,
+      centerY + (camera.position.y - centerY) * 0.8,
       0
     );
   });
@@ -676,22 +719,21 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
     });
   }, []);
 
-  const { placements, rowCount, caseWidth } = useMemo(
-    () => layoutBooks(books, spineRatios),
-    [books, spineRatios]
-  );
-  // The wall unit runs floor to ceiling with spare rows around the content,
-  // like a closet with room to grow.
-  const totalRows = rowCount > 0 ? Math.max(4, rowCount + 2) : 0;
-  const contentStart = Math.floor((totalRows - rowCount) / 2);
+  const {
+    placements,
+    contentRows,
+    contentCols,
+    totalRows,
+    totalCols,
+    wallWidth,
+  } = useMemo(() => layoutBooks(books, spineRatios), [books, spineRatios]);
   const rowCenters = useMemo(() => rowYCenters(totalRows), [totalRows]);
-  const roomW = Math.max(caseWidth + 4.5, 9.5);
+  const roomW = wallWidth;
   const caseTop =
     totalRows > 0 ? rowCenters[0] + BOOK_HEIGHT / 2 + 0.18 + 0.09 : 3;
+  // Content rows sit in the middle of the ring, so their center is y = 0.
   const contentMidY =
-    rowCount > 0
-      ? (rowCenters[contentStart] + rowCenters[contentStart + rowCount - 1]) / 2
-      : 0;
+    contentRows > 0 ? (rowCenters[1] + rowCenters[totalRows - 2]) / 2 : 0;
   const bookByUuid = useMemo(
     () => new Map(books.map((b) => [b.uuid, b])),
     [books]
@@ -762,18 +804,14 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
         {totalRows > 0 && (
           <>
             <ClosetRoom totalRows={totalRows} roomW={roomW} />
-            <Bookcase
-              totalRows={totalRows}
-              roomW={roomW}
-              contentWidth={caseWidth}
-            />
+            <Bookcase totalRows={totalRows} totalCols={totalCols} />
           </>
         )}
 
         {placements.map((p) => {
           const book = bookByUuid.get(p.uuid);
           if (!book) return null;
-          const y = rowCenters[contentStart + p.row];
+          const y = rowCenters[p.row + 1];
           return (
             <BookMesh
               key={p.uuid}
@@ -790,8 +828,10 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
 
         <CameraRig
           focused={selectedUuid !== null}
-          caseWidth={caseWidth}
-          rowCount={rowCount}
+          contentW={contentCols * BAY_PITCH}
+          contentH={contentRows * ROW_HEIGHT}
+          roomW={roomW}
+          wallH={totalRows * ROW_HEIGHT}
           centerY={contentMidY}
         />
       </Canvas>

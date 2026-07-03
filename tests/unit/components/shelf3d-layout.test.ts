@@ -1,7 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import {
+  BAY_INNER,
+  BAY_PITCH,
   BOOK_GAP,
   DEFAULT_SPINE_RATIO,
+  DIVIDER_T,
+  MAX_CONTENT_COLS,
   MAX_SPINE_RATIO,
   MIN_SPINE_RATIO,
   clampSpineRatio,
@@ -39,70 +43,98 @@ describe('spineWidth', () => {
   });
 });
 
-describe('layoutBooks', () => {
+describe('layoutBooks (bay grid)', () => {
   it('returns an empty layout for no books', () => {
-    const { placements, rowCount } = layoutBooks([], new Map());
-    expect(placements).toHaveLength(0);
-    expect(rowCount).toBe(0);
+    const layout = layoutBooks([], new Map());
+    expect(layout.placements).toHaveLength(0);
+    expect(layout.contentRows).toBe(0);
+    expect(layout.contentCols).toBe(0);
+    expect(layout.totalRows).toBe(0);
+    expect(layout.totalCols).toBe(0);
   });
 
-  it('puts public and user books on separate rows', () => {
-    const { placements, rowCount } = layoutBooks(
-      [book('pub-1'), book('pub-2'), book('mine-1', 7)],
-      new Map()
-    );
-    expect(rowCount).toBe(2);
-    const byUuid = new Map(placements.map((p) => [p.uuid, p]));
-    expect(byUuid.get('pub-1')!.row).toBe(0);
-    expect(byUuid.get('pub-2')!.row).toBe(0);
-    expect(byUuid.get('mine-1')!.row).toBe(1);
+  it('adds one ring of empty bays around the content', () => {
+    const layout = layoutBooks([book('a'), book('b')], new Map());
+    expect(layout.contentRows).toBe(1);
+    expect(layout.contentCols).toBe(1);
+    expect(layout.totalRows).toBe(3);
+    expect(layout.totalCols).toBe(3);
+    expect(layout.wallWidth).toBeCloseTo(3 * BAY_PITCH + DIVIDER_T);
   });
 
-  it('skips the public row entirely when there are no public books', () => {
-    const { placements, rowCount } = layoutBooks(
-      [book('mine-1', 7), book('mine-2', 7)],
-      new Map()
-    );
-    expect(rowCount).toBe(1);
-    expect(placements.every((p) => p.row === 0)).toBe(true);
-  });
-
-  it('centers each row around x = 0', () => {
-    const { placements } = layoutBooks(
-      [book('a'), book('b'), book('c')],
-      new Map()
-    );
-    const xs = placements.map((p) => p.x);
+  it('keeps a small run inside one bay, centered around the wall middle', () => {
+    const layout = layoutBooks([book('a'), book('b'), book('c')], new Map());
+    const xs = layout.placements.map((p) => p.x);
     const mid = (Math.min(...xs) + Math.max(...xs)) / 2;
     expect(mid).toBeCloseTo(0, 5);
+    // Everything fits well inside the single center bay
+    for (const p of layout.placements) {
+      expect(Math.abs(p.x) + p.width / 2).toBeLessThanOrEqual(BAY_INNER / 2);
+    }
   });
 
   it('places books side by side with the configured gap', () => {
-    const { placements } = layoutBooks([book('a'), book('b')], new Map());
-    const [a, b] = placements;
+    const layout = layoutBooks([book('a'), book('b')], new Map());
+    const [a, b] = layout.placements;
     const edgeToEdge = b.x - b.width / 2 - (a.x + a.width / 2);
     expect(edgeToEdge).toBeCloseTo(BOOK_GAP, 5);
   });
 
-  it('wraps to a new row when a shelf overflows', () => {
+  it('overflows into the next bay when one fills up', () => {
     const wide = new Map<string, number>();
     const books = Array.from({ length: 10 }, (_, i) => {
       wide.set(`b${i}`, MAX_SPINE_RATIO);
       return book(`b${i}`);
     });
-    // 10 books * 0.35 width each = 3.5 world units; force a tiny shelf
-    const { placements, rowCount } = layoutBooks(books, wide, 1.0);
-    expect(rowCount).toBeGreaterThan(1);
-    // Every placement still fits inside the shelf width
-    for (const p of placements) {
-      expect(Math.abs(p.x) + p.width / 2).toBeLessThanOrEqual(0.5 + 1e-6);
+    // 10 * 0.35 = 3.5 > BAY_INNER, so at least two bays are needed
+    const layout = layoutBooks(books, wide);
+    expect(layout.contentCols).toBeGreaterThan(1);
+    expect(layout.contentRows).toBe(1);
+    // No book crosses a divider: each stays within its bay's inner width
+    const pitch = BAY_PITCH;
+    for (const p of layout.placements) {
+      const bayIndex = Math.round(
+        p.x / pitch + (layout.totalCols % 2 === 0 ? 0.5 : 0)
+      );
+      const bayCenter =
+        (bayIndex - (layout.totalCols % 2 === 0 ? 0.5 : 0)) * pitch;
+      expect(Math.abs(p.x - bayCenter) + p.width / 2).toBeLessThanOrEqual(
+        BAY_INNER / 2 + 1e-6
+      );
     }
+  });
+
+  it('wraps to a new row past MAX_CONTENT_COLS', () => {
+    const wide = new Map<string, number>();
+    // Enough wide books to fill more than MAX_CONTENT_COLS bays
+    const perBay = Math.floor(BAY_INNER / MAX_SPINE_RATIO);
+    const count = perBay * (MAX_CONTENT_COLS + 1);
+    const books = Array.from({ length: count }, (_, i) => {
+      wide.set(`b${i}`, MAX_SPINE_RATIO);
+      return book(`b${i}`);
+    });
+    const layout = layoutBooks(books, wide);
+    expect(layout.contentCols).toBe(MAX_CONTENT_COLS);
+    expect(layout.contentRows).toBeGreaterThan(1);
+  });
+
+  it('starts user books on a fresh row', () => {
+    const layout = layoutBooks(
+      [book('pub-1'), book('pub-2'), book('mine-1', 7)],
+      new Map()
+    );
+    const byUuid = new Map(layout.placements.map((p) => [p.uuid, p]));
+    expect(byUuid.get('pub-1')!.row).toBe(0);
+    expect(byUuid.get('pub-2')!.row).toBe(0);
+    expect(byUuid.get('mine-1')!.row).toBe(1);
+    expect(layout.contentRows).toBe(2);
+    expect(layout.totalRows).toBe(4);
   });
 
   it('uses measured spine ratios for width', () => {
     const ratios = new Map([['a', 0.3]]);
-    const { placements } = layoutBooks([book('a')], ratios);
-    expect(placements[0].width).toBeCloseTo(0.3);
+    const layout = layoutBooks([book('a')], ratios);
+    expect(layout.placements[0].width).toBeCloseTo(0.3);
   });
 });
 

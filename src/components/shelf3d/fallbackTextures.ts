@@ -18,6 +18,78 @@ function shade(hex: string, amount: number): string {
   return `rgb(${r}, ${g}, ${b})`;
 }
 
+/** Average color of a loaded image, darkened a touch — used as the cloth
+ * color for a book's back cover and page-edge rims. */
+export function averageColor(
+  img: CanvasImageSource & { width: number; height: number },
+  fallback = '#3a3026'
+): string {
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = 6;
+    canvas.height = 6;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return fallback;
+    ctx.drawImage(img, 0, 0, 6, 6);
+    const d = ctx.getImageData(0, 0, 6, 6).data;
+    let r = 0,
+      g = 0,
+      b = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      r += d[i];
+      g += d[i + 1];
+      b += d[i + 2];
+    }
+    const n = d.length / 4;
+    const dim = 0.82;
+    return `rgb(${Math.round((r / n) * dim)}, ${Math.round((g / n) * dim)}, ${Math.round(
+      (b / n) * dim
+    )})`;
+  } catch {
+    return fallback;
+  }
+}
+
+/**
+ * Page-block edge texture: cream paper with fine striations (the stacked
+ * sheets) and a thin cloth-colored rim where the cover boards overhang.
+ * Striations run along the canvas's vertical axis, which matches both the
+ * top face (lines along depth) and the fore edge (lines along height).
+ */
+export function makePageEdgesCanvas(cloth: string): HTMLCanvasElement {
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 256;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return canvas;
+
+  ctx.fillStyle = '#eee2c9';
+  ctx.fillRect(0, 0, 256, 256);
+
+  // Sheet striations
+  for (let x = 0; x < 256; x += 2) {
+    const a = 0.05 + Math.abs(Math.sin(x * 12.9898)) * 0.1;
+    ctx.fillStyle =
+      x % 6 < 2 ? `rgba(120,100,70,${a})` : `rgba(255,250,236,${a})`;
+    ctx.fillRect(x, 0, 1, 256);
+  }
+  // Soft shading toward the rims
+  const shade = ctx.createLinearGradient(0, 0, 256, 0);
+  shade.addColorStop(0, 'rgba(90,70,45,0.22)');
+  shade.addColorStop(0.12, 'rgba(90,70,45,0)');
+  shade.addColorStop(0.88, 'rgba(90,70,45,0)');
+  shade.addColorStop(1, 'rgba(90,70,45,0.22)');
+  ctx.fillStyle = shade;
+  ctx.fillRect(0, 0, 256, 256);
+
+  // Cloth rim: the cover boards overhanging the page block
+  ctx.strokeStyle = cloth;
+  ctx.lineWidth = 18;
+  ctx.strokeRect(0, 0, 256, 256);
+
+  return canvas;
+}
+
 export function makeSpineCanvas(title: string): HTMLCanvasElement {
   const canvas = document.createElement('canvas');
   canvas.width = 112;

@@ -1,11 +1,24 @@
 // Pure layout math for the 3D closet view. All sizes are in world units
 // where one book is BOOK_HEIGHT tall.
+//
+// The wall is a grid of uniform bays (columns) and shelf rows. Books fill
+// bays left-to-right, top row first; the rendered wall always adds one ring
+// of empty bays around the content, so the closet looks like it has room to
+// grow no matter how many books there are.
 
 export const BOOK_HEIGHT = 1;
 export const BOOK_DEPTH = 0.7;
 export const BOOK_GAP = 0.006;
-export const SHELF_INNER_WIDTH = 6.9;
 export const ROW_HEIGHT = 1.26;
+
+/** Inner width of a single bay. */
+export const BAY_INNER = 2.35;
+/** Thickness of the vertical dividers between bays. */
+export const DIVIDER_T = 0.11;
+/** Horizontal distance between bay centers. */
+export const BAY_PITCH = BAY_INNER + DIVIDER_T;
+/** Content never grows wider than this many bays; it wraps to a new row. */
+export const MAX_CONTENT_COLS = 4;
 
 export const DEFAULT_SPINE_RATIO = 1 / 5.3;
 export const MIN_SPINE_RATIO = 0.04;
@@ -25,84 +38,135 @@ export function spineWidth(
 
 export interface PlacedBook {
   uuid: string;
-  /** Horizontal center of the book, relative to the bookcase center. */
+  /** Horizontal center of the book in wall coordinates (wall center = 0). */
   x: number;
-  /** Shelf row index, 0 = top row. */
+  /** Content row index, 0 = top content row (the empty ring is excluded). */
   row: number;
   width: number;
 }
 
 export interface ShelfLayout {
   placements: PlacedBook[];
-  rowCount: number;
-  /** Widest row's content width — the bookcase is sized to hug this. */
-  caseWidth: number;
+  /** Rows/columns actually holding books. */
+  contentRows: number;
+  contentCols: number;
+  /** Full wall grid: content plus one ring of empty bays. */
+  totalRows: number;
+  totalCols: number;
+  /** Inner width of the whole wall (totalCols bays plus dividers). */
+  wallWidth: number;
 }
 
 /**
- * Pack books onto shelves. Public books fill the top rows; user books always
- * start on a fresh row (mirroring the classic two-row shelf). Each row's
- * content is centered horizontally.
- *
- * The shelf width adapts to the collection: with only a handful of books the
- * bookcase hugs them tightly instead of leaving metres of empty board.
+ * Pack books into uniform bays. Public books fill bays first; user books
+ * always start on a fresh row. Each bay's run of books is centered within
+ * the bay.
  */
 export function layoutBooks(
   books: { uuid: string; user_id: number | null }[],
   ratios: Map<string, number>,
-  innerWidth: number = SHELF_INNER_WIDTH
+  bayInner: number = BAY_INNER,
+  maxCols: number = MAX_CONTENT_COLS
 ): ShelfLayout {
   const groups = [
     books.filter((b) => !b.user_id),
     books.filter((b) => !!b.user_id),
   ].filter((g) => g.length > 0);
 
-  // Adaptive shelf width: spread each group over as few rows as fit in
-  // innerWidth, then shrink the shelf to the width those rows actually need.
-  let effectiveWidth = 0;
-  for (const group of groups) {
-    const total =
-      group.reduce((sum, b) => sum + spineWidth(ratios.get(b.uuid)), 0) +
-      BOOK_GAP * (group.length - 1);
-    const rowsNeeded = Math.max(1, Math.ceil(total / innerWidth));
-    const perRow = total / rowsNeeded + (rowsNeeded > 1 ? 0.35 : 0);
-    effectiveWidth = Math.max(effectiveWidth, perRow);
+  interface Slot {
+    uuid: string;
+    width: number;
+    /** Center offset of the book within its bay's left-aligned run. */
+    offset: number;
+    row: number;
+    col: number;
   }
-  effectiveWidth = Math.min(Math.max(effectiveWidth, 1.2), innerWidth);
 
-  const placements: PlacedBook[] = [];
+  const slots: Slot[] = [];
   let row = 0;
-  let caseWidth = 0;
+  let col = 0;
+  let cursor = 0;
+  let maxColUsed = -1;
+  let started = false;
 
   for (const group of groups) {
-    let cursor = 0;
-    let rowStart = placements.length;
-
-    const finishRow = () => {
-      const contentWidth = cursor - BOOK_GAP;
-      caseWidth = Math.max(caseWidth, contentWidth);
-      for (let i = rowStart; i < placements.length; i++) {
-        placements[i].x -= contentWidth / 2;
-      }
-    };
-
+    if (started) {
+      // Each group (public / user books) starts on a fresh row.
+      row++;
+      col = 0;
+      cursor = 0;
+    }
     for (const book of group) {
+      started = true;
       const w = spineWidth(ratios.get(book.uuid));
-      // Epsilon keeps a row that exactly fits from wrapping on float noise.
-      if (cursor + w > effectiveWidth + 1e-6 && cursor > 0) {
-        finishRow();
-        row++;
+      // Epsilon keeps a bay that exactly fits from wrapping on float noise.
+      if (cursor + w > bayInner + 1e-6 && cursor > 0) {
+        col++;
         cursor = 0;
-        rowStart = placements.length;
+        if (col >= maxCols) {
+          col = 0;
+          row++;
+        }
       }
-      placements.push({ uuid: book.uuid, x: cursor + w / 2, row, width: w });
+      slots.push({
+        uuid: book.uuid,
+        width: w,
+        offset: cursor + w / 2,
+        row,
+        col,
+      });
+      maxColUsed = Math.max(maxColUsed, col);
       cursor += w + BOOK_GAP;
     }
-    finishRow();
-    row++;
   }
 
-  return { placements, rowCount: row, caseWidth };
+  const contentRows = slots.length > 0 ? row + 1 : 0;
+  const contentCols = slots.length > 0 ? maxColUsed + 1 : 0;
+  const totalRows = contentRows > 0 ? contentRows + 2 : 0;
+  const totalCols = contentCols > 0 ? contentCols + 2 : 0;
+  const pitch = bayInner + DIVIDER_T;
+  const wallWidth = totalCols * pitch + DIVIDER_T;
+
+  // Width of each bay's run and how many bays each row uses.
+  const runWidth = new Map<string, number>();
+  const rowBays = new Map<number, Set<number>>();
+  for (const s of slots) {
+    const key = `${s.row}:${s.col}`;
+    runWidth.set(key, Math.max(runWidth.get(key) ?? 0, s.offset + s.width / 2));
+    if (!rowBays.has(s.row)) rowBays.set(s.row, new Set());
+    rowBays.get(s.row)!.add(s.col);
+  }
+
+  const placements: PlacedBook[] = slots.map((s) => {
+    // Content col c sits at global col c+1 (ring offset).
+    const bayCenter = (s.col + 1 + 0.5 - totalCols / 2) * pitch;
+    // A row that fills several bays reads as one continuous run, so its
+    // books stay left-aligned; a lone bay looks better centered.
+    if ((rowBays.get(s.row)?.size ?? 1) > 1) {
+      return {
+        uuid: s.uuid,
+        width: s.width,
+        row: s.row,
+        x: bayCenter - bayInner / 2 + s.offset,
+      };
+    }
+    const run = runWidth.get(`${s.row}:${s.col}`) ?? 0;
+    return {
+      uuid: s.uuid,
+      width: s.width,
+      row: s.row,
+      x: bayCenter + s.offset - run / 2,
+    };
+  });
+
+  return {
+    placements,
+    contentRows,
+    contentCols,
+    totalRows,
+    totalCols,
+    wallWidth,
+  };
 }
 
 /** Vertical center of each row, rows stacked symmetrically around y = 0. */
