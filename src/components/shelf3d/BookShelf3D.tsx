@@ -271,16 +271,18 @@ function BookMesh({
   );
 }
 
-/** Wooden bookcase frame sized to the shelf rows, plus floor and back wall. */
+/** Built-in wall unit: shelves spanning the full room width, floor to ceiling. */
 function Bookcase({
-  rowCount,
-  caseWidth,
+  totalRows,
+  roomW,
+  contentWidth,
 }: {
-  rowCount: number;
-  caseWidth: number;
+  totalRows: number;
+  roomW: number;
+  contentWidth: number;
 }) {
-  const rows = rowYCenters(rowCount);
-  const width = caseWidth + 0.5;
+  const rows = rowYCenters(totalRows);
+  const width = roomW;
   const boardT = 0.09;
   const depth = BOOK_DEPTH + 0.3;
   const headroom = 0.34;
@@ -288,6 +290,21 @@ function Bookcase({
   const bottomY = rows[rows.length - 1] - BOOK_HEIGHT / 2 - boardT;
   const height = topY - bottomY;
   const midY = (topY + bottomY) / 2;
+
+  // Vertical dividers: one pair framing the content bay, then more toward
+  // the walls so wide side sections split into believable bays.
+  const dividerXs = useMemo(() => {
+    const xs: number[] = [];
+    let x = contentWidth / 2 + 0.28;
+    if (width / 2 - x > 0.5) {
+      xs.push(x);
+      while (width / 2 - x > 2.7) {
+        x += 2.2;
+        xs.push(x);
+      }
+    }
+    return xs;
+  }, [contentWidth, width]);
 
   const boardTex = useMemo(() => {
     const t = new THREE.CanvasTexture(makeWoodCanvas('ovid-boards'));
@@ -321,29 +338,43 @@ function Bookcase({
 
   return (
     <group>
-      {/* back panel — flush with the case, hidden behind the top cap */}
+      {/* back panel — the case's own back, covering the wall behind it */}
       <mesh position={[0, midY, -BOOK_DEPTH / 2 - 0.09]} receiveShadow>
-        <boxGeometry args={[width + 0.3, height, 0.06]} />
-        <meshStandardMaterial map={boardTex} color="#8a7866" roughness={0.92} />
+        <boxGeometry args={[width, height + boardT, 0.06]} />
+        <meshStandardMaterial map={boardTex} color="#ab9b8a" roughness={0.92} />
       </mesh>
-      {/* side panels — run exactly from the case bottom to the cap top */}
+      {/* end stiles flush against the side walls */}
       {[-1, 1].map((side) => (
         <mesh
           key={side}
-          position={[side * (width / 2 + 0.09), midY + boardT / 2, -0.02]}
+          position={[side * (width / 2 - 0.09), midY + boardT / 2, -0.02]}
           castShadow
           receiveShadow
         >
           <boxGeometry args={[0.18, height + boardT, depth]} />
-          <meshStandardMaterial map={sideTex} roughness={0.82} />
+          <meshStandardMaterial map={sideTex} roughness={0.8} />
         </mesh>
       ))}
-      {/* top cap */}
+      {/* vertical dividers between bays */}
+      {dividerXs.map((x) =>
+        [-1, 1].map((side) => (
+          <mesh
+            key={`div-${side * x}`}
+            position={[side * x, midY + boardT / 2, -0.03]}
+            castShadow
+            receiveShadow
+          >
+            <boxGeometry args={[0.11, height + boardT, depth - 0.06]} />
+            <meshStandardMaterial map={sideTex} roughness={0.8} />
+          </mesh>
+        ))
+      )}
+      {/* top cap meets the ceiling */}
       <mesh position={[0, topY + boardT / 2, -0.02]} castShadow receiveShadow>
-        <boxGeometry args={[width + 0.36, boardT, depth]} />
-        <meshStandardMaterial map={boardTex} roughness={0.82} />
+        <boxGeometry args={[width, boardT, depth]} />
+        <meshStandardMaterial map={boardTex} roughness={0.8} />
       </mesh>
-      {/* a board under every row of books */}
+      {/* a board under every row */}
       {rows.map((y, i) => (
         <mesh
           key={i}
@@ -351,8 +382,8 @@ function Bookcase({
           castShadow
           receiveShadow
         >
-          <boxGeometry args={[width + 0.2, boardT, depth]} />
-          <meshStandardMaterial map={boardTex} roughness={0.82} />
+          <boxGeometry args={[width, boardT, depth]} />
+          <meshStandardMaterial map={boardTex} roughness={0.8} />
         </mesh>
       ))}
       {/* cheap ambient occlusion inside every cavity */}
@@ -365,7 +396,7 @@ function Bookcase({
             key={`cavity-${i}`}
             position={[0, (ceiling + floor) / 2, -BOOK_DEPTH / 2 - 0.05]}
           >
-            <planeGeometry args={[width, h]} />
+            <planeGeometry args={[width - 0.3, h]} />
             <meshBasicMaterial map={cavityTex} transparent depthWrite={false} />
           </mesh>
         );
@@ -400,26 +431,30 @@ function useTiledTexture(
  * floorboards and a ceiling, so the view never falls off into a void.
  */
 function ClosetRoom({
-  rowCount,
-  caseWidth,
+  totalRows,
+  roomW,
 }: {
-  rowCount: number;
-  caseWidth: number;
+  totalRows: number;
+  roomW: number;
 }) {
-  const rows = rowYCenters(rowCount);
+  const rows = rowYCenters(totalRows);
   const boardT = 0.09;
   const headroom = 0.34;
   const topY = rows[0] + BOOK_HEIGHT / 2 + headroom + boardT;
   const bottomY = rows[rows.length - 1] - BOOK_HEIGHT / 2 - boardT;
 
-  const roomW = Math.max(caseWidth + 4.5, 9.5);
   const floorY = bottomY;
-  const ceilY = topY + 1.15;
+  // Built-in: the ceiling rests right on the case's top cap.
+  const ceilY = topY + 0.02;
   const roomH = ceilY - floorY;
   const zBack = -1.35;
   const zFront = 13.5;
   const zMid = (zBack + zFront) / 2;
   const roomD = zFront - zBack;
+  // Side moldings start in front of the case so they don't clip through it.
+  const zTrim = 0.6;
+  const zTrimMid = (zTrim + zFront) / 2;
+  const trimD = zFront - zTrim;
 
   const backTex = useTiledTexture(
     () => makePanelCanvas('ovid-wall-back'),
@@ -443,7 +478,7 @@ function ClosetRoom({
   );
 
   const wallY = floorY + roomH / 2;
-  const WALL_TINT = '#9a8672'; // walls sit back tonally so the case pops
+  const WALL_TINT = '#8d7e6f'; // walls sit back tonally so the case pops
 
   return (
     <group>
@@ -473,79 +508,75 @@ function ClosetRoom({
           roughness={0.9}
         />
       </mesh>
-      {/* floor */}
+      {/* floor — low roughness for a subtle sheen under the lights */}
       <mesh
         position={[0, floorY, zMid]}
         rotation={[-Math.PI / 2, 0, 0]}
         receiveShadow
       >
         <planeGeometry args={[roomW, roomD]} />
-        <meshStandardMaterial map={floorTex} roughness={0.82} />
+        <meshStandardMaterial
+          map={floorTex}
+          roughness={0.34}
+          metalness={0.16}
+        />
       </mesh>
       {/* ceiling */}
       <mesh position={[0, ceilY, zMid]} rotation={[Math.PI / 2, 0, 0]}>
         <planeGeometry args={[roomW, roomD]} />
-        <meshStandardMaterial color="#4a3826" roughness={0.95} />
+        <meshStandardMaterial color="#3c2e21" roughness={0.95} />
       </mesh>
-      {/* crown molding hides the wall/ceiling junction */}
-      <mesh position={[0, ceilY - 0.07, zBack + 0.04]}>
-        <boxGeometry args={[roomW, 0.14, 0.07]} />
-        <meshStandardMaterial color="#54391f" roughness={0.7} />
-      </mesh>
+      {/* crown molding along the side walls (the case meets the ceiling) */}
       {[-1, 1].map((side) => (
         <mesh
           key={`crown-${side}`}
-          position={[side * (roomW / 2 - 0.04), ceilY - 0.07, zMid]}
+          position={[side * (roomW / 2 - 0.04), ceilY - 0.07, zTrimMid]}
         >
-          <boxGeometry args={[0.07, 0.14, roomD]} />
-          <meshStandardMaterial color="#54391f" roughness={0.7} />
+          <boxGeometry args={[0.07, 0.14, trimD]} />
+          <meshStandardMaterial color="#3f2b19" roughness={0.7} />
         </mesh>
       ))}
-      {/* baseboards */}
-      <mesh position={[0, floorY + 0.08, zBack + 0.03]}>
-        <boxGeometry args={[roomW, 0.16, 0.05]} />
-        <meshStandardMaterial color="#4e3620" roughness={0.7} />
-      </mesh>
+      {/* baseboards along the side walls */}
       {[-1, 1].map((side) => (
         <mesh
           key={side}
-          position={[side * (roomW / 2 - 0.03), floorY + 0.08, zMid]}
+          position={[side * (roomW / 2 - 0.03), floorY + 0.08, zTrimMid]}
         >
-          <boxGeometry args={[0.05, 0.16, roomD]} />
-          <meshStandardMaterial color="#4e3620" roughness={0.7} />
+          <boxGeometry args={[0.05, 0.16, trimD]} />
+          <meshStandardMaterial color="#3a2817" roughness={0.7} />
         </mesh>
       ))}
-      {/* warm ceiling glow pooling down the walls */}
+      {/* soft ceiling glow pooling down the walls */}
       <pointLight
         position={[-roomW * 0.28, ceilY - 0.3, 2]}
         decay={0}
-        intensity={0.26}
-        color="#ffcf9e"
+        intensity={0.3}
+        color="#efe0cb"
       />
       <pointLight
         position={[roomW * 0.28, ceilY - 0.3, 2]}
         decay={0}
-        intensity={0.26}
-        color="#ffcf9e"
+        intensity={0.3}
+        color="#efe0cb"
       />
       {/* washers brightening the upper side walls and ceiling edge */}
       <pointLight
         position={[-(roomW / 2 - 0.7), ceilY - 0.5, 3]}
         decay={0}
-        intensity={0.15}
-        color="#ffd8ab"
+        intensity={0.14}
+        color="#ece0cd"
       />
       <pointLight
         position={[roomW / 2 - 0.7, ceilY - 0.5, 3]}
         decay={0}
-        intensity={0.15}
-        color="#ffd8ab"
+        intensity={0.14}
+        color="#ece0cd"
       />
       <pointLight
         position={[0, floorY + 1.2, 9]}
         decay={0}
         intensity={0.12}
-        color="#ffddb0"
+        color="#eaddca"
       />
     </group>
   );
@@ -643,7 +674,14 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
     () => layoutBooks(books, spineRatios),
     [books, spineRatios]
   );
-  const rowCenters = useMemo(() => rowYCenters(rowCount), [rowCount]);
+  // The wall unit runs floor to ceiling with spare rows around the content,
+  // like a closet with room to grow.
+  const totalRows = rowCount > 0 ? Math.max(4, rowCount + 2) : 0;
+  const contentStart = Math.floor((totalRows - rowCount) / 2);
+  const rowCenters = useMemo(() => rowYCenters(totalRows), [totalRows]);
+  const roomW = Math.max(caseWidth + 4.5, 9.5);
+  const caseTop =
+    totalRows > 0 ? rowCenters[0] + BOOK_HEIGHT / 2 + 0.34 + 0.09 : 3;
   const bookByUuid = useMemo(
     () => new Map(books.map((b) => [b.uuid, b])),
     [books]
@@ -679,21 +717,21 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
         gl={{ antialias: true }}
         onCreated={({ gl }) => {
           gl.toneMapping = THREE.ACESFilmicToneMapping;
-          gl.toneMappingExposure = 1.2;
+          gl.toneMappingExposure = 1.15;
         }}
         onPointerMissed={() => setSelectedUuid(null)}
       >
         <color attach="background" args={[ROOM]} />
         <fog attach="fog" args={[ROOM, 12, 40]} />
-        <ambientLight intensity={0.55} color="#ffe9cf" />
-        {/* warm key light from the front-top, the only shadow caster */}
+        <ambientLight intensity={0.62} color="#f4ede3" />
+        {/* key light just below the ceiling, the only shadow caster */}
         <spotLight
-          position={[1.6, (rowCount * ROW_HEIGHT) / 2 + 2.6, 5.6]}
-          angle={1.05}
+          position={[1.3, caseTop - 0.25, 5.4]}
+          angle={1.15}
           penumbra={0.9}
           decay={0}
-          intensity={1.5}
-          color="#ffdfb4"
+          intensity={1.55}
+          color="#f4e7d3"
           castShadow
           shadow-mapSize={[2048, 2048]}
           shadow-bias={-0.0004}
@@ -701,27 +739,31 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
         {/* soft fills so shadowed sides don't go black */}
         <directionalLight
           position={[-4, 1.2, 3.5]}
-          intensity={0.22}
-          color="#c9d4f2"
+          intensity={0.26}
+          color="#ccd4e8"
         />
         <pointLight
           position={[0, -0.4, 4.5]}
           decay={0}
-          intensity={0.18}
-          color="#ffd9a8"
+          intensity={0.15}
+          color="#ece1cf"
         />
 
-        {rowCount > 0 && (
+        {totalRows > 0 && (
           <>
-            <ClosetRoom rowCount={rowCount} caseWidth={caseWidth} />
-            <Bookcase rowCount={rowCount} caseWidth={caseWidth} />
+            <ClosetRoom totalRows={totalRows} roomW={roomW} />
+            <Bookcase
+              totalRows={totalRows}
+              roomW={roomW}
+              contentWidth={caseWidth}
+            />
           </>
         )}
 
         {placements.map((p) => {
           const book = bookByUuid.get(p.uuid);
           if (!book) return null;
-          const y = rowCenters[p.row];
+          const y = rowCenters[contentStart + p.row];
           return (
             <BookMesh
               key={p.uuid}

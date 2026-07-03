@@ -31,12 +31,12 @@ export function makeWoodCanvas(
   if (!ctx) return canvas;
   const rand = seededRandom(seed);
 
-  // Base: vertical-ish gradient of warm browns
+  // Base: dark walnut, sampled from the classic shelf's bookcase_bg.jpeg
   const base = ctx.createLinearGradient(0, 0, 0, height);
-  base.addColorStop(0, '#8a5c33');
-  base.addColorStop(0.45, '#96683c');
-  base.addColorStop(0.55, '#8d5f36');
-  base.addColorStop(1, '#7d5330');
+  base.addColorStop(0, '#54382a');
+  base.addColorStop(0.45, '#5e4130');
+  base.addColorStop(0.55, '#563a2b');
+  base.addColorStop(1, '#4c3324');
   ctx.fillStyle = base;
   ctx.fillRect(0, 0, width, height);
 
@@ -48,7 +48,7 @@ export function makeWoodCanvas(
     const ry = 20 + rand() * 60;
     const g = ctx.createRadialGradient(x, y, 0, x, y, rx);
     const dark = rand() > 0.5;
-    g.addColorStop(0, dark ? 'rgba(70,44,22,0.10)' : 'rgba(214,164,106,0.08)');
+    g.addColorStop(0, dark ? 'rgba(36,22,14,0.12)' : 'rgba(148,108,78,0.07)');
     g.addColorStop(1, 'rgba(0,0,0,0)');
     ctx.save();
     ctx.translate(x, y);
@@ -68,8 +68,8 @@ export function makeWoodCanvas(
     const alpha = 0.03 + rand() * 0.09;
     const light = rand() > 0.72;
     ctx.strokeStyle = light
-      ? `rgba(226,180,120,${alpha})`
-      : `rgba(58,36,18,${alpha})`;
+      ? `rgba(158,118,86,${alpha})`
+      : `rgba(30,18,11,${alpha})`;
     ctx.lineWidth = 0.6 + rand() * 1.8;
     ctx.beginPath();
     for (let x = 0; x <= width; x += 8) {
@@ -143,14 +143,14 @@ export function makePanelCanvas(seed = 'ovid-panel'): HTMLCanvasElement {
   const panel = 128;
   for (let x = 0; x <= size; x += panel) {
     // Slight tone shift per panel so boards read as separate pieces.
-    ctx.fillStyle = `rgba(${rand() > 0.5 ? '255,225,180' : '40,24,12'},${
+    ctx.fillStyle = `rgba(${rand() > 0.5 ? '182,142,104' : '28,17,10'},${
       0.02 + rand() * 0.04
     })`;
     ctx.fillRect(x, 0, panel, size);
     // V-groove: dark seam plus a light catch on its right edge.
-    ctx.fillStyle = 'rgba(28,16,8,0.55)';
+    ctx.fillStyle = 'rgba(20,12,7,0.55)';
     ctx.fillRect(x - 2, 0, 3, size);
-    ctx.fillStyle = 'rgba(238,196,140,0.16)';
+    ctx.fillStyle = 'rgba(172,132,96,0.14)';
     ctx.fillRect(x + 1, 0, 1, size);
   }
   return canvas;
@@ -167,13 +167,13 @@ export function makeFloorCanvas(seed = 'ovid-floor'): HTMLCanvasElement {
   if (!ctx) return canvas;
 
   // Deepen the tone: floors read darker than furniture.
-  ctx.fillStyle = 'rgba(30,18,10,0.32)';
+  ctx.fillStyle = 'rgba(22,13,8,0.30)';
   ctx.fillRect(0, 0, size, size);
 
   const rand = seededRandom(seed + ':boards');
   const board = 128;
   for (let y = 0; y <= size; y += board) {
-    ctx.fillStyle = `rgba(${rand() > 0.5 ? '235,200,150' : '30,18,10'},${
+    ctx.fillStyle = `rgba(${rand() > 0.5 ? '170,132,98' : '22,13,8'},${
       0.03 + rand() * 0.05
     })`;
     ctx.fillRect(0, y, size, board);
