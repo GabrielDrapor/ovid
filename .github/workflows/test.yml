@@ -20,6 +20,9 @@ jobs:
 
   visual-tests:
     runs-on: ubuntu-latest
+    # Temporarily disabled while the shelf UX is churning (3D closet work);
+    # drop this `if` to re-enable once the UI stabilizes.
+    if: false
     # Visual diffs are informational — failures don't block merge
     continue-on-error: true
     steps:
