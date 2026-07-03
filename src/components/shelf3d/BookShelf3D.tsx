@@ -18,6 +18,11 @@ import {
   rowYCenters,
 } from './layout';
 import { makeCoverCanvas, makeSpineCanvas } from './fallbackTextures';
+import {
+  makeCavityShadeCanvas,
+  makeWoodCanvas,
+  seededRandom,
+} from './woodTexture';
 import './BookShelf3D.css';
 
 interface BookShelf3DProps {
@@ -30,8 +35,6 @@ interface BookShelf3DProps {
   onDelete: (bookUuid: string) => void;
 }
 
-const WOOD = '#77522e';
-const WOOD_DARK = '#5c3d20';
 const ROOM = '#171210';
 const PAGES = '#efe5cc';
 
@@ -109,6 +112,20 @@ function BookMesh({
   const [hovered, setHovered] = useState(false);
   const processing = book.status === 'processing';
 
+  // Real shelves aren't perfectly uniform: vary height, push-in depth and a
+  // hair of lean per book, deterministically from its uuid.
+  const jitter = useMemo(() => {
+    const rand = seededRandom(book.uuid);
+    return {
+      heightScale: 0.955 + rand() * 0.075,
+      pushIn: -0.055 + rand() * 0.065,
+      lean: (rand() - 0.5) * 0.014,
+    };
+  }, [book.uuid]);
+  const bookHeight = BOOK_HEIGHT * jitter.heightScale;
+  // Keep the bottom edge on the board regardless of height.
+  const shelfY = position[1] - (BOOK_HEIGHT - bookHeight) / 2;
+
   const spineTex = useArtTexture(
     book.book_spine_img_url,
     () => makeSpineCanvas(book.original_title || book.title),
@@ -133,7 +150,11 @@ function BookMesh({
   // Place the book at its shelf spot on first render so it doesn't fly in
   // from the origin.
   useEffect(() => {
-    group.current?.position.set(...position);
+    group.current?.position.set(
+      position[0],
+      shelfY,
+      position[2] + jitter.pushIn
+    );
   }, []);
 
   useFrame((state, delta) => {
@@ -142,9 +163,10 @@ function BookMesh({
     const k = 1 - Math.exp(-delta * 7);
 
     let tx = position[0];
-    let ty = position[1];
-    let tz = position[2];
+    let ty = shelfY;
+    let tz = position[2] + jitter.pushIn;
     let ry = 0;
+    let rz = jitter.lean;
 
     if (selected) {
       // Float in front of the camera, cover turned toward the viewer.
@@ -160,6 +182,7 @@ function BookMesh({
         cam.position.y + yOff + Math.sin(state.clock.elapsedTime * 1.1) * 0.02;
       tz = cam.position.z - 2.15;
       ry = -Math.PI / 2;
+      rz = 0;
     } else if (hovered && !anySelected && !processing) {
       tz = position[2] + 0.22;
     }
@@ -168,6 +191,7 @@ function BookMesh({
     g.position.y += (ty - g.position.y) * k;
     g.position.z += (tz - g.position.z) * k;
     g.rotation.y += (ry - g.rotation.y) * k;
+    g.rotation.z += (rz - g.rotation.z) * k;
 
     // Brightness: dim unselected books while one is out; pulse processing.
     const m = mesh.current;
@@ -196,6 +220,8 @@ function BookMesh({
     <group ref={group}>
       <mesh
         ref={mesh}
+        castShadow
+        receiveShadow
         onClick={handleClick}
         onPointerOver={(e) => {
           e.stopPropagation();
@@ -203,7 +229,7 @@ function BookMesh({
         }}
         onPointerOut={() => setHovered(false)}
       >
-        <boxGeometry args={[width, BOOK_HEIGHT, BOOK_DEPTH]} />
+        <boxGeometry args={[width, bookHeight, BOOK_DEPTH]} />
         {/* +x: front cover (faces camera when the book turns out) */}
         <meshStandardMaterial
           attach="material-0"
@@ -243,7 +269,7 @@ function BookMesh({
   );
 }
 
-/** Wooden bookcase frame sized to the shelf rows. */
+/** Wooden bookcase frame sized to the shelf rows, plus floor and back wall. */
 function Bookcase({
   rowCount,
   caseWidth,
@@ -253,40 +279,109 @@ function Bookcase({
 }) {
   const rows = rowYCenters(rowCount);
   const width = caseWidth + 0.5;
-  const boardT = 0.08;
-  const depth = BOOK_DEPTH + 0.28;
+  const boardT = 0.09;
+  const depth = BOOK_DEPTH + 0.3;
   const headroom = 0.34;
   const topY = rows[0] + BOOK_HEIGHT / 2 + headroom;
   const bottomY = rows[rows.length - 1] - BOOK_HEIGHT / 2 - boardT;
   const height = topY - bottomY;
   const midY = (topY + bottomY) / 2;
 
+  const boardTex = useMemo(() => {
+    const t = new THREE.CanvasTexture(makeWoodCanvas('ovid-boards'));
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.anisotropy = 8;
+    return t;
+  }, []);
+  const sideTex = useMemo(() => {
+    const t = new THREE.CanvasTexture(makeWoodCanvas('ovid-sides'));
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.anisotropy = 8;
+    // Grain runs along the length of vertical members.
+    t.center.set(0.5, 0.5);
+    t.rotation = Math.PI / 2;
+    return t;
+  }, []);
+  const cavityTex = useMemo(
+    () => new THREE.CanvasTexture(makeCavityShadeCanvas()),
+    []
+  );
+  useEffect(
+    () => () => {
+      boardTex.dispose();
+      sideTex.dispose();
+      cavityTex.dispose();
+    },
+    [boardTex, sideTex, cavityTex]
+  );
+
   return (
     <group>
-      {/* back panel */}
-      <mesh position={[0, midY, -BOOK_DEPTH / 2 - 0.09]}>
-        <boxGeometry args={[width + 0.3, height + 0.2, 0.06]} />
-        <meshStandardMaterial color={WOOD_DARK} roughness={0.92} />
+      {/* room: floor + back wall catch the spill light and shadows */}
+      <mesh
+        rotation={[-Math.PI / 2, 0, 0]}
+        position={[0, bottomY - 0.001, 4]}
+        receiveShadow
+      >
+        <planeGeometry args={[40, 24]} />
+        <meshStandardMaterial color="#2a1f16" roughness={0.94} />
       </mesh>
-      {/* side panels */}
+      <mesh position={[0, midY + 2, -1.3]} receiveShadow>
+        <planeGeometry args={[44, 26]} />
+        <meshStandardMaterial color="#241b13" roughness={0.96} />
+      </mesh>
+
+      {/* back panel — flush with the case, hidden behind the top cap */}
+      <mesh position={[0, midY, -BOOK_DEPTH / 2 - 0.09]} receiveShadow>
+        <boxGeometry args={[width + 0.3, height, 0.06]} />
+        <meshStandardMaterial map={boardTex} color="#79695a" roughness={0.92} />
+      </mesh>
+      {/* side panels — run exactly from the case bottom to the cap top */}
       {[-1, 1].map((side) => (
-        <mesh key={side} position={[side * (width / 2 + 0.09), midY, -0.02]}>
-          <boxGeometry args={[0.18, height + 0.2, depth]} />
-          <meshStandardMaterial color={WOOD} roughness={0.85} />
+        <mesh
+          key={side}
+          position={[side * (width / 2 + 0.09), midY + boardT / 2, -0.02]}
+          castShadow
+          receiveShadow
+        >
+          <boxGeometry args={[0.18, height + boardT, depth]} />
+          <meshStandardMaterial map={sideTex} roughness={0.82} />
         </mesh>
       ))}
       {/* top cap */}
-      <mesh position={[0, topY + boardT / 2, -0.02]}>
+      <mesh position={[0, topY + boardT / 2, -0.02]} castShadow receiveShadow>
         <boxGeometry args={[width + 0.36, boardT, depth]} />
-        <meshStandardMaterial color={WOOD} roughness={0.85} />
+        <meshStandardMaterial map={boardTex} roughness={0.82} />
       </mesh>
       {/* a board under every row of books */}
       {rows.map((y, i) => (
-        <mesh key={i} position={[0, y - BOOK_HEIGHT / 2 - boardT / 2, -0.02]}>
+        <mesh
+          key={i}
+          position={[0, y - BOOK_HEIGHT / 2 - boardT / 2, -0.02]}
+          castShadow
+          receiveShadow
+        >
           <boxGeometry args={[width + 0.2, boardT, depth]} />
-          <meshStandardMaterial color={WOOD} roughness={0.85} />
+          <meshStandardMaterial map={boardTex} roughness={0.82} />
         </mesh>
       ))}
+      {/* cheap ambient occlusion inside every cavity */}
+      {rows.map((y, i) => {
+        const ceiling = i === 0 ? topY : rows[i - 1] - BOOK_HEIGHT / 2 - boardT;
+        const floor = y - BOOK_HEIGHT / 2;
+        const h = ceiling - floor;
+        return (
+          <mesh
+            key={`cavity-${i}`}
+            position={[0, (ceiling + floor) / 2, -BOOK_DEPTH / 2 - 0.05]}
+          >
+            <planeGeometry args={[width, h]} />
+            <meshBasicMaterial map={cavityTex} transparent depthWrite={false} />
+          </mesh>
+        );
+      })}
     </group>
   );
 }
@@ -414,25 +509,41 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
     <div className="closet3d-root">
       <Canvas
         dpr={[1, 2]}
+        shadows
         camera={{ fov: 38, position: [0, 0, initialZ], near: 0.1, far: 60 }}
         gl={{ antialias: true }}
         onCreated={({ gl }) => {
-          gl.toneMapping = THREE.NoToneMapping;
+          gl.toneMapping = THREE.ACESFilmicToneMapping;
+          gl.toneMappingExposure = 1.2;
         }}
         onPointerMissed={() => setSelectedUuid(null)}
       >
         <color attach="background" args={[ROOM]} />
-        <fog attach="fog" args={[ROOM, 8, 24]} />
-        <ambientLight intensity={0.92} />
-        <directionalLight
-          position={[2.5, 4, 6]}
-          intensity={0.55}
-          color="#ffe9c9"
+        <fog attach="fog" args={[ROOM, 9, 26]} />
+        <ambientLight intensity={0.5} color="#ffe9cf" />
+        {/* warm key light from the front-top, the only shadow caster */}
+        <spotLight
+          position={[1.6, (rowCount * ROW_HEIGHT) / 2 + 2.6, 5.6]}
+          angle={1.05}
+          penumbra={0.9}
+          decay={0}
+          intensity={1.5}
+          color="#ffdfb4"
+          castShadow
+          shadow-mapSize={[2048, 2048]}
+          shadow-bias={-0.0004}
         />
+        {/* soft fills so shadowed sides don't go black */}
         <directionalLight
-          position={[-3, 1.5, 4]}
-          intensity={0.25}
-          color="#cfd8ff"
+          position={[-4, 1.2, 3.5]}
+          intensity={0.22}
+          color="#c9d4f2"
+        />
+        <pointLight
+          position={[0, -0.4, 4.5]}
+          decay={0}
+          intensity={0.18}
+          color="#ffd9a8"
         />
 
         {rowCount > 0 && <Bookcase rowCount={rowCount} caseWidth={caseWidth} />}
