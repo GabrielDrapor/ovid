@@ -1,0 +1,225 @@
+.closet3d-root {
+  position: absolute;
+  inset: 0;
+  background: #171210;
+  overflow: hidden;
+}
+
+.closet3d-root canvas {
+  display: block;
+}
+
+/* soft vignette over the scene */
+.closet3d-root::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse at center,
+    transparent 55%,
+    rgba(0, 0, 0, 0.45) 100%
+  );
+}
+
+.closet3d-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #171210;
+  z-index: 4;
+}
+
+.closet3d-spinner {
+  width: 36px;
+  height: 36px;
+  border: 3px solid rgba(255, 240, 220, 0.2);
+  border-top-color: rgba(255, 240, 220, 0.85);
+  border-radius: 50%;
+  animation: closet3d-spin 0.9s linear infinite;
+}
+
+@keyframes closet3d-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.closet3d-hint {
+  position: absolute;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: rgba(255, 244, 228, 0.45);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  pointer-events: none;
+  z-index: 3;
+  white-space: nowrap;
+}
+
+.closet3d-panel {
+  position: absolute;
+  top: 50%;
+  right: 7%;
+  transform: translateY(-50%);
+  width: min(320px, 38vw);
+  padding: 26px 26px 22px;
+  background: rgba(24, 18, 14, 0.78);
+  border: 1px solid rgba(255, 235, 205, 0.14);
+  border-radius: 14px;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  color: #f4ead9;
+  z-index: 5;
+  animation: closet3d-panel-in 0.35s ease both;
+}
+
+@keyframes closet3d-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(-50%) translateX(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(-50%) translateX(0);
+  }
+}
+
+.closet3d-panel h2 {
+  margin: 0 0 4px;
+  font-size: 22px;
+  line-height: 1.25;
+  font-family: Georgia, 'Songti SC', serif;
+}
+
+.closet3d-panel h3 {
+  margin: 0 0 4px;
+  font-size: 15px;
+  font-weight: 400;
+  color: rgba(244, 234, 217, 0.75);
+}
+
+.closet3d-author {
+  margin: 6px 0 18px;
+  font-size: 13px;
+  color: rgba(244, 234, 217, 0.6);
+}
+
+.closet3d-panel-close {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  background: none;
+  border: none;
+  color: rgba(244, 234, 217, 0.55);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px;
+}
+
+.closet3d-panel-close:hover {
+  color: #f4ead9;
+}
+
+.closet3d-progress {
+  margin-bottom: 16px;
+  font-size: 12px;
+  color: rgba(244, 234, 217, 0.65);
+}
+
+.closet3d-progress-bar {
+  height: 5px;
+  border-radius: 3px;
+  background: rgba(255, 235, 205, 0.15);
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+
+.closet3d-progress-bar > div {
+  height: 100%;
+  border-radius: 3px;
+  background: #d8b271;
+  transition: width 0.4s ease;
+}
+
+.closet3d-processing {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: rgba(244, 234, 217, 0.75);
+}
+
+.closet3d-error {
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: #ff8a80;
+}
+
+.closet3d-read-btn {
+  display: block;
+  width: 100%;
+  padding: 11px 0;
+  border: none;
+  border-radius: 9px;
+  background: #d8b271;
+  color: #241a10;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.closet3d-read-btn:hover {
+  background: #e6c68d;
+}
+
+.closet3d-remove-btn {
+  display: block;
+  width: 100%;
+  margin-top: 10px;
+  padding: 8px 0;
+  border: 1px solid rgba(255, 138, 128, 0.4);
+  border-radius: 9px;
+  background: none;
+  color: #ff8a80;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.closet3d-remove-btn:hover {
+  background: rgba(255, 138, 128, 0.12);
+}
+
+@media (max-width: 768px) {
+  .closet3d-panel {
+    top: auto;
+    right: 0;
+    left: 0;
+    bottom: 0;
+    transform: none;
+    width: auto;
+    border-radius: 18px 18px 0 0;
+    animation: closet3d-sheet-in 0.3s ease both;
+  }
+
+  @keyframes closet3d-sheet-in {
+    from {
+      transform: translateY(40px);
+      opacity: 0;
+    }
+    to {
+      transform: translateY(0);
+      opacity: 1;
+    }
+  }
+
+  .closet3d-hint {
+    display: none;
+  }
+}

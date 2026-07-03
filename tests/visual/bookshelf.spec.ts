@@ -3,30 +3,60 @@ import { test, expect } from '@playwright/test';
 // Mock book data matching production structure
 const MOCK_BOOKS = [
   {
-    id: 1, uuid: 'test-book-1', title: '血字的研究', original_title: 'A Study in Scarlet',
-    author: 'Sir Arthur Conan Doyle', language_pair: 'en-zh',
-    book_cover_img_url: null, book_spine_img_url: null,
-    user_id: null, status: 'ready', created_at: '2025-01-01', updated_at: '2025-01-01',
+    id: 1,
+    uuid: 'test-book-1',
+    title: '血字的研究',
+    original_title: 'A Study in Scarlet',
+    author: 'Sir Arthur Conan Doyle',
+    language_pair: 'en-zh',
+    book_cover_img_url: null,
+    book_spine_img_url: null,
+    user_id: null,
+    status: 'ready',
+    created_at: '2025-01-01',
+    updated_at: '2025-01-01',
   },
   {
-    id: 2, uuid: 'test-book-2', title: '四签名', original_title: 'The Sign of the Four',
-    author: 'Sir Arthur Conan Doyle', language_pair: 'en-zh',
-    book_cover_img_url: null, book_spine_img_url: null,
-    user_id: null, status: 'ready', created_at: '2025-01-01', updated_at: '2025-01-01',
+    id: 2,
+    uuid: 'test-book-2',
+    title: '四签名',
+    original_title: 'The Sign of the Four',
+    author: 'Sir Arthur Conan Doyle',
+    language_pair: 'en-zh',
+    book_cover_img_url: null,
+    book_spine_img_url: null,
+    user_id: null,
+    status: 'ready',
+    created_at: '2025-01-01',
+    updated_at: '2025-01-01',
   },
 ];
 
 const MOCK_USER_BOOKS = [
   {
-    id: 10, uuid: 'user-book-1', title: '局外人', original_title: 'The Stranger',
-    author: 'Albert Camus', language_pair: 'en-zh',
-    book_cover_img_url: null, book_spine_img_url: null,
-    user_id: 1, status: 'ready', created_at: '2025-01-01', updated_at: '2025-01-01',
+    id: 10,
+    uuid: 'user-book-1',
+    title: '局外人',
+    original_title: 'The Stranger',
+    author: 'Albert Camus',
+    language_pair: 'en-zh',
+    book_cover_img_url: null,
+    book_spine_img_url: null,
+    user_id: 1,
+    status: 'ready',
+    created_at: '2025-01-01',
+    updated_at: '2025-01-01',
   },
 ];
 
 test.describe('Bookshelf Visual Regression', () => {
   test.beforeEach(async ({ page }) => {
+    // Pin the classic 2D shelf: the 3D closet renders via WebGL and is not
+    // pixel-stable enough for snapshot comparison.
+    await page.addInitScript(() => {
+      localStorage.setItem('ovid:shelfView', 'classic');
+    });
+
     // Mock the books API
     await page.route('**/api/v2/books', (route) => {
       route.fulfill({
@@ -58,7 +88,9 @@ test.describe('Bookshelf Visual Regression', () => {
     });
   });
 
-  test('book spine positions relative to shelf background', async ({ page }) => {
+  test('book spine positions relative to shelf background', async ({
+    page,
+  }) => {
     await page.goto('/');
     await page.waitForTimeout(1000);
 
@@ -79,5 +111,39 @@ test.describe('Bookshelf Visual Regression', () => {
     await expect(page).toHaveScreenshot('bookshelf-full.png', {
       maxDiffPixelRatio: 0.01,
     });
+  });
+
+  test('3d closet view renders a WebGL canvas', async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem('ovid:shelfView', '3d');
+    });
+    await page.goto('/');
+
+    // The closet is lazy-loaded; wait for its canvas to appear.
+    await expect(page.locator('.closet3d-root canvas')).toBeVisible({
+      timeout: 15000,
+    });
+    // View toggle is present and Closet is active
+    await expect(page.locator('.shelf-view-toggle button.active')).toHaveText(
+      'Closet'
+    );
+  });
+
+  test('view toggle switches back to the classic shelf', async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem('ovid:shelfView', '3d');
+    });
+    await page.goto('/');
+    await expect(page.locator('.closet3d-root canvas')).toBeVisible({
+      timeout: 15000,
+    });
+
+    await page
+      .locator('.shelf-view-toggle button', { hasText: 'Classic' })
+      .click();
+    await expect(
+      page.locator('.bookshelf-wall:not(.closet-mode)')
+    ).toBeVisible();
+    await expect(page.locator('.book-spine-container').first()).toBeVisible();
   });
 });

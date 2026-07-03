@@ -1,37 +1,36 @@
-import React, { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
+import React, {
+  useState,
+  useEffect,
+  useLayoutEffect,
+  useCallback,
+  useRef,
+  Suspense,
+} from 'react';
 import { SUPPORTED_LANGUAGES } from '../utils/translator';
 import { useUser } from '../contexts/UserContext';
 import { ApiError, fetchApi } from '../utils/api';
+import { Book, UserBookProgress } from './shelf3d/types';
 import './BookShelf.css';
+
+const BookShelf3D = React.lazy(() => import('./shelf3d/BookShelf3D'));
 
 const DEFAULT_TARGET_LANGUAGE = 'zh';
 const BOOKS_PER_ROW = 8;
 
-interface Book {
-  id: number;
-  uuid: string;
-  title: string;
-  original_title: string;
-  author: string;
-  language_pair: string;
-  book_cover_img_url: string | null;
-  book_spine_img_url: string | null;
-  user_id: number | null;
-  status: string | null; // 'ready' | 'processing' | 'error'
-  created_at: string;
-  updated_at: string;
-}
+const SHELF_VIEW_STORAGE_KEY = 'ovid:shelfView';
 
-interface UserBookProgress {
-  id: number;
-  user_id: number;
-  book_uuid: string;
-  is_completed: number; // 0 or 1
-  reading_progress: number | null;
-  completed_at: string | null;
-  last_read_at: string | null;
-  created_at: string;
-  updated_at: string;
+type ShelfViewMode = '3d' | 'classic';
+
+function isWebGLAvailable(): boolean {
+  try {
+    const canvas = document.createElement('canvas');
+    return !!(
+      window.WebGLRenderingContext &&
+      (canvas.getContext('webgl2') || canvas.getContext('webgl'))
+    );
+  } catch {
+    return false;
+  }
 }
 
 interface BookShelfProps {
@@ -44,7 +43,9 @@ const MAX_SPINE_RATIO = 0.35;
 
 const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
   const [books, setBooks] = useState<Book[]>([]);
-  const [spineRatios, setSpineRatios] = useState<Map<string, number>>(new Map());
+  const [spineRatios, setSpineRatios] = useState<Map<string, number>>(
+    new Map()
+  );
   const [bookProgressMap, setBookProgressMap] = useState<
     Map<string, UserBookProgress>
   >(new Map());
@@ -56,6 +57,16 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
     null
   );
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
+  const [webglOk] = useState(isWebGLAvailable);
+  const [viewMode, setViewMode] = useState<ShelfViewMode>(() => {
+    try {
+      const saved = localStorage.getItem(SHELF_VIEW_STORAGE_KEY);
+      if (saved === '3d' || saved === 'classic') return saved;
+    } catch {
+      /* storage unavailable */
+    }
+    return window.innerWidth <= 768 ? 'classic' : '3d';
+  });
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showHelpMenu, setShowHelpMenu] = useState(false);
   const helpRef = useRef<HTMLDivElement>(null);
@@ -110,22 +121,30 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
     refreshCredits,
   } = useUser();
 
-  const handleSpineImageLoad = useCallback((bookUuid: string, event: React.SyntheticEvent<HTMLImageElement>) => {
-    const img = event.currentTarget;
-    const naturalWidth = img.naturalWidth || 0;
-    const naturalHeight = img.naturalHeight || 0;
-    if (!naturalWidth || !naturalHeight) return;
+  const handleSpineImageLoad = useCallback(
+    (bookUuid: string, event: React.SyntheticEvent<HTMLImageElement>) => {
+      const img = event.currentTarget;
+      const naturalWidth = img.naturalWidth || 0;
+      const naturalHeight = img.naturalHeight || 0;
+      if (!naturalWidth || !naturalHeight) return;
 
-    const ratio = Math.min(MAX_SPINE_RATIO, Math.max(MIN_SPINE_RATIO, naturalWidth / naturalHeight));
-    setSpineRatios((prev) => {
-      const next = new Map(prev);
-      if (Math.abs((next.get(bookUuid) ?? DEFAULT_SPINE_RATIO) - ratio) < 0.001) {
-        return prev;
-      }
-      next.set(bookUuid, ratio);
-      return next;
-    });
-  }, []);
+      const ratio = Math.min(
+        MAX_SPINE_RATIO,
+        Math.max(MIN_SPINE_RATIO, naturalWidth / naturalHeight)
+      );
+      setSpineRatios((prev) => {
+        const next = new Map(prev);
+        if (
+          Math.abs((next.get(bookUuid) ?? DEFAULT_SPINE_RATIO) - ratio) < 0.001
+        ) {
+          return prev;
+        }
+        next.set(bookUuid, ratio);
+        return next;
+      });
+    },
+    []
+  );
 
   const fetchBooks = async () => {
     try {
@@ -184,8 +203,20 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
+  const use3D = viewMode === '3d' && webglOk;
+
+  const switchView = (mode: ShelfViewMode) => {
+    setViewMode(mode);
+    try {
+      localStorage.setItem(SHELF_VIEW_STORAGE_KEY, mode);
+    } catch {
+      /* storage unavailable */
+    }
+  };
+
   // Dynamically compute shelf positions based on background-size: cover scaling
   useEffect(() => {
+    if (use3D) return;
     const wall = wallRef.current;
     if (!wall) return;
     const IMG_W = 1248,
@@ -213,7 +244,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
     const observer = new ResizeObserver(update);
     observer.observe(wall);
     return () => observer.disconnect();
-  }, []);
+  }, [use3D]);
 
   // Move the shelf by one page, clamping to the available range and recording
   // the direction so the slide animation knows which way to move.
@@ -235,7 +266,9 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
   );
 
   // Vertical swipe (touch) + trackpad/wheel (desktop) to paginate the shelf.
+  // In the 3D closet the wheel is used for zooming instead.
   useEffect(() => {
+    if (use3D) return;
     const wall = wallRef.current;
     if (!wall) return;
     let startY = 0;
@@ -293,7 +326,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
       wall.removeEventListener('wheel', onWheel);
       if (resetTimer) clearTimeout(resetTimer);
     };
-  }, [goPage]);
+  }, [goPage, use3D]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -338,7 +371,8 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
         const vOverlap = cy + th > a.top && cy < a.bottom;
         const boxLeft = cx - tw / 2;
         const boxRight = cx + tw / 2;
-        const hOverlap = boxRight > a.left - margin && boxLeft < a.right + margin;
+        const hOverlap =
+          boxRight > a.left - margin && boxLeft < a.right + margin;
         if (vOverlap && hOverlap) {
           const roomLeft = a.left;
           const roomRight = viewportW - a.right;
@@ -522,7 +556,13 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
         sourceLanguage: detected,
       });
     } catch (err) {
-      alert(err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Failed to estimate book');
+      alert(
+        err instanceof ApiError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : 'Failed to estimate book'
+      );
     } finally {
       setEstimating(false);
     }
@@ -562,7 +602,6 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
         });
       }
 
-
       const estimateData = (await response.json()) as {
         title: string;
         author: string;
@@ -589,7 +628,13 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
           : prev
       );
     } catch (err) {
-      alert(err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Failed to re-estimate');
+      alert(
+        err instanceof ApiError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : 'Failed to re-estimate'
+      );
     } finally {
       setReEstimating(false);
     }
@@ -677,7 +722,10 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
 
         throw new ApiError(errorData.error || 'Upload failed', {
           status: response.status,
-          requestId: errorData.requestId || response.headers.get('x-request-id') || undefined,
+          requestId:
+            errorData.requestId ||
+            response.headers.get('x-request-id') ||
+            undefined,
           retryAfter: response.headers.get('retry-after'),
         });
       }
@@ -705,13 +753,14 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
     } catch (err) {
       setUploadProgress('');
       setUploading(false);
-      const message = err instanceof ApiError
-        ? err.message
-        : err instanceof TypeError
-          ? 'Network error while uploading. Please retry. If it keeps failing, contact support with time and browser.'
-          : err instanceof Error
-            ? err.message
-            : 'Upload failed';
+      const message =
+        err instanceof ApiError
+          ? err.message
+          : err instanceof TypeError
+            ? 'Network error while uploading. Please retry. If it keeps failing, contact support with time and browser.'
+            : err instanceof Error
+              ? err.message
+              : 'Upload failed';
       alert(message);
     }
   };
@@ -760,9 +809,11 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
   return (
     <div className="bookshelf-container">
       <div
-        className="bookshelf-wall"
+        className={`bookshelf-wall${use3D ? ' closet-mode' : ''}`}
         ref={wallRef}
-        style={{ backgroundImage: 'url(/bookcase_bg.jpeg)' }}
+        style={
+          use3D ? undefined : { backgroundImage: 'url(/bookcase_bg.jpeg)' }
+        }
       >
         {(() => {
           let row1Books: Book[];
@@ -773,7 +824,10 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
           } else {
             const startIdx = BOOKS_PER_ROW + (page - 1) * BOOKS_PER_ROW * 2;
             row1Books = userBooks.slice(startIdx, startIdx + BOOKS_PER_ROW);
-            row2Books = userBooks.slice(startIdx + BOOKS_PER_ROW, startIdx + BOOKS_PER_ROW * 2);
+            row2Books = userBooks.slice(
+              startIdx + BOOKS_PER_ROW,
+              startIdx + BOOKS_PER_ROW * 2
+            );
           }
           const renderBook = (book: Book) => {
             const isProcessing = book.status === 'processing';
@@ -806,7 +860,8 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                     onClick={(e) => {
                       e.stopPropagation();
                       setUploadedBookUuid(null);
-                      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+                      if (toastTimerRef.current)
+                        clearTimeout(toastTimerRef.current);
                     }}
                   >
                     <strong>Book uploaded!</strong>
@@ -819,7 +874,10 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                 )}
                 <div
                   className="book-spine-container"
-                  style={{ ['--book-spine-ratio' as any]: spineRatios.get(book.uuid) ?? DEFAULT_SPINE_RATIO }}
+                  style={{
+                    ['--book-spine-ratio' as any]:
+                      spineRatios.get(book.uuid) ?? DEFAULT_SPINE_RATIO,
+                  }}
                 >
                   {book.book_spine_img_url ? (
                     <img
@@ -855,7 +913,48 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                 transition: 'opacity 0.5s ease-in-out',
               }}
             >
-              {row1Books.length > 0 && (
+              {use3D && (
+                <Suspense
+                  fallback={
+                    <div className="closet-suspense">
+                      <div className="processing-spinner" />
+                    </div>
+                  }
+                >
+                  <BookShelf3D
+                    books={safeBooks}
+                    loading={loading}
+                    showProgress={!!user}
+                    progressMap={bookProgressMap}
+                    translationProgress={translationProgress}
+                    onRead={onSelectBook}
+                    onDelete={handleDeleteBook}
+                  />
+                </Suspense>
+              )}
+              {webglOk && (
+                <div
+                  className="shelf-view-toggle"
+                  role="group"
+                  aria-label="Shelf view"
+                >
+                  <button
+                    type="button"
+                    className={use3D ? 'active' : ''}
+                    onClick={() => switchView('3d')}
+                  >
+                    Closet
+                  </button>
+                  <button
+                    type="button"
+                    className={!use3D ? 'active' : ''}
+                    onClick={() => switchView('classic')}
+                  >
+                    Classic
+                  </button>
+                </div>
+              )}
+              {!use3D && row1Books.length > 0 && (
                 <div
                   key={`row1-${page}`}
                   className={`books-grid shelf-slide-${pageDir}`}
@@ -865,8 +964,12 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                 </div>
               )}
               <div
-                className="shelf-actions"
-                style={{ top: shelfPos.actionsTop, left: shelfPos.actionsLeft }}
+                className={`shelf-actions${use3D ? ' shelf-actions--floating' : ''}`}
+                style={
+                  use3D
+                    ? undefined
+                    : { top: shelfPos.actionsTop, left: shelfPos.actionsLeft }
+                }
               >
                 {userLoading ? null : user ? (
                   <>
@@ -1016,7 +1119,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                   )}
                 </div>
               </div>
-              {row2Books.length > 0 && (
+              {!use3D && row2Books.length > 0 && (
                 <div
                   key={`row2-${page}`}
                   className={`books-grid shelf-slide-${pageDir}`}
@@ -1025,7 +1128,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                   {row2Books.map(renderBook)}
                 </div>
               )}
-              {totalPages > 1 && (
+              {!use3D && totalPages > 1 && (
                 <div className="shelf-pagination">
                   <button
                     type="button"
@@ -1055,138 +1158,140 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
         })()}
       </div>
 
-      <div className="book-preview-sidebar">
-        {hoveredBook && (
-          <div className="preview-content">
-            <div className="preview-cover">
-              {hoveredBook.book_cover_img_url ? (
-                <img
-                  key={hoveredBook.uuid}
-                  src={hoveredBook.book_cover_img_url}
-                  alt={hoveredBook.title}
-                  className={coverLoaded ? 'cover-loaded' : 'cover-loading'}
-                  onLoad={() => setCoverLoaded(true)}
-                />
-              ) : (
-                <div className="default-preview-cover">
-                  <h3>{hoveredBook.title}</h3>
-                  <p>{hoveredBook.author}</p>
-                </div>
-              )}
-            </div>
-
-            <div className="preview-info">
-              <h2>{hoveredBook.original_title || hoveredBook.title}</h2>
-              {hoveredBook.original_title &&
-                hoveredBook.title !== hoveredBook.original_title && (
-                  <h3 className="translated-title">{hoveredBook.title}</h3>
+      {!use3D && (
+        <div className="book-preview-sidebar">
+          {hoveredBook && (
+            <div className="preview-content">
+              <div className="preview-cover">
+                {hoveredBook.book_cover_img_url ? (
+                  <img
+                    key={hoveredBook.uuid}
+                    src={hoveredBook.book_cover_img_url}
+                    alt={hoveredBook.title}
+                    className={coverLoaded ? 'cover-loaded' : 'cover-loading'}
+                    onLoad={() => setCoverLoaded(true)}
+                  />
+                ) : (
+                  <div className="default-preview-cover">
+                    <h3>{hoveredBook.title}</h3>
+                    <p>{hoveredBook.author}</p>
+                  </div>
                 )}
-              <p className="author">By {hoveredBook.author}</p>
+              </div>
 
-              {hoveredBook.status === 'processing' ? (
-                <div className="book-status-processing">
-                  <div className="processing-spinner"></div>
-                  {(() => {
-                    const tp = translationProgress.get(hoveredBook.uuid);
-                    if (tp && tp.chaptersTotal > 0) {
-                      const pct = Math.round(
-                        (tp.chaptersCompleted / tp.chaptersTotal) * 100
-                      );
+              <div className="preview-info">
+                <h2>{hoveredBook.original_title || hoveredBook.title}</h2>
+                {hoveredBook.original_title &&
+                  hoveredBook.title !== hoveredBook.original_title && (
+                    <h3 className="translated-title">{hoveredBook.title}</h3>
+                  )}
+                <p className="author">By {hoveredBook.author}</p>
+
+                {hoveredBook.status === 'processing' ? (
+                  <div className="book-status-processing">
+                    <div className="processing-spinner"></div>
+                    {(() => {
+                      const tp = translationProgress.get(hoveredBook.uuid);
+                      if (tp && tp.chaptersTotal > 0) {
+                        const pct = Math.round(
+                          (tp.chaptersCompleted / tp.chaptersTotal) * 100
+                        );
+                        return (
+                          <>
+                            <span>
+                              Translating... {tp.chaptersCompleted}/
+                              {tp.chaptersTotal} chapters ({pct}%)
+                            </span>
+                            <div className="translation-progress-bar">
+                              <div
+                                className="translation-progress-fill"
+                                style={{ width: `${pct}%` }}
+                              ></div>
+                            </div>
+                          </>
+                        );
+                      }
                       return (
-                        <>
-                          <span>
-                            Translating... {tp.chaptersCompleted}/
-                            {tp.chaptersTotal} chapters ({pct}%)
-                          </span>
-                          <div className="translation-progress-bar">
+                        <span>
+                          {tp?.phase === 'glossary'
+                            ? 'Extracting glossary...'
+                            : 'Translating...'}
+                        </span>
+                      );
+                    })()}
+                    <span className="safe-to-close-hint">
+                      You can safely close this page — the book will be ready
+                      when you return.
+                    </span>
+                  </div>
+                ) : hoveredBook.status === 'error' ? (
+                  <div className="book-status-error">
+                    <span>Translation failed</span>
+                  </div>
+                ) : null}
+                {(() => {
+                  const progress = bookProgressMap.get(hoveredBook.uuid);
+                  const progressPercent = progress?.is_completed
+                    ? 100
+                    : progress?.reading_progress || 0;
+                  const statusText = progress?.is_completed
+                    ? '✓ Completed'
+                    : progressPercent > 0
+                      ? `${progressPercent}% read`
+                      : 'Not started';
+                  return (
+                    <>
+                      {/* Progress bar - show only for ready books */}
+                      {user && hoveredBook.status !== 'processing' && (
+                        <div className="progress-section">
+                          <div className="progress-bar">
                             <div
-                              className="translation-progress-fill"
-                              style={{ width: `${pct}%` }}
+                              className="progress-fill"
+                              style={{ width: `${progressPercent}%` }}
                             ></div>
                           </div>
-                        </>
-                      );
-                    }
-                    return (
-                      <span>
-                        {tp?.phase === 'glossary'
-                          ? 'Extracting glossary...'
-                          : 'Translating...'}
-                      </span>
-                    );
-                  })()}
-                  <span className="safe-to-close-hint">
-                    You can safely close this page — the book will be ready when
-                    you return.
-                  </span>
-                </div>
-              ) : hoveredBook.status === 'error' ? (
-                <div className="book-status-error">
-                  <span>Translation failed</span>
-                </div>
-              ) : null}
-              {(() => {
-                const progress = bookProgressMap.get(hoveredBook.uuid);
-                const progressPercent = progress?.is_completed
-                  ? 100
-                  : progress?.reading_progress || 0;
-                const statusText = progress?.is_completed
-                  ? '✓ Completed'
-                  : progressPercent > 0
-                    ? `${progressPercent}% read`
-                    : 'Not started';
-                return (
-                  <>
-                    {/* Progress bar - show only for ready books */}
-                    {user && hoveredBook.status !== 'processing' && (
-                      <div className="progress-section">
-                        <div className="progress-bar">
-                          <div
-                            className="progress-fill"
-                            style={{ width: `${progressPercent}%` }}
-                          ></div>
+                          <span className="progress-text">{statusText}</span>
                         </div>
-                        <span className="progress-text">{statusText}</span>
-                      </div>
-                    )}
+                      )}
 
-                    {/* Remove button - only for user-owned books */}
-                    {hoveredBook.user_id && (
-                      <button
-                        className="remove-book-btn"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteBook(hoveredBook.uuid);
-                        }}
-                        title="Remove Book"
-                      >
-                        <svg
-                          viewBox="0 0 24 24"
-                          width="16"
-                          height="16"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
+                      {/* Remove button - only for user-owned books */}
+                      {hoveredBook.user_id && (
+                        <button
+                          className="remove-book-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteBook(hoveredBook.uuid);
+                          }}
+                          title="Remove Book"
                         >
-                          <polyline points="3 6 5 6 21 6" />
-                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                          <line x1="10" y1="11" x2="10" y2="17" />
-                          <line x1="14" y1="11" x2="14" y2="17" />
-                        </svg>
-                        <span>Remove</span>
-                      </button>
-                    )}
-                  </>
-                );
-              })()}
+                          <svg
+                            viewBox="0 0 24 24"
+                            width="16"
+                            height="16"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          >
+                            <polyline points="3 6 5 6 21 6" />
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                            <line x1="10" y1="11" x2="10" y2="17" />
+                            <line x1="14" y1="11" x2="14" y2="17" />
+                          </svg>
+                          <span>Remove</span>
+                        </button>
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* Auth is now in shelf-actions on the shelf */}
-      </div>
+          {/* Auth is now in shelf-actions on the shelf */}
+        </div>
+      )}
 
       {/* Mobile floating auth removed - now in shelf-actions */}
 
@@ -1422,7 +1527,9 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                         />
                         <div className="estimate-mode-text">
                           <strong>Translate this book</strong>
-                          <span>Bilingual reading with paragraph-level toggle.</span>
+                          <span>
+                            Bilingual reading with paragraph-level toggle.
+                          </span>
                         </div>
                       </label>
                       <label
@@ -1437,7 +1544,9 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                         />
                         <div className="estimate-mode-text">
                           <strong>Import without translation</strong>
-                          <span>Read the original text only. No credits charged.</span>
+                          <span>
+                            Read the original text only. No credits charged.
+                          </span>
                         </div>
                       </label>
                     </div>
@@ -1495,7 +1604,9 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                           <span>Translation cost:</span>
                           <span
                             className={
-                              estimate.canAfford ? 'affordable' : 'not-affordable'
+                              estimate.canAfford
+                                ? 'affordable'
+                                : 'not-affordable'
                             }
                           >
                             {reEstimating
@@ -1523,12 +1634,13 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                         )}
                       </div>
                     )}
-                    {!skipTranslation && estimate.sourceLanguage === estimate.targetLanguage && (
-                      <div className="estimate-language-warning">
-                        Source and target language are the same. Change one to
-                        continue.
-                      </div>
-                    )}
+                    {!skipTranslation &&
+                      estimate.sourceLanguage === estimate.targetLanguage && (
+                        <div className="estimate-language-warning">
+                          Source and target language are the same. Change one to
+                          continue.
+                        </div>
+                      )}
                     <div className="estimate-actions">
                       {skipTranslation ? (
                         <button

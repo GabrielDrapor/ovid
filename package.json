@@ -45,6 +45,7 @@
   "license": "MIT",
   "dependencies": {
     "@lingo-reader/mobi-parser": "^0.4.5",
+    "@react-three/fiber": "^8",
     "@xmldom/xmldom": "^0.8.11",
     "epub2": "^3.0.2",
     "js-tiktoken": "^1.0.21",
@@ -54,6 +55,7 @@
     "react-dom": "^18.2.0",
     "react-scripts": "5.0.1",
     "stripe": "^20.1.0",
+    "three": "0.160.1",
     "uuid": "^11.1.0"
   },
   "devDependencies": {
@@ -65,6 +67,7 @@
     "@types/node": "^24.1.0",
     "@types/react": "18.3.18",
     "@types/react-dom": "18.3.5",
+    "@types/three": "0.160.0",
     "dotenv": "^10.0.0",
     "jsdom": "^28.1.0",
     "prettier": "^3.6.2",
