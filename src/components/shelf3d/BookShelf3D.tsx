@@ -20,6 +20,8 @@ import {
 import { makeCoverCanvas, makeSpineCanvas } from './fallbackTextures';
 import {
   makeCavityShadeCanvas,
+  makeFloorCanvas,
+  makePanelCanvas,
   makeWoodCanvas,
   seededRandom,
 } from './woodTexture';
@@ -319,24 +321,10 @@ function Bookcase({
 
   return (
     <group>
-      {/* room: floor + back wall catch the spill light and shadows */}
-      <mesh
-        rotation={[-Math.PI / 2, 0, 0]}
-        position={[0, bottomY - 0.001, 4]}
-        receiveShadow
-      >
-        <planeGeometry args={[40, 24]} />
-        <meshStandardMaterial color="#2a1f16" roughness={0.94} />
-      </mesh>
-      <mesh position={[0, midY + 2, -1.3]} receiveShadow>
-        <planeGeometry args={[44, 26]} />
-        <meshStandardMaterial color="#241b13" roughness={0.96} />
-      </mesh>
-
       {/* back panel — flush with the case, hidden behind the top cap */}
       <mesh position={[0, midY, -BOOK_DEPTH / 2 - 0.09]} receiveShadow>
         <boxGeometry args={[width + 0.3, height, 0.06]} />
-        <meshStandardMaterial map={boardTex} color="#79695a" roughness={0.92} />
+        <meshStandardMaterial map={boardTex} color="#8a7866" roughness={0.92} />
       </mesh>
       {/* side panels — run exactly from the case bottom to the cap top */}
       {[-1, 1].map((side) => (
@@ -382,6 +370,183 @@ function Bookcase({
           </mesh>
         );
       })}
+    </group>
+  );
+}
+
+/** Repeating canvas texture with proper color space and wrapping. */
+function useTiledTexture(
+  make: () => HTMLCanvasElement,
+  repeatX: number,
+  repeatY: number
+): THREE.Texture {
+  const tex = useMemo(() => {
+    const t = new THREE.CanvasTexture(make());
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.anisotropy = 8;
+    return t;
+    // eslint-disable-next-line
+  }, []);
+  useEffect(() => {
+    tex.repeat.set(repeatX, repeatY);
+  }, [tex, repeatX, repeatY]);
+  useEffect(() => () => tex.dispose(), [tex]);
+  return tex;
+}
+
+/**
+ * Walk-in closet room around the bookcase: paneled walls on all sides,
+ * floorboards and a ceiling, so the view never falls off into a void.
+ */
+function ClosetRoom({
+  rowCount,
+  caseWidth,
+}: {
+  rowCount: number;
+  caseWidth: number;
+}) {
+  const rows = rowYCenters(rowCount);
+  const boardT = 0.09;
+  const headroom = 0.34;
+  const topY = rows[0] + BOOK_HEIGHT / 2 + headroom + boardT;
+  const bottomY = rows[rows.length - 1] - BOOK_HEIGHT / 2 - boardT;
+
+  const roomW = Math.max(caseWidth + 4.5, 9.5);
+  const floorY = bottomY;
+  const ceilY = topY + 1.15;
+  const roomH = ceilY - floorY;
+  const zBack = -1.35;
+  const zFront = 13.5;
+  const zMid = (zBack + zFront) / 2;
+  const roomD = zFront - zBack;
+
+  const backTex = useTiledTexture(
+    () => makePanelCanvas('ovid-wall-back'),
+    roomW / 4,
+    roomH / 4
+  );
+  const leftTex = useTiledTexture(
+    () => makePanelCanvas('ovid-wall-left'),
+    roomD / 4,
+    roomH / 4
+  );
+  const rightTex = useTiledTexture(
+    () => makePanelCanvas('ovid-wall-right'),
+    roomD / 4,
+    roomH / 4
+  );
+  const floorTex = useTiledTexture(
+    () => makeFloorCanvas('ovid-floor'),
+    roomW / 4,
+    roomD / 4
+  );
+
+  const wallY = floorY + roomH / 2;
+  const WALL_TINT = '#9a8672'; // walls sit back tonally so the case pops
+
+  return (
+    <group>
+      {/* back wall */}
+      <mesh position={[0, wallY, zBack]} receiveShadow>
+        <planeGeometry args={[roomW, roomH]} />
+        <meshStandardMaterial map={backTex} color={WALL_TINT} roughness={0.9} />
+      </mesh>
+      {/* side walls */}
+      <mesh
+        position={[-roomW / 2, wallY, zMid]}
+        rotation={[0, Math.PI / 2, 0]}
+        receiveShadow
+      >
+        <planeGeometry args={[roomD, roomH]} />
+        <meshStandardMaterial map={leftTex} color={WALL_TINT} roughness={0.9} />
+      </mesh>
+      <mesh
+        position={[roomW / 2, wallY, zMid]}
+        rotation={[0, -Math.PI / 2, 0]}
+        receiveShadow
+      >
+        <planeGeometry args={[roomD, roomH]} />
+        <meshStandardMaterial
+          map={rightTex}
+          color={WALL_TINT}
+          roughness={0.9}
+        />
+      </mesh>
+      {/* floor */}
+      <mesh
+        position={[0, floorY, zMid]}
+        rotation={[-Math.PI / 2, 0, 0]}
+        receiveShadow
+      >
+        <planeGeometry args={[roomW, roomD]} />
+        <meshStandardMaterial map={floorTex} roughness={0.82} />
+      </mesh>
+      {/* ceiling */}
+      <mesh position={[0, ceilY, zMid]} rotation={[Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[roomW, roomD]} />
+        <meshStandardMaterial color="#4a3826" roughness={0.95} />
+      </mesh>
+      {/* crown molding hides the wall/ceiling junction */}
+      <mesh position={[0, ceilY - 0.07, zBack + 0.04]}>
+        <boxGeometry args={[roomW, 0.14, 0.07]} />
+        <meshStandardMaterial color="#54391f" roughness={0.7} />
+      </mesh>
+      {[-1, 1].map((side) => (
+        <mesh
+          key={`crown-${side}`}
+          position={[side * (roomW / 2 - 0.04), ceilY - 0.07, zMid]}
+        >
+          <boxGeometry args={[0.07, 0.14, roomD]} />
+          <meshStandardMaterial color="#54391f" roughness={0.7} />
+        </mesh>
+      ))}
+      {/* baseboards */}
+      <mesh position={[0, floorY + 0.08, zBack + 0.03]}>
+        <boxGeometry args={[roomW, 0.16, 0.05]} />
+        <meshStandardMaterial color="#4e3620" roughness={0.7} />
+      </mesh>
+      {[-1, 1].map((side) => (
+        <mesh
+          key={side}
+          position={[side * (roomW / 2 - 0.03), floorY + 0.08, zMid]}
+        >
+          <boxGeometry args={[0.05, 0.16, roomD]} />
+          <meshStandardMaterial color="#4e3620" roughness={0.7} />
+        </mesh>
+      ))}
+      {/* warm ceiling glow pooling down the walls */}
+      <pointLight
+        position={[-roomW * 0.28, ceilY - 0.3, 2]}
+        decay={0}
+        intensity={0.26}
+        color="#ffcf9e"
+      />
+      <pointLight
+        position={[roomW * 0.28, ceilY - 0.3, 2]}
+        decay={0}
+        intensity={0.26}
+        color="#ffcf9e"
+      />
+      {/* washers brightening the upper side walls and ceiling edge */}
+      <pointLight
+        position={[-(roomW / 2 - 0.7), ceilY - 0.5, 3]}
+        decay={0}
+        intensity={0.15}
+        color="#ffd8ab"
+      />
+      <pointLight
+        position={[roomW / 2 - 0.7, ceilY - 0.5, 3]}
+        decay={0}
+        intensity={0.15}
+        color="#ffd8ab"
+      />
+      <pointLight
+        position={[0, floorY + 1.2, 9]}
+        decay={0}
+        intensity={0.12}
+        color="#ffddb0"
+      />
     </group>
   );
 }
@@ -519,8 +684,8 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
         onPointerMissed={() => setSelectedUuid(null)}
       >
         <color attach="background" args={[ROOM]} />
-        <fog attach="fog" args={[ROOM, 9, 26]} />
-        <ambientLight intensity={0.5} color="#ffe9cf" />
+        <fog attach="fog" args={[ROOM, 12, 40]} />
+        <ambientLight intensity={0.55} color="#ffe9cf" />
         {/* warm key light from the front-top, the only shadow caster */}
         <spotLight
           position={[1.6, (rowCount * ROW_HEIGHT) / 2 + 2.6, 5.6]}
@@ -546,7 +711,12 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
           color="#ffd9a8"
         />
 
-        {rowCount > 0 && <Bookcase rowCount={rowCount} caseWidth={caseWidth} />}
+        {rowCount > 0 && (
+          <>
+            <ClosetRoom rowCount={rowCount} caseWidth={caseWidth} />
+            <Bookcase rowCount={rowCount} caseWidth={caseWidth} />
+          </>
+        )}
 
         {placements.map((p) => {
           const book = bookByUuid.get(p.uuid);
