@@ -49,19 +49,6 @@
   }
 }
 
-.closet3d-hint {
-  position: absolute;
-  bottom: 18px;
-  left: 50%;
-  transform: translateX(-50%);
-  color: rgba(255, 244, 228, 0.45);
-  font-size: 12px;
-  letter-spacing: 0.04em;
-  pointer-events: none;
-  z-index: 3;
-  white-space: nowrap;
-}
-
 .closet3d-panel {
   position: absolute;
   top: 50%;
@@ -219,9 +206,5 @@
       transform: translateY(0);
       opacity: 1;
     }
-  }
-
-  .closet3d-hint {
-    display: none;
   }
 }

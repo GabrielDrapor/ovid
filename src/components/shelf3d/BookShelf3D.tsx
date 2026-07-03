@@ -779,10 +779,6 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
         </div>
       )}
 
-      <div className="closet3d-hint">
-        Move the mouse to look around · scroll to zoom · click a book
-      </div>
-
       {selectedBook && (
         <div
           className="closet3d-panel"

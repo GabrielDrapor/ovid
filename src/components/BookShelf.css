@@ -1927,9 +1927,36 @@
   background: #171210;
 }
 
+/* 3D closet: the actions live in a glass dock at the bottom center,
+   sharing a pill with the interaction hint. Menus open upward. */
 .shelf-actions--floating {
-  top: 14px;
-  right: 18px;
-  left: auto;
-  transform: none;
+  top: auto;
+  bottom: 16px;
+  left: 50%;
+  right: auto;
+  transform: translateX(-50%);
+  gap: 10px;
+  padding: 8px 16px;
+  background: rgba(20, 15, 12, 0.6);
+  border: 1px solid rgba(255, 235, 205, 0.16);
+  border-radius: 999px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  max-width: calc(100vw - 32px);
+}
+
+.closet-dock-hint {
+  color: rgba(255, 244, 228, 0.5);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  padding-left: 12px;
+  margin-left: 2px;
+  border-left: 1px solid rgba(255, 235, 205, 0.18);
+}
+
+@media (max-width: 768px) {
+  .closet-dock-hint {
+    display: none;
+  }
 }
