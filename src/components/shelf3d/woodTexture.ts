@@ -205,21 +205,21 @@ export function makeCavityShadeCanvas(
   if (!ctx) return canvas;
 
   const top = ctx.createLinearGradient(0, 0, 0, height);
-  top.addColorStop(0, 'rgba(0,0,0,0.42)');
-  top.addColorStop(0.42, 'rgba(0,0,0,0.08)');
-  top.addColorStop(0.75, 'rgba(0,0,0,0.03)');
-  top.addColorStop(1, 'rgba(0,0,0,0.18)');
+  top.addColorStop(0, 'rgba(0,0,0,0.28)');
+  top.addColorStop(0.42, 'rgba(0,0,0,0.06)');
+  top.addColorStop(0.75, 'rgba(0,0,0,0.02)');
+  top.addColorStop(1, 'rgba(0,0,0,0.12)');
   ctx.fillStyle = top;
   ctx.fillRect(0, 0, width, height);
 
   const left = ctx.createLinearGradient(0, 0, width * 0.18, 0);
-  left.addColorStop(0, 'rgba(0,0,0,0.30)');
+  left.addColorStop(0, 'rgba(0,0,0,0.18)');
   left.addColorStop(1, 'rgba(0,0,0,0)');
   ctx.fillStyle = left;
   ctx.fillRect(0, 0, width, height);
 
   const right = ctx.createLinearGradient(width, 0, width * 0.82, 0);
-  right.addColorStop(0, 'rgba(0,0,0,0.30)');
+  right.addColorStop(0, 'rgba(0,0,0,0.18)');
   right.addColorStop(1, 'rgba(0,0,0,0)');
   ctx.fillStyle = right;
   ctx.fillRect(0, 0, width, height);

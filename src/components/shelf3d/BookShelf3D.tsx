@@ -285,7 +285,7 @@ function Bookcase({
   const width = roomW;
   const boardT = 0.09;
   const depth = BOOK_DEPTH + 0.3;
-  const headroom = 0.34;
+  const headroom = 0.18;
   const topY = rows[0] + BOOK_HEIGHT / 2 + headroom;
   const bottomY = rows[rows.length - 1] - BOOK_HEIGHT / 2 - boardT;
   const height = topY - bottomY;
@@ -295,7 +295,7 @@ function Bookcase({
   // the walls so wide side sections split into believable bays.
   const dividerXs = useMemo(() => {
     const xs: number[] = [];
-    let x = contentWidth / 2 + 0.28;
+    let x = contentWidth / 2 + 0.1;
     if (width / 2 - x > 0.5) {
       xs.push(x);
       while (width / 2 - x > 2.7) {
@@ -341,7 +341,7 @@ function Bookcase({
       {/* back panel — the case's own back, covering the wall behind it */}
       <mesh position={[0, midY, -BOOK_DEPTH / 2 - 0.09]} receiveShadow>
         <boxGeometry args={[width, height + boardT, 0.06]} />
-        <meshStandardMaterial map={boardTex} color="#ab9b8a" roughness={0.92} />
+        <meshStandardMaterial map={boardTex} color="#b9a897" roughness={0.92} />
       </mesh>
       {/* end stiles flush against the side walls */}
       {[-1, 1].map((side) => (
@@ -439,7 +439,7 @@ function ClosetRoom({
 }) {
   const rows = rowYCenters(totalRows);
   const boardT = 0.09;
-  const headroom = 0.34;
+  const headroom = 0.18;
   const topY = rows[0] + BOOK_HEIGHT / 2 + headroom + boardT;
   const bottomY = rows[rows.length - 1] - BOOK_HEIGHT / 2 - boardT;
 
@@ -587,10 +587,12 @@ function CameraRig({
   focused,
   caseWidth,
   rowCount,
+  centerY,
 }: {
   focused: boolean;
   caseWidth: number;
   rowCount: number;
+  centerY: number;
 }) {
   const { camera, gl, size } = useThree();
   const zoom = useRef<number | null>(null);
@@ -601,8 +603,8 @@ function CameraRig({
     if (!caseWidth || !rowCount) return 6;
     const tanHalf = Math.tan((38 / 2) * (Math.PI / 180));
     const aspect = size.width / size.height;
-    const zForWidth = (caseWidth / 2 + 0.55) / (tanHalf * aspect);
-    const zForHeight = (rowCount * ROW_HEIGHT) / 2 / tanHalf + 0.6;
+    const zForWidth = (caseWidth / 2 + 0.75) / (tanHalf * aspect);
+    const zForHeight = (rowCount * ROW_HEIGHT) / 2 / tanHalf + 0.9;
     return THREE.MathUtils.clamp(
       Math.max(zForWidth, zForHeight),
       MIN_ZOOM,
@@ -635,11 +637,15 @@ function CameraRig({
     // While a book is presented, quiet the gaze so the pose feels stable.
     const gaze = focused ? 0.18 : 1;
     const tx = state.pointer.x * 1.55 * gaze;
-    const ty = state.pointer.y * 0.5 * gaze;
+    const ty = centerY + state.pointer.y * 0.5 * gaze;
     camera.position.x += (tx - camera.position.x) * k;
     camera.position.y += (ty - camera.position.y) * k;
     camera.position.z += ((zoom.current ?? fitZ) - camera.position.z) * k;
-    camera.lookAt(camera.position.x * 1.35, camera.position.y * 0.75, 0);
+    camera.lookAt(
+      camera.position.x * 1.35,
+      centerY + (camera.position.y - centerY) * 0.75,
+      0
+    );
   });
 
   return null;
@@ -681,7 +687,11 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
   const rowCenters = useMemo(() => rowYCenters(totalRows), [totalRows]);
   const roomW = Math.max(caseWidth + 4.5, 9.5);
   const caseTop =
-    totalRows > 0 ? rowCenters[0] + BOOK_HEIGHT / 2 + 0.34 + 0.09 : 3;
+    totalRows > 0 ? rowCenters[0] + BOOK_HEIGHT / 2 + 0.18 + 0.09 : 3;
+  const contentMidY =
+    rowCount > 0
+      ? (rowCenters[contentStart] + rowCenters[contentStart + rowCount - 1]) / 2
+      : 0;
   const bookByUuid = useMemo(
     () => new Map(books.map((b) => [b.uuid, b])),
     [books]
@@ -782,6 +792,7 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
           focused={selectedUuid !== null}
           caseWidth={caseWidth}
           rowCount={rowCount}
+          centerY={contentMidY}
         />
       </Canvas>
 

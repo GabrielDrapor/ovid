@@ -3,9 +3,9 @@
 
 export const BOOK_HEIGHT = 1;
 export const BOOK_DEPTH = 0.7;
-export const BOOK_GAP = 0.018;
+export const BOOK_GAP = 0.006;
 export const SHELF_INNER_WIDTH = 6.9;
-export const ROW_HEIGHT = 1.5;
+export const ROW_HEIGHT = 1.26;
 
 export const DEFAULT_SPINE_RATIO = 1 / 5.3;
 export const MIN_SPINE_RATIO = 0.04;
@@ -88,7 +88,8 @@ export function layoutBooks(
 
     for (const book of group) {
       const w = spineWidth(ratios.get(book.uuid));
-      if (cursor + w > effectiveWidth && cursor > 0) {
+      // Epsilon keeps a row that exactly fits from wrapping on float noise.
+      if (cursor + w > effectiveWidth + 1e-6 && cursor > 0) {
         finishRow();
         row++;
         cursor = 0;
