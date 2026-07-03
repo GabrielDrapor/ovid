@@ -71,7 +71,7 @@ function useArtTexture(
     let cancelled = false;
     const loader = new THREE.TextureLoader();
     loader.setCrossOrigin('anonymous');
-    loader.load(url, (tex) => {
+    const apply = (tex: THREE.Texture) => {
       if (cancelled) {
         tex.dispose();
         return;
@@ -80,6 +80,16 @@ function useArtTexture(
       tex.anisotropy = 8;
       setLoaded(tex);
       onLoadedRef.current?.(tex);
+    };
+    loader.load(url, apply, undefined, () => {
+      if (cancelled) return;
+      // The usual failure is a poisoned HTTP cache: the same URL was fetched
+      // earlier without CORS (plain <img>), and the cached response carries
+      // no CORS headers. A cache-busting query forces a fresh response.
+      const bust = url + (url.includes('?') ? '&' : '?') + 'cors=1';
+      loader.load(bust, apply, undefined, () => {
+        /* keep the generated fallback */
+      });
     });
     return () => {
       cancelled = true;

@@ -147,10 +147,14 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
       }
       setLoading(false);
 
-      // Preload cover images into browser cache
+      // Preload cover images into browser cache. crossOrigin matters: the 3D
+      // view loads these same URLs as WebGL textures in CORS mode, and a
+      // cached non-CORS response would poison those loads (all covers would
+      // silently fall back to generated art).
       booksData.forEach((book) => {
         if (book.book_cover_img_url) {
           const img = new Image();
+          img.crossOrigin = 'anonymous';
           img.src = book.book_cover_img_url;
         }
       });
@@ -861,6 +865,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                 >
                   {book.book_spine_img_url ? (
                     <img
+                      crossOrigin="anonymous"
                       src={book.book_spine_img_url}
                       alt={`${book.title} spine`}
                       className="book-spine-img"
@@ -1270,6 +1275,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
             <div className="sheet-handle" />
             {mobileSelectedBook.book_cover_img_url && (
               <img
+                crossOrigin="anonymous"
                 src={mobileSelectedBook.book_cover_img_url}
                 alt={mobileSelectedBook.title}
                 className="sheet-cover"
