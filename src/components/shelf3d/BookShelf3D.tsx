@@ -211,7 +211,9 @@ function BookMesh({
       ry = -Math.PI / 2;
       rz = 0;
     } else if (hovered && !anySelected && !processing) {
-      tz = position[2] + 0.22;
+      // Tip the book out of the row and yaw it so the cover peeks out.
+      tz = position[2] + 0.42;
+      ry = -0.3;
     }
 
     g.position.x += (tx - g.position.x) * k;
