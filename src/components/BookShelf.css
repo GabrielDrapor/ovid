@@ -2,6 +2,10 @@
 .bookshelf-container {
   position: relative;
   height: 100vh;
+  /* iOS standalone PWA: 100vh spans the full screen but the webview starts
+     below the status bar, pushing bottom-anchored UI off screen. dvh tracks
+     the real viewport. */
+  height: 100dvh;
   width: 100vw;
   display: flex;
   flex-direction: row;
@@ -1931,7 +1935,7 @@
    sharing a pill with the interaction hint. Menus open upward. */
 .shelf-actions--floating {
   top: auto;
-  bottom: 16px;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
   left: 50%;
   right: auto;
   transform: translateX(-50%);
