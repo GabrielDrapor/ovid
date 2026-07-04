@@ -194,6 +194,8 @@
     transform: none;
     width: auto;
     border-radius: 18px 18px 0 0;
+    /* keep the buttons clear of the iPhone home indicator */
+    padding-bottom: calc(22px + env(safe-area-inset-bottom, 0px));
     animation: closet3d-sheet-in 0.3s ease both;
   }
 
