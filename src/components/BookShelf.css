@@ -1943,6 +1943,9 @@
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   max-width: calc(100vw - 32px);
+  transition:
+    opacity 0.25s ease,
+    visibility 0.25s ease;
 }
 
 .closet-dock-hint {
@@ -1958,5 +1961,13 @@
 @media (max-width: 768px) {
   .closet-dock-hint {
     display: none;
+  }
+
+  /* The info panel becomes a bottom sheet on small screens and would sit
+     right on top of the dock — hide the dock while a book is open. */
+  .shelf-content:has(.closet3d-panel) .shelf-actions--floating {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
   }
 }

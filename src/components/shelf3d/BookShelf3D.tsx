@@ -207,16 +207,36 @@ function BookMesh({
     let tz = position[2] + jitter.pushIn;
     let ry = 0;
     let rz = jitter.lean;
+    let ts = 1;
 
     if (selected) {
       // Float in front of the camera, cover turned toward the viewer.
-      // On wide screens sit left of center (info panel is on the right);
-      // on portrait screens stay centered above the bottom sheet.
+      // On wide screens sit left of center (info panel is on the right).
       const cam = state.camera;
       const aspect = state.size.width / state.size.height;
-      const halfW = Math.tan((38 / 2) * (Math.PI / 180)) * 2.15 * aspect;
-      const xOff = aspect > 1 ? -Math.min(0.75, halfW * 0.42) : 0;
-      const yOff = aspect > 1 ? -0.05 : 0.3;
+      const tanHalf = Math.tan((38 / 2) * (Math.PI / 180));
+      const visH = 2 * tanHalf * 2.15;
+      const visW = visH * aspect;
+      // Matches the CSS breakpoint where the info panel becomes a bottom sheet.
+      const sheetMode = state.size.width <= 768;
+      let xOff = 0;
+      let yOff = -0.05;
+      if (!sheetMode) {
+        xOff = -Math.min(0.75, (visW / 2) * 0.42);
+      } else {
+        // The sheet hides the bottom of the viewport, and at this distance
+        // the cover is wider than what remains of a portrait frame — shrink
+        // the book to fit the free space and center it there. (Backing the
+        // book further off instead would clip it into the shelf whenever the
+        // camera is near MIN_ZOOM.)
+        const sheet = 0.38; // rough fraction covered by the bottom sheet
+        yOff = (sheet * visH) / 2;
+        ts = Math.min(
+          1,
+          (0.62 * visW) / BOOK_DEPTH,
+          (0.72 * (1 - sheet) * visH) / bookHeight
+        );
+      }
       tx = cam.position.x + xOff;
       ty =
         cam.position.y + yOff + Math.sin(state.clock.elapsedTime * 1.1) * 0.02;
@@ -234,6 +254,7 @@ function BookMesh({
     g.position.z += (tz - g.position.z) * k;
     g.rotation.y += (ry - g.rotation.y) * k;
     g.rotation.z += (rz - g.rotation.z) * k;
+    g.scale.setScalar(g.scale.x + (ts - g.scale.x) * k);
 
     // Brightness: dim unselected books while one is out; pulse processing.
     const m = mesh.current;
