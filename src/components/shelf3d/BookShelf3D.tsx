@@ -662,6 +662,24 @@ function CameraRig({
   return null;
 }
 
+// Fill light for the flown-out book. The key spotlight is aimed at the wall,
+// so a presented book — floating well in front of it — would only catch
+// ambient light and read too dark, most visibly on phones where the camera
+// sits far back. decay=2 keeps the light local to the book: the wall behind
+// is far enough away that it stays effectively untouched.
+function SelectionLight({ active }: { active: boolean }) {
+  const ref = useRef<THREE.PointLight>(null);
+  useFrame((state, delta) => {
+    const l = ref.current;
+    if (!l) return;
+    const k = 1 - Math.exp(-delta * 7);
+    l.intensity += ((active ? 2.1 : 0) - l.intensity) * k;
+    const cam = state.camera;
+    l.position.set(cam.position.x, cam.position.y + 0.55, cam.position.z - 1.0);
+  });
+  return <pointLight ref={ref} intensity={0} decay={2} color="#f2e6d2" />;
+}
+
 const BookShelf3D: React.FC<BookShelf3DProps> = ({
   books,
   loading,
@@ -769,6 +787,7 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
           intensity={0.15}
           color="#ece1cf"
         />
+        <SelectionLight active={!!selectedUuid} />
 
         {totalRows > 0 && (
           <Bookcase totalRows={totalRows} totalCols={totalCols} />
