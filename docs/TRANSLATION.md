@@ -12,12 +12,13 @@ CF Workers have a 30-second CPU time limit (even with `waitUntil`). Translating 
 
 ```
 Worker receives EPUB upload
-  → Parses chapters/paragraphs, stores in D1 (translated_text = '')
-  → waitUntil: POST {bookUuid, secret} to TRANSLATOR_URL/translate
+  → Stages the file in R2, inserts a placeholder book row
+  → waitUntil: POST {bookUuid, fileKey, secret} to TRANSLATOR_SERVICE_URL/upload-and-parse
   → Returns 200 immediately to user
 
 Railway receives webhook
-  → Queries D1 for book metadata + untranslated chapters
+  → Fetches the staged file from R2, parses chapters/paragraphs into D1
+  → Extracts glossary, composes cover/spine
   → For each chapter (5 concurrent):
       → Fetches paragraphs from D1
       → Skips already-translated (checkpoint resume)
@@ -28,10 +29,13 @@ Railway receives webhook
 
 ## LLM Configuration
 
-- **Provider**: OpenRouter (`openrouter.ai/api/v1`)
-- **Model**: `anthropic/claude-sonnet` (configurable via `OPENAI_MODEL`)
+- **API**: Any OpenAI-compatible chat-completions endpoint (`OPENAI_API_BASE_URL`)
+- **Model**: `OPENAI_MODEL`, default `gpt-4o-mini`
 - **Temperature**: 0.3 (consistent, faithful translations)
-- **API**: OpenAI-compatible chat completions
+
+`scripts/eval-translation.mjs` benchmarks candidate models on the exact
+production pipeline (LLM-judge scoring across sample chapters) — use it before
+switching `OPENAI_MODEL`.
 
 ## Translation Prompt
 
@@ -43,6 +47,15 @@ The system prompt instructs the model to:
 - Handle XML/HTML artifacts in EPUB content
 
 Context from surrounding paragraphs is included for coherence.
+
+## Glossary
+
+Before translating, the service samples the book text and extracts a
+proper-noun glossary (names, places) with the LLM; the glossary is stored on
+the translation job (`translation_jobs.glossary_json`) and injected into every
+chapter's prompt so names stay consistent across concurrently translated
+chapters. Extraction failures are surfaced in the job status rather than
+silently skipped.
 
 ## Concurrency & Resume
 

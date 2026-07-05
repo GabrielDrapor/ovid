@@ -9,20 +9,26 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full system diagram.
 **Stack**: React + Cloudflare Worker + D1 (SQLite) + R2 (assets) + Railway (translation service)
 
 ### How Upload → Translation Works
-1. User uploads EPUB via `/api/books/upload`
-2. Worker parses EPUB: extracts TOC, chapters, paragraphs → stores in D1 with `translated_text = ''`
-3. Worker extracts/generates cover and spine images → uploads to R2
-4. `waitUntil` fires POST to Railway translator (`TRANSLATOR_URL/translate`)
-5. Railway reads untranslated items from D1 (via REST API), translates 5 chapters concurrently
-6. Each translated paragraph is written back to D1 immediately (checkpoint resume)
-7. Frontend polls `/api/book/:uuid/status` for progress
+1. User uploads EPUB via `/api/books/upload`; Worker stages the file in R2 and inserts a placeholder book row
+2. `waitUntil` fires POST to Railway (`TRANSLATOR_SERVICE_URL/upload-and-parse`) — Railway owns everything from here (parsing, DB writes, credits, translation, covers)
+3. Railway parses the EPUB (TOC, chapters, paragraphs, embedded cover) → stores in D1
+4. Railway translates 5 chapters concurrently, writing each paragraph back to D1 immediately (checkpoint resume)
+5. Frontend polls `/api/book/:uuid/status` for progress
 
 ### Cover/Spine Generation
-- Worker generates SVG covers with title/author text
-- Railway's `image-processor.ts` uses Sharp to render SVG → PNG
-- Spine images: vertical text, auto-sized
-- Cover preview: `/cover-preview/:uuid` endpoint on Railway
+- Railway's `cover-composer.ts` composites each book onto a pre-made blank
+  cloth-hardcover template with Sharp (no AI at request time): original-cover
+  inset with book-face detection, title/author typesetting, spine width scaled
+  to book length
+- Blank templates are generated offline by `scripts/generate-blanks.ts`
+- `image-processor.ts` is the legacy SVG→PNG path, still used by the
+  cover-preview debug page (`/cover-preview/:uuid` on Railway, password-gated)
 - Images stored in R2 at `assets.ovid.jrd.pub`
+- **R2 CORS matters**: the 3D shelf loads covers/spines as WebGL textures, so
+  the bucket has a CORS rule (`GET`/`HEAD` from `*`). Every `<img>`/preload of
+  these assets must set `crossOrigin="anonymous"` — a non-CORS response cached
+  by the browser will poison later `crossOrigin` texture fetches and covers
+  silently fall back to procedural canvases.
 
 ## EPUB Parsing — Hard-Won Lessons
 
@@ -48,16 +54,15 @@ EPUB processing can be async → chapters may arrive out of order. Always use `o
 
 ## Database Notes
 
-Full schema in `database/schema.sql`. Key tables:
-- `books`, `chapters`, `content_items` — content
+Production runs on the **v2 schema** (`database/schema_v2.sql`); `database/schema.sql` is the legacy v1 layout. Key tables:
+- `books_v2`, `chapters_v2` (raw EPUB HTML), `translations_v2` (XPath-mapped translations) — content
 - `users`, `sessions` — auth
-- `reading_progress` — cloud-synced reading position
+- `user_book_progress` — completion + cloud-synced reading position
 - `credit_transactions` — credit ledger (signup_bonus, purchase, usage, refund)
 
 ### D1 Gotchas
 - **SQLITE_BUSY**: Avoid many small writes. Use single SQL file ingestion: `--sql-out=exports/book.sql --apply=local`
 - **SQLITE_AUTH**: D1 rejects PRAGMA statements. Remove from manual SQL files.
-- **Legacy DB name**: Still "polyink-db" in wrangler.toml to preserve existing data.
 
 ## Frontend Notes
 
@@ -69,12 +74,21 @@ Full schema in `database/schema.sql`. Key tables:
 - Click paragraph → toggle `original` ↔ `translated` (state per paragraph via `item_id`)
 - Single-chapter in memory, scroll triggers next/prev chapter load
 - Reading progress auto-saved and restored
-- CJK typography: Noto Sans CJK SC, tuned spacing
+- CJK typography: LXGW Neo ZhiSong Screen, tuned spacing
 
 ### BookShelf
-- Two rows: public books, user's books
-- Hover preview, click spine to read
-- Cover/spine images from R2
+- Default view: 3D closet (`shelf3d/BookShelf3D.tsx`, three + @react-three/fiber,
+  lazy-loaded) — gaze/zoom camera, click a book to fly it out with an info panel;
+  shelf-packing math lives in `shelf3d/layout.ts` (pure, unit-tested)
+- Classic 2D wall remains as the no-WebGL fallback inside `BookShelf.tsx`
+- Cover/spine images from R2, loaded with `crossOrigin` (see R2 CORS note above)
+
+### iOS PWA Gotchas
+- The app is installable (manifest + service worker in `src/sw-register.ts`,
+  update toast on new deploys)
+- In standalone mode `100vh` spans the full screen but the webview starts below
+  the status bar — size full-screen containers with `100dvh` (keep a `100vh`
+  fallback) and pad bottom-anchored UI with `env(safe-area-inset-bottom)`
 
 ### ErrorBoundary
 Wraps the app. Catches render errors, shows recovery UI.
@@ -84,13 +98,16 @@ Wraps the app. Catches render errors, shows recovery UI.
 Located in `services/translator/`. Hono server deployed on Railway.
 
 ### Endpoints
-- `POST /translate` — Start translation (requires `secret` in body)
+- `POST /upload-and-parse` — Full pipeline for a staged upload: parse, credits, covers, translation (requires `secret`)
+- `POST /estimate` — Parse a staged file and return a cost estimate
+- `POST /translate` — Start/resume translation only (requires `secret`)
 - `GET /status/:uuid` — Translation progress
 - `GET /health` — Health check
-- `GET /cover-preview/:uuid` — Cover preview page
+- `GET /preview` — Password-gated cover preview/regeneration pages
+- `POST /admin/regenerate-cover` — Recompose a book's cover/spine
 
 ### Translation Engine
-- Model: OpenRouter → `anthropic/claude-sonnet`
+- Model: `OPENAI_MODEL` on any OpenAI-compatible endpoint (default `gpt-4o-mini`)
 - 5 concurrent chapter workers
 - Checkpoint resume: skips already-translated paragraphs on restart
 - Writes directly to D1 via REST API (`d1-client.ts`)

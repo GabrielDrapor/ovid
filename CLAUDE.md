@@ -47,8 +47,9 @@ TypeScript-first across frontend, backend, CLI, and translator service.
     cloth-hardcover template (pure Sharp, no AI at request time) — see
     `cover-composer.ts`. Spine width scales with book length.
 - **CLI Scripts** (`scripts/`) — import-book, list-books, remove-book, sync-remote-book, generate-blanks
-- **D1 SQLite** — Users, sessions, books, chapters, content_items, credits, reading progress
-- **R2 Storage** — Cover images, spine images, in-book images (`books/{uuid}/images/`)
+- **D1 SQLite** — Users, sessions, books/chapters/translations (v2 tables), translation jobs, credits, reading progress
+- **R2 Storage** — Cover images, spine images, in-book images (`books/{uuid}/images/`). CORS enabled (`GET`/`HEAD` from `*`) — the 3D shelf loads these as WebGL textures
+- **PWA** — Installable (manifest + iOS metas); `src/sw-register.ts` registers the service worker and shows a refresh toast on new deploys. iOS standalone quirk: use `100dvh`/`safe-area-inset-bottom` for full-screen layouts, not bare `100vh`
 
 ### Key Files
 - `src/worker/index.ts` — Main Worker entry, routing, middleware
@@ -79,16 +80,21 @@ TypeScript-first across frontend, backend, CLI, and translator service.
 - `POST /api/auth/logout` — Logout
 
 ### Books
-- `GET /api/books` — List books (public + user's private)
-- `POST /api/books/upload` — Upload EPUB (auth required, deducts credits)
+- `GET /api/books` (alias `/api/v2/books`) — List books (public + user's private)
+- `POST /api/books/estimate` — Parse an EPUB via Railway and return a translation cost estimate
+- `POST /api/books/upload` — Upload EPUB (auth required, deducts credits; Railway handles the rest via `/upload-and-parse`)
+- `GET /api/book/:uuid/status` — Parsing/translation progress (polled by the shelf)
 - `GET /api/book/:uuid/chapters` — Chapter list
 - `GET /api/book/:uuid/chapter/:number` — Chapter content (XPath-mapped paragraphs)
 - `GET /api/book/:uuid/content` — Full book content
 - `DELETE /api/book/:uuid` — Delete book (owner only)
+- `POST /api/book/:uuid/share` / `GET /api/shared/:token/...` — Share links
 
 ### Reading Progress
 - `POST /api/book/:uuid/mark-complete` — Mark book read/unread (`{isCompleted: bool}`)
 - `GET /api/book/:uuid/progress` — Get reading progress
+- `PUT|POST /api/book/:uuid/progress` — Save reading position (POST used by `sendBeacon` on unload)
+- `GET /api/progress` — All of the user's per-book progress in one map
 
 ### Credits & Payments
 - `GET /api/credits` — Balance + available packages
@@ -102,15 +108,18 @@ TypeScript-first across frontend, backend, CLI, and translator service.
 
 ## Database Schema
 
+Production runs the **v2 schema** (`database/schema_v2.sql` + `database/migrations/`); `database/schema.sql` is the legacy v1 layout.
+
 ### Core Tables
 - **users** — `id, google_id, email, name, picture, credits, created_at, updated_at`
 - **sessions** — `id, user_id, session_token, expires_at`
-- **books** — `id, uuid, title, original_title, author, language_pair, styles, user_id, is_public, book_cover_img_url, book_spine_img_url, created_at, updated_at`
-- **chapters** — `id, book_id, chapter_number, title, original_title, order_index`
-- **content_items** — `id, book_id, chapter_id, item_id, original_text, translated_text, type, tag_name, order_index`
+- **books_v2** — `id, uuid, title, original_title, author, language_pair, styles, book_cover_img_url, book_spine_img_url, user_id, status, display_order, created_at, updated_at`
+- **chapters_v2** — `id, book_id, chapter_number, title, original_title, raw_html (original EPUB HTML), text_nodes_json, order_index`
+- **translations_v2** — `id, chapter_id, xpath, original_text, original_html, translated_text, order_index` (XPath-mapped onto the chapter's raw HTML)
+- **translation_jobs** — `book_uuid, source/target_language, total/completed_chapters, current_chapter, current_item_offset, glossary_json, glossary_extracted, translated_title, status, error_message` (checkpoint + progress state per book)
 
 ### User Data
-- **user_book_progress** — `id, user_id, book_uuid, is_completed, completed_at, last_read_at` (UNIQUE user_id + book_uuid)
+- **user_book_progress** — `id, user_id, book_uuid, is_completed, completed_at, last_read_at, chapter_number, paragraph_xpath, show_original` (UNIQUE user_id + book_uuid)
 - **credit_transactions** — `id, user_id, amount, type (purchase/usage), stripe_payment_intent_id, balance_after, created_at`
 
 ## Environment Variables
@@ -119,7 +128,7 @@ TypeScript-first across frontend, backend, CLI, and translator service.
 - `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET`
 - `OPENAI_API_KEY`, `OPENAI_API_BASE_URL`, `OPENAI_MODEL`
 - `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PUBLISHABLE_KEY`
-- `TRANSLATOR_URL`, `TRANSLATOR_SECRET`
+- `TRANSLATOR_SERVICE_URL`, `TRANSLATOR_SECRET`
 
 ### wrangler.toml vars
 - `APP_URL` — e.g. `https://ovid.ink`

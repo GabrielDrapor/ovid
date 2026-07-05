@@ -24,10 +24,12 @@ English | [简体中文](README.zh-CN.md)
 
 - **Click-to-toggle** — Tap any paragraph to switch between original and translated text instantly
 - **EPUB import** — Upload an EPUB, get it auto-translated in the background
-- **Bookshelf UI** — Book spines, AI-generated covers, hover previews — feels like a real shelf
+- **3D bookshelf** — A WebGL walnut wall of cloth hardcovers: pan and zoom with mouse or touch, click a book and it flies off the shelf (classic 2D shelf as no-WebGL fallback)
+- **Composed covers** — Each book gets a cloth-hardcover jacket and spine, composited from the EPUB's own cover art
 - **Reading progress** — Picks up where you left off, synced to the cloud
 - **Infinite scroll** — Chapters load seamlessly as you scroll up/down
 - **CJK typography** — LXGW Neo ZhiSong Screen with tuned line height and spacing
+- **Installable PWA** — Add to home screen; a toast prompts when a new version is ready
 - **Google OAuth** — Login, get your own private library
 - **Credits & payments** — Stripe-powered, pay per book translation
 
@@ -79,12 +81,12 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development workflow and PR process.
 
 ```
 src/
-  components/        React UI — BookShelf, BilingualReaderV2, ErrorBoundary
-  worker/            CF Worker — auth, book-handlers, cover-generator, credits, db
+  components/        React UI — BookShelf (+ shelf3d/), BilingualReaderV2, ErrorBoundary
+  worker/            CF Worker — auth, book-handlers, credits, db
   utils/             Shared utilities (translator module)
 services/
-  translator/        Railway translation service (Hono + Sharp + D1 client)
-scripts/             CLI tools — import, list, remove, sync, generate-cover
+  translator/        Railway translation service (Hono + Sharp + D1 client, cover composer)
+scripts/             CLI tools — import, list, remove, sync, generate-blanks
 database/            Schema, migrations, sample data
 docs/                Architecture & translation system docs
 ```
