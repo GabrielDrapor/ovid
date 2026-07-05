@@ -14,10 +14,12 @@
 
 - **点击切换** — 点任意段落，原文 ↔ 译文即时切换
 - **EPUB 导入** — 上传 EPUB，后台自动翻译
-- **书架 UI** — 书脊、AI 生成封面、悬停预览——像一个真正的书架
+- **3D 书架** — WebGL 胡桃木书墙，布面精装书一字排开：鼠标/触屏平移缩放，点击书本飞出展示详情（无 WebGL 时回退到经典 2D 书架）
+- **合成封面** — 每本书都有布面精装封面和书脊，由 EPUB 自带封面合成
 - **阅读进度** — 自动记录阅读位置，云端同步
 - **无限滚动** — 上下滑动自动加载上一章/下一章
 - **CJK 排版** — 霞鹜新致宋屏幕版，精调行高和字间距
+- **可安装 PWA** — 添加到主屏幕，新版本可用时弹出刷新提示
 - **Google 登录** — 登录后拥有私人书库
 - **积分 & 支付** — Stripe 驱动，按书付费翻译
 
@@ -67,12 +69,12 @@ yarn preview                           # http://localhost:8787
 
 ```
 src/
-  components/        React 组件 — BookShelf, BilingualReaderV2, ErrorBoundary
-  worker/            CF Worker — 认证、书籍处理、封面生成、积分、数据库
+  components/        React 组件 — BookShelf（含 shelf3d/）, BilingualReaderV2, ErrorBoundary
+  worker/            CF Worker — 认证、书籍处理、积分、数据库
   utils/             公共工具（翻译模块）
 services/
-  translator/        Railway 翻译服务（Hono + Sharp + D1 客户端）
-scripts/             CLI 工具 — 导入、列表、删除、同步、生成封面
+  translator/        Railway 翻译服务（Hono + Sharp + D1 客户端、封面合成）
+scripts/             CLI 工具 — 导入、列表、删除、同步、生成封面底板
 database/            Schema、迁移、示例数据
 docs/                架构和翻译系统文档
 ```

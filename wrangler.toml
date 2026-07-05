@@ -1,6 +1,6 @@
 name = "ovid"
 main = "src/worker/index.ts"
-compatibility_date = "2023-12-01"
+compatibility_date = "2026-06-01"
 
 [build]
 command = "yarn build"

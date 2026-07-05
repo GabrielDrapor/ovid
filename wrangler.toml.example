@@ -1,6 +1,6 @@
 name = "ovid"
 main = "src/worker/index.ts"
-compatibility_date = "2023-12-01"
+compatibility_date = "2026-06-01"
 
 [build]
 command = "yarn build"
@@ -14,13 +14,18 @@ binding = "DB"
 database_name = "ovid-db"
 database_id = "your-database-id-here"
 
+[[r2_buckets]]
+binding = "ASSETS_BUCKET"
+bucket_name = "your-bucket-name"
+
 [vars]
 APP_URL = "https://your-domain.com"
-# Stripe publishable key (safe to expose in client)
-STRIPE_PUBLISHABLE_KEY = "pk_test_..."
 
 # Secrets (set via `wrangler secret put`):
 # - GOOGLE_OAUTH_CLIENT_ID
 # - GOOGLE_OAUTH_CLIENT_SECRET
 # - STRIPE_SECRET_KEY
 # - STRIPE_WEBHOOK_SECRET
+# - STRIPE_PUBLISHABLE_KEY
+# - TRANSLATOR_SERVICE_URL
+# - TRANSLATOR_SECRET

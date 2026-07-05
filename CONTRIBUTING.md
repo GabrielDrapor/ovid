@@ -18,12 +18,17 @@ yarn preview  # http://localhost:8787
 
 ## Pull Request Process
 
-1. Create a feature branch
+1. Create a feature branch off the latest `main` (`git fetch origin && git pull` first)
 2. Make your changes
 3. Run tests: `yarn test` and `yarn test:visual`
 4. Run formatter: `yarn format`
-5. Open a PR with a clear description of what and why
-6. Wait for CI (deploy preview + tests)
+5. Rebase on `origin/main` before pushing — main moves fast
+6. Open a PR with a clear description of what and why
+7. Wait for CI (deploy preview + tests)
+
+> Note: the `visual-tests` CI job is temporarily disabled (`if: false` in
+> `.github/workflows/test.yml`) while the shelf UX churns — still run
+> `yarn test:visual` locally for reader/classic-shelf changes.
 
 ## Testing
 
