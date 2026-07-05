@@ -7,7 +7,8 @@
 <p align="center"><strong>Two languages, one tap.</strong></p>
 
 <div align="center">
-  <img width="800" height="476" alt="image" src="https://github.com/user-attachments/assets/b4263157-c44b-4b7e-8692-69f19c457e57" />
+  <img width="800" height="589" alt="ovid_shelf" src="https://github.com/user-attachments/assets/7b1b6977-6fa4-411c-9034-eb6724c56963" />
+
 </div>
 
 <div align="center">
