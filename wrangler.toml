@@ -40,4 +40,4 @@ bucket_name = "ovid"
 
 
 [env.staging.vars]
-APP_URL = "https://staging.lib.jrd.pub"
+APP_URL = "https://ovid-staging.drapor.workers.dev"

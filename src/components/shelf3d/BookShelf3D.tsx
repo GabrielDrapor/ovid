@@ -49,7 +49,22 @@ const CLOTH_FALLBACK = '#3a3026';
 
 const MIN_ZOOM = 2.5;
 
-/** Loads an image texture, falling back to generated canvas artwork. */
+/** A tiny solid-color canvas used as a neutral placeholder while loading. */
+function makeNeutralCanvas(w = 16, h = 16): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  const ctx = c.getContext('2d');
+  if (ctx) {
+    ctx.fillStyle = '#4a3f34';
+    ctx.fillRect(0, 0, w, h);
+  }
+  return c;
+}
+
+/** Loads an image texture, falling back to generated canvas artwork.
+ *  While a URL is loading, returns a neutral dark placeholder instead of the
+ *  colorful fallback so the shelf looks clean during initial load. */
 function useArtTexture(
   url: string | null,
   makeFallback: () => HTMLCanvasElement,
@@ -60,6 +75,13 @@ function useArtTexture(
 
   const fallback = useMemo(() => {
     const tex = new THREE.CanvasTexture(makeFallback());
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+  }, []);
+
+  const neutral = useMemo(() => {
+    if (!url) return null;
+    const tex = new THREE.CanvasTexture(makeNeutralCanvas());
     tex.colorSpace = THREE.SRGBColorSpace;
     return tex;
   }, []);
@@ -83,12 +105,10 @@ function useArtTexture(
     };
     loader.load(url, apply, undefined, () => {
       if (cancelled) return;
-      // The usual failure is a poisoned HTTP cache: the same URL was fetched
-      // earlier without CORS (plain <img>), and the cached response carries
-      // no CORS headers. A cache-busting query forces a fresh response.
       const bust = url + (url.includes('?') ? '&' : '?') + 'cors=1';
       loader.load(bust, apply, undefined, () => {
-        /* keep the generated fallback */
+        // Both attempts failed — show the colorful fallback.
+        setLoaded(fallback);
       });
     });
     return () => {
@@ -99,11 +119,16 @@ function useArtTexture(
   useEffect(() => {
     return () => {
       fallback.dispose();
+      neutral?.dispose();
       loaded?.dispose();
     };
   }, []);
 
-  return loaded ?? fallback;
+  // No URL → colorful fallback immediately.
+  // URL loading → neutral dark placeholder.
+  // URL resolved → real texture (or fallback on failure).
+  if (!url) return fallback;
+  return loaded ?? neutral ?? fallback;
 }
 
 interface BookMeshProps {
@@ -114,6 +139,7 @@ interface BookMeshProps {
   anySelected: boolean;
   onSelect: (uuid: string) => void;
   onSpineRatio: (uuid: string, ratio: number) => void;
+  onArtReady: (uuid: string) => void;
   /** Accumulated touch-drag distance; large values suppress the tap-click. */
   dragDist: React.MutableRefObject<number>;
 }
@@ -126,6 +152,7 @@ function BookMesh({
   anySelected,
   onSelect,
   onSpineRatio,
+  onArtReady,
   dragDist,
 }: BookMeshProps) {
   const group = useRef<THREE.Group>(null);
@@ -150,10 +177,16 @@ function BookMesh({
   // Cloth color (back cover, page rims) sampled from the spine art.
   const [cloth, setCloth] = useState(CLOTH_FALLBACK);
 
+  const hasSpineUrl = !!book.book_spine_img_url;
+  const hasCoverUrl = !!book.book_cover_img_url;
+  const [spineLoaded, setSpineLoaded] = useState(false);
+  const [coverLoaded, setCoverLoaded] = useState(false);
+
   const spineTex = useArtTexture(
     book.book_spine_img_url,
     () => makeSpineCanvas(book.original_title || book.title),
     (tex) => {
+      setSpineLoaded(true);
       const img = tex.image as HTMLImageElement;
       if (img?.width && img?.height) {
         onSpineRatio(book.uuid, clampSpineRatio(img.width / img.height));
@@ -161,9 +194,17 @@ function BookMesh({
       }
     }
   );
-  const coverTex = useArtTexture(book.book_cover_img_url, () =>
-    makeCoverCanvas(book.original_title || book.title, book.author)
+  const coverTex = useArtTexture(
+    book.book_cover_img_url,
+    () => makeCoverCanvas(book.original_title || book.title, book.author),
+    () => setCoverLoaded(true)
   );
+  // Books without URLs are ready immediately; books with URLs wait for load.
+  const artReady =
+    (!hasSpineUrl || spineLoaded) && (!hasCoverUrl || coverLoaded);
+  useEffect(() => {
+    if (artReady) onArtReady(book.uuid);
+  }, [artReady, book.uuid, onArtReady]);
   const pagesTex = useMemo(() => {
     const t = new THREE.CanvasTexture(makePageEdgesCanvas(cloth));
     t.colorSpace = THREE.SRGBColorSpace;
@@ -179,6 +220,8 @@ function BookMesh({
     return [white, clothC, white, white, white, white];
   }, [cloth]);
   const dim = useRef(1);
+  // Fade-in: books with image URLs start transparent, fade to opaque once loaded.
+  const reveal = useRef(artReady ? 1 : 0);
 
   useEffect(() => {
     document.body.style.cursor = hovered ? 'pointer' : '';
@@ -256,6 +299,12 @@ function BookMesh({
     g.rotation.z += (rz - g.rotation.z) * k;
     g.scale.setScalar(g.scale.x + (ts - g.scale.x) * k);
 
+    // Skeleton → reveal: books with image URLs start as visible silhouettes
+    // with a breathing shimmer, then fade to full brightness once loaded.
+    if (artReady) {
+      reveal.current = Math.min(1, reveal.current + delta * 2.5);
+    }
+
     // Brightness: dim unselected books while one is out; pulse processing.
     const m = mesh.current;
     if (m && Array.isArray(m.material)) {
@@ -266,12 +315,21 @@ function BookMesh({
       }
       dim.current += (target - dim.current) * k;
       const mats = m.material as THREE.MeshStandardMaterial[];
+
+      // Loading shimmer: gentle breathing pulse on skeleton books.
+      let bright = dim.current;
+      if (!artReady) {
+        bright *= 0.55 + Math.sin(state.clock.elapsedTime * 1.8) * 0.15;
+      } else if (reveal.current < 1) {
+        bright *= reveal.current;
+      }
+
       for (let i = 0; i < mats.length; i++) {
         const base = baseColors[i] ?? baseColors[0];
         mats[i].color.setRGB(
-          base.r * dim.current,
-          base.g * dim.current,
-          base.b * dim.current
+          base.r * bright,
+          base.g * bright,
+          base.b * bright
         );
       }
     }
@@ -694,6 +752,20 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
   );
   const [selectedUuid, setSelectedUuid] = useState<string | null>(null);
 
+  // Track how many books with image URLs have finished loading.
+  const booksWithUrls = useMemo(
+    () => books.filter((b) => b.book_spine_img_url || b.book_cover_img_url).length,
+    [books]
+  );
+  const [readyCount, setReadyCount] = useState(0);
+  const readySet = useRef(new Set<string>());
+  const handleArtReady = useCallback((uuid: string) => {
+    if (readySet.current.has(uuid)) return;
+    readySet.current.add(uuid);
+    setReadyCount(readySet.current.size);
+  }, []);
+  const allArtReady = booksWithUrls === 0 || readyCount >= booksWithUrls;
+
   const handleSpineRatio = useCallback((uuid: string, ratio: number) => {
     setSpineRatios((prev) => {
       if (Math.abs((prev.get(uuid) ?? DEFAULT_SPINE_RATIO) - ratio) < 0.001) {
@@ -807,6 +879,7 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
               anySelected={selectedUuid !== null}
               onSelect={setSelectedUuid}
               onSpineRatio={handleSpineRatio}
+              onArtReady={handleArtReady}
               dragDist={dragDist}
             />
           );
@@ -822,6 +895,12 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
           dragDist={dragDist}
         />
       </Canvas>
+
+      {!loading && (
+        <div
+          className={`closet3d-blur-overlay ${allArtReady ? 'closet3d-blur-clear' : ''}`}
+        />
+      )}
 
       {loading && (
         <div className="closet3d-loading">
