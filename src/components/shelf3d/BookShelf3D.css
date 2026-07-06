@@ -24,6 +24,23 @@
   );
 }
 
+.closet3d-blur-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 3;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  transition: backdrop-filter 0.6s ease-out, -webkit-backdrop-filter 0.6s ease-out,
+    opacity 0.6s ease-out;
+}
+
+.closet3d-blur-overlay.closet3d-blur-clear {
+  backdrop-filter: blur(0px);
+  -webkit-backdrop-filter: blur(0px);
+  opacity: 0;
+}
+
 .closet3d-loading {
   position: absolute;
   inset: 0;
