@@ -120,6 +120,20 @@ describe('composeBookImages', () => {
     expect((await sharp(spine).metadata()).format).toBe('png');
   });
 
+  it('accepts a shorter spine title without affecting cover composition', async () => {
+    const { cover, spine } = await composeBookImages({
+      templateCover: await fakeCoverTemplate(),
+      templateSpine: await fakeSpineTemplate(),
+      originalCover: null,
+      title: '可能性的艺术：比较政治学30讲',
+      spineTitle: '可能性的艺术',
+      author: '刘瑜',
+    });
+
+    expect((await sharp(cover).metadata()).format).toBe('png');
+    expect((await sharp(spine).metadata()).format).toBe('png');
+  });
+
   it('handles CJK titles and a long wrapping title without throwing', async () => {
     const cjk = await composeBookImages({
       templateCover: await fakeCoverTemplate('#22304a'),

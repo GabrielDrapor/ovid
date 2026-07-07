@@ -11,6 +11,10 @@ import {
   composeBookImages,
   spineThicknessFromLength,
 } from './cover-composer.js';
+import {
+  compressBookTitleForSpine,
+  sanitizeBookTitle,
+} from './title-sanitizer.js';
 import { generatePreview, PREVIEW_HTML, LOGIN_HTML } from './cover-preview.js';
 import { parseBook, type BookDataV2 } from './book-parser.js';
 import { calculateBookCredits, TOKENS_PER_CREDIT } from './token-counter.js';
@@ -295,6 +299,16 @@ async function processUpload(req: UploadAndParseRequest): Promise<void> {
     console.log(
       `[upload] Parsed: "${bookData.title}" by ${bookData.author}, ${bookData.chapters.length} chapters`
     );
+    const originalParsedTitle = bookData.title || 'Untitled';
+    const sanitizedBookTitle = await sanitizeBookTitle(
+      originalParsedTitle,
+      getLlmConfig()
+    );
+    if (sanitizedBookTitle !== originalParsedTitle) {
+      console.log(
+        `[upload] Title sanitized for ${bookUuid}: "${originalParsedTitle}" → "${sanitizedBookTitle}"`
+      );
+    }
 
     // 3. Calculate credits and check balance (skipped when no translation requested)
     if (!skipTranslation) {
@@ -334,7 +348,7 @@ async function processUpload(req: UploadAndParseRequest): Promise<void> {
         [
           userId,
           -requiredCredits,
-          `Translation: ${bookData.title || 'Book'}`,
+          `Translation: ${sanitizedBookTitle || 'Book'}`,
           bookUuid,
           userId,
         ]
@@ -360,8 +374,8 @@ async function processUpload(req: UploadAndParseRequest): Promise<void> {
       `UPDATE books_v2 SET title = ?, original_title = ?, author = ?, language_pair = ?, styles = ?, user_id = ?
        WHERE uuid = ?`,
       [
-        bookData.title,
-        bookData.title,
+        sanitizedBookTitle,
+        sanitizedBookTitle,
         bookData.author,
         `${sourceLanguage}-${effectiveTargetLanguage}`,
         bookData.styles || '',
@@ -386,8 +400,8 @@ async function processUpload(req: UploadAndParseRequest): Promise<void> {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           bookUuid,
-          bookData.title,
-          bookData.title,
+          sanitizedBookTitle,
+          sanitizedBookTitle,
           bookData.author,
           `${sourceLanguage}-${effectiveTargetLanguage}`,
           bookData.styles || '',
@@ -474,12 +488,14 @@ async function processUpload(req: UploadAndParseRequest): Promise<void> {
       });
     }
 
-    // 8. Generate cover images — composite onto a blank cloth template (no AI at runtime)
+    // 8. Generate cover images from sanitized metadata. The spine can use a
+    // shorter display title, but the cover keeps the full sanitized title.
     generateCoversForBook(
-      bookData.title,
+      sanitizedBookTitle,
       bookData.author,
       bookUuid,
-      bookData.coverImage
+      bookData.coverImage,
+      { titleIsSanitized: true }
     ).catch((err) => {
       console.warn(`[upload] Cover generation failed for ${bookUuid}:`, err);
     });
@@ -526,11 +542,12 @@ async function processUpload(req: UploadAndParseRequest): Promise<void> {
 }
 
 function slugify(text: string): string {
-  return text
+  const slug = text
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '_')
     .replace(/^_|_$/g, '')
     .slice(0, 40);
+  return slug || 'book';
 }
 
 /**
@@ -550,17 +567,35 @@ function normalizeAuthorName(author: string): string {
  * hardcover template (see scripts/generate-blanks.ts) and typesetting the
  * title/author — with the EPUB's own cover inset on the front when present.
  *
- * This is pure image compositing (Sharp); no AI call happens at request time.
+ * Image composition is pure Sharp. Uploads pass an already-sanitized title;
+ * admin regeneration still sanitizes here so older records get clean artwork.
  */
 
 async function generateCoversForBook(
   title: string,
   author: string,
   bookUuid: string,
-  coverImage?: { data: Uint8Array; mediaType: string }
+  coverImage?: { data: Uint8Array; mediaType: string },
+  options: { titleIsSanitized?: boolean } = {}
 ): Promise<void> {
   // Normalize author name from catalog format ("Allen, David") to natural ("David Allen")
   author = normalizeAuthorName(author);
+
+  const originalCoverTitle = title;
+  title = options.titleIsSanitized
+    ? title
+    : await sanitizeBookTitle(title, getLlmConfig());
+  if (title !== originalCoverTitle) {
+    console.log(
+      `[cover] Title sanitized for ${bookUuid}: "${originalCoverTitle}" → "${title}"`
+    );
+  }
+  const spineTitle = compressBookTitleForSpine(title);
+  if (spineTitle !== title) {
+    console.log(
+      `[cover] Spine title compressed for ${bookUuid}: "${title}" → "${spineTitle}"`
+    );
+  }
 
   const slug = slugify(title);
   const uid = crypto.randomUUID().slice(0, 8);
@@ -593,6 +628,7 @@ async function generateCoversForBook(
       templateSpine: template.spine,
       originalCover: coverImage ? Buffer.from(coverImage.data) : null,
       title,
+      spineTitle,
       author,
       spineThickness,
     });
