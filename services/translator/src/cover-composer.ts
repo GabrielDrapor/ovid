@@ -24,6 +24,8 @@ export interface ComposeInput {
   /** The book's own embedded cover, if the EPUB had one. */
   originalCover?: Buffer | null;
   title: string;
+  /** Optional shorter title for the spine, where horizontal room is limited. */
+  spineTitle?: string;
   author: string;
   /**
    * Spine width multiplier (book thickness). 1 = the template's native width;
@@ -347,7 +349,8 @@ async function composeCover(input: ComposeInput): Promise<Buffer> {
 
 /** Compose the spine: blank template + vertical title/author. */
 async function composeSpine(input: ComposeInput): Promise<Buffer> {
-  const { title, author } = input;
+  const { author } = input;
+  const title = input.spineTitle || input.title;
 
   // Apply book thickness: stretch the cloth horizontally BEFORE detecting the
   // spine and printing text, so the spine widens (with its 3D lighting) while
