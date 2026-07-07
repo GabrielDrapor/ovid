@@ -45,8 +45,18 @@ export interface PlacedBook {
   width: number;
 }
 
+export interface PlacedShelfLabel {
+  key: string;
+  text: string;
+  /** Left edge of the label plane in wall coordinates. */
+  left: number;
+  /** Content row index, 0 = top content row (the empty ring is excluded). */
+  row: number;
+}
+
 export interface ShelfLayout {
   placements: PlacedBook[];
+  slotLabels: PlacedShelfLabel[];
   /** Rows/columns actually holding books. */
   contentRows: number;
   contentCols: number;
@@ -57,21 +67,80 @@ export interface ShelfLayout {
   wallWidth: number;
 }
 
+type LayoutBook = {
+  uuid: string;
+  user_id: number | null;
+  shelf_id?: string | null;
+  shelf_position?: number | null;
+  shelf_row?: number | null;
+  shelf_col?: number | null;
+  shelf_slot_order?: number | null;
+  shelf_slot_label?: string | null;
+  display_order?: number | null;
+};
+
 /**
  * Pack books into uniform bays. Public books fill bays first; user books
  * always start on a fresh row. Each bay's run of books is centered within
  * the bay.
  */
 export function layoutBooks(
-  books: { uuid: string; user_id: number | null }[],
+  books: LayoutBook[],
   ratios: Map<string, number>,
   bayInner: number = BAY_INNER,
   maxCols: number = MAX_CONTENT_COLS
 ): ShelfLayout {
-  const groups = [
-    books.filter((b) => !b.user_id),
-    books.filter((b) => !!b.user_id),
-  ].filter((g) => g.length > 0);
+  if (
+    books.some(
+      (book) =>
+        Number.isFinite(book.shelf_row) && Number.isFinite(book.shelf_col)
+    )
+  ) {
+    return layoutPhysicalSlots(books, ratios, bayInner);
+  }
+
+  return layoutLegacyBooks(books, ratios, bayInner, maxCols);
+}
+
+function groupKey(book: LayoutBook) {
+  if (book.shelf_id) return book.shelf_id;
+  return book.user_id ? '90-user' : '00-public';
+}
+
+function orderValue(book: LayoutBook) {
+  return book.shelf_position ?? book.display_order ?? 0;
+}
+
+function sortBooks(a: LayoutBook, b: LayoutBook) {
+  const byPosition = orderValue(a) - orderValue(b);
+  if (byPosition !== 0) return byPosition;
+  return a.uuid.localeCompare(b.uuid);
+}
+
+function layoutLegacyBooks(
+  books: LayoutBook[],
+  ratios: Map<string, number>,
+  bayInner: number,
+  maxCols: number
+): ShelfLayout {
+  const groupForBook = (book: LayoutBook) => {
+    if (book.shelf_id) return book.shelf_id;
+    return book.user_id ? '90-user' : '00-public';
+  };
+
+  const grouped = new Map<string, LayoutBook[]>();
+  for (const book of books) {
+    const key = groupForBook(book);
+    const group = grouped.get(key);
+    if (group) group.push(book);
+    else grouped.set(key, [book]);
+  }
+  const groups = Array.from(grouped.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([, group]) =>
+      group.slice().sort(sortBooks)
+    )
+    .filter((g) => g.length > 0);
 
   interface Slot {
     uuid: string;
@@ -161,12 +230,171 @@ export function layoutBooks(
 
   return {
     placements,
+    slotLabels: [],
     contentRows,
     contentCols,
     totalRows,
     totalCols,
     wallWidth,
   };
+}
+
+interface PhysicalRun {
+  rowCoord: number;
+  colCoord: number;
+  books: LayoutBook[];
+}
+
+function layoutPhysicalSlots(
+  books: LayoutBook[],
+  ratios: Map<string, number>,
+  bayInner: number
+): ShelfLayout {
+  const runMap = new Map<string, PhysicalRun>();
+  const unplaced: LayoutBook[] = [];
+
+  const addToRun = (rowCoord: number, colCoord: number, book: LayoutBook) => {
+    const key = `${rowCoord}:${colCoord}`;
+    let run = runMap.get(key);
+    if (!run) {
+      run = { rowCoord, colCoord, books: [] };
+      runMap.set(key, run);
+    }
+    run.books.push(book);
+  };
+
+  for (const book of books) {
+    if (Number.isFinite(book.shelf_row) && Number.isFinite(book.shelf_col)) {
+      addToRun(Number(book.shelf_row), Number(book.shelf_col), book);
+    } else {
+      unplaced.push(book);
+    }
+  }
+
+  for (const run of Array.from(runMap.values())) {
+    run.books.sort(sortBooks);
+  }
+
+  if (unplaced.length > 0) {
+    const occupied = new Set(runMap.keys());
+    const grouped = new Map<string, LayoutBook[]>();
+    for (const book of unplaced) {
+      const key = groupKey(book);
+      const group = grouped.get(key);
+      if (group) group.push(book);
+      else grouped.set(key, [book]);
+    }
+
+    for (const [, group] of Array.from(grouped.entries()).sort(([a], [b]) =>
+      a.localeCompare(b)
+    )) {
+      let currentRun: PhysicalRun | null = null;
+      let cursor = 0;
+      for (const book of group.slice().sort(sortBooks)) {
+        const w = spineWidth(ratios.get(book.uuid));
+        if (!currentRun || (cursor + w > bayInner + 1e-6 && cursor > 0)) {
+          const [rowCoord, colCoord] = nextCenterOutCoord(occupied);
+          currentRun = { rowCoord, colCoord, books: [] };
+          runMap.set(`${rowCoord}:${colCoord}`, currentRun);
+          occupied.add(`${rowCoord}:${colCoord}`);
+          cursor = 0;
+        }
+        currentRun.books.push(book);
+        cursor += w + BOOK_GAP;
+      }
+    }
+  }
+
+  const runs = Array.from(runMap.values());
+  if (runs.length === 0) {
+    return {
+      placements: [],
+      slotLabels: [],
+      contentRows: 0,
+      contentCols: 0,
+      totalRows: 0,
+      totalCols: 0,
+      wallWidth: 0,
+    };
+  }
+
+  const minRow = Math.min(...runs.map((run) => run.rowCoord));
+  const maxRow = Math.max(...runs.map((run) => run.rowCoord));
+  const minCol = Math.min(...runs.map((run) => run.colCoord));
+  const maxCol = Math.max(...runs.map((run) => run.colCoord));
+  const contentRows = maxRow - minRow + 1;
+  const contentCols = maxCol - minCol + 1;
+  const totalRows = contentRows + 2;
+  const totalCols = contentCols + 2;
+  const pitch = bayInner + DIVIDER_T;
+  const wallWidth = totalCols * pitch + DIVIDER_T;
+
+  const placements: PlacedBook[] = [];
+  const slotLabels: PlacedShelfLabel[] = [];
+  for (const run of runs) {
+    const row = run.rowCoord - minRow;
+    const col = run.colCoord - minCol;
+    const bayCenter = (col + 1 + 0.5 - totalCols / 2) * pitch;
+    const widths = run.books.map((book) => spineWidth(ratios.get(book.uuid)));
+    const bayLeft = bayCenter - bayInner / 2;
+    const labelText = run.books
+      .map((book) => book.shelf_slot_label?.trim())
+      .find((label): label is string => !!label);
+
+    if (labelText) {
+      slotLabels.push({
+        key: `${run.rowCoord}:${run.colCoord}:${labelText}`,
+        text: labelText,
+        left: bayLeft + 0.08,
+        row,
+      });
+    }
+
+    let cursor = 0;
+    run.books.forEach((book, index) => {
+      const width = widths[index];
+      placements.push({
+        uuid: book.uuid,
+        width,
+        row,
+        x: bayLeft + cursor + width / 2,
+      });
+      cursor += width + BOOK_GAP;
+    });
+  }
+
+  return {
+    placements,
+    slotLabels,
+    contentRows,
+    contentCols,
+    totalRows,
+    totalCols,
+    wallWidth,
+  };
+}
+
+function nextCenterOutCoord(occupied: Set<string>): [number, number] {
+  for (let radius = 0; radius < 50; radius++) {
+    const candidates: Array<[number, number]> = [];
+    for (let row = -radius; row <= radius; row++) {
+      for (let col = -radius; col <= radius; col++) {
+        if (Math.max(Math.abs(row), Math.abs(col)) !== radius) continue;
+        candidates.push([row, col]);
+      }
+    }
+    candidates.sort(([rowA, colA], [rowB, colB]) => {
+      const distA = Math.abs(rowA) + Math.abs(colA);
+      const distB = Math.abs(rowB) + Math.abs(colB);
+      if (distA !== distB) return distA - distB;
+      if (rowA !== rowB) return rowA - rowB;
+      return colA - colB;
+    });
+    for (const [row, col] of candidates) {
+      if (!occupied.has(`${row}:${col}`)) return [row, col];
+    }
+  }
+  return [0, occupied.size + 1];
 }
 
 /** Vertical center of each row, rows stacked symmetrically around y = 0. */

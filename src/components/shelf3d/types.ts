@@ -11,6 +11,14 @@ export interface Book {
   book_spine_img_url: string | null;
   user_id: number | null;
   status: string | null; // 'ready' | 'processing' | 'error'
+  display_order?: number | null;
+  shelf_id?: string | null;
+  shelf_position?: number | null;
+  shelf_slot_id?: number | null;
+  shelf_row?: number | null;
+  shelf_col?: number | null;
+  shelf_slot_order?: number | null;
+  shelf_slot_label?: string | null;
   created_at: string;
   updated_at: string;
 }

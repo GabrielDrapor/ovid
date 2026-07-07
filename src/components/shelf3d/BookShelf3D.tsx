@@ -15,6 +15,7 @@ import {
   BOOK_HEIGHT,
   DEFAULT_SPINE_RATIO,
   DIVIDER_T,
+  PlacedShelfLabel,
   ROW_HEIGHT,
   clampSpineRatio,
   layoutBooks,
@@ -48,6 +49,8 @@ const ROOM = '#171210';
 const CLOTH_FALLBACK = '#3a3026';
 
 const MIN_ZOOM = 2.5;
+const SHELF_LABEL_HEIGHT = 0.084;
+const SHELF_LABEL_FONT = '900 58px Arial, Helvetica, sans-serif';
 
 /** A tiny solid-color canvas used as a neutral placeholder while loading. */
 function makeNeutralCanvas(w = 16, h = 16): HTMLCanvasElement {
@@ -59,6 +62,60 @@ function makeNeutralCanvas(w = 16, h = 16): HTMLCanvasElement {
     ctx.fillStyle = '#4a3f34';
     ctx.fillRect(0, 0, w, h);
   }
+  return c;
+}
+
+function makeShelfLabelCanvas(text: string): HTMLCanvasElement {
+  const measureCanvas = document.createElement('canvas');
+  const measureCtx = measureCanvas.getContext('2d');
+  const textWidth = (() => {
+    if (!measureCtx) return 520;
+    measureCtx.font = SHELF_LABEL_FONT;
+    return Math.ceil(measureCtx.measureText(text).width);
+  })();
+
+  const c = document.createElement('canvas');
+  c.width = Math.max(780, textWidth + 150);
+  c.height = 132;
+  const ctx = c.getContext('2d');
+  if (!ctx) return c;
+
+  ctx.clearRect(0, 0, c.width, c.height);
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.34)';
+  ctx.fillRect(30, 11, c.width - 60, 116);
+
+  // Black plastic holder, like a clip-on library shelf label.
+  ctx.fillStyle = '#11100e';
+  ctx.fillRect(20, 4, c.width - 40, 116);
+  ctx.fillStyle = '#24211d';
+  ctx.fillRect(20, 4, c.width - 40, 18);
+  ctx.fillStyle = '#050504';
+  ctx.fillRect(20, 107, c.width - 40, 13);
+  ctx.fillRect(20, 4, 20, 116);
+  ctx.fillRect(c.width - 40, 4, 20, 116);
+
+  // White paper insert.
+  ctx.fillStyle = '#f6f4ed';
+  ctx.fillRect(48, 30, c.width - 96, 64);
+  ctx.strokeStyle = '#d0cabd';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(48, 30, c.width - 96, 64);
+
+  // Subtle paper grain so the label reads as a pasted library shelf marker.
+  const noise = seededRandom(`shelf-label-${text}`);
+  ctx.globalAlpha = 0.1;
+  for (let i = 0; i < 1200; i++) {
+    const v = 120 + Math.floor(noise() * 80);
+    ctx.fillStyle = `rgb(${v}, ${v}, ${v})`;
+    ctx.fillRect(48 + noise() * (c.width - 96), 30 + noise() * 64, 1, 1);
+  }
+  ctx.globalAlpha = 1;
+
+  ctx.fillStyle = '#050505';
+  ctx.font = SHELF_LABEL_FONT;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, c.width / 2, 63);
   return c;
 }
 
@@ -129,6 +186,40 @@ function useArtTexture(
   // URL resolved → real texture (or fallback on failure).
   if (!url) return fallback;
   return loaded ?? neutral ?? fallback;
+}
+
+function ShelfLabel({
+  text,
+  left,
+  y,
+}: {
+  text: string;
+  left: number;
+  y: number;
+}) {
+  const label = useMemo(() => {
+    const canvas = makeShelfLabelCanvas(text);
+    const t = new THREE.CanvasTexture(canvas);
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.anisotropy = 8;
+    return {
+      texture: t,
+      width: SHELF_LABEL_HEIGHT * (canvas.width / canvas.height),
+    };
+  }, [text]);
+  useEffect(() => () => label.texture.dispose(), [label]);
+
+  return (
+    <mesh position={[left + label.width / 2, y, BOOK_DEPTH / 2 + 0.15]} renderOrder={5}>
+      <planeGeometry args={[label.width, SHELF_LABEL_HEIGHT]} />
+      <meshBasicMaterial
+        map={label.texture}
+        transparent
+        depthWrite={false}
+        toneMapped={false}
+      />
+    </mesh>
+  );
 }
 
 interface BookMeshProps {
@@ -409,9 +500,11 @@ function BookMesh({
 function Bookcase({
   totalRows,
   totalCols,
+  slotLabels,
 }: {
   totalRows: number;
   totalCols: number;
+  slotLabels: PlacedShelfLabel[];
 }) {
   const rows = rowYCenters(totalRows);
   const width = totalCols * BAY_PITCH + DIVIDER_T;
@@ -422,7 +515,6 @@ function Bookcase({
   const bottomY = rows[rows.length - 1] - BOOK_HEIGHT / 2 - boardT;
   const height = topY - bottomY;
   const midY = (topY + bottomY) / 2;
-
   // A divider on every internal bay boundary — all bays the same width.
   const dividerXs = useMemo(() => {
     const xs: number[] = [];
@@ -524,6 +616,14 @@ function Bookcase({
           <boxGeometry args={[width, boardT, depth]} />
           <meshStandardMaterial map={boardTex} roughness={0.8} />
         </mesh>
+      ))}
+      {slotLabels.map((label) => (
+        <ShelfLabel
+          key={label.key}
+          text={label.text}
+          left={label.left}
+          y={rows[label.row + 1] - BOOK_HEIGHT / 2 - SHELF_LABEL_HEIGHT / 2}
+        />
       ))}
       {/* cheap ambient occlusion inside every cavity */}
       {rows.map((y, i) => {
@@ -779,6 +879,7 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
 
   const {
     placements,
+    slotLabels,
     contentRows,
     contentCols,
     totalRows,
@@ -862,7 +963,11 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
         <SelectionLight active={!!selectedUuid} />
 
         {totalRows > 0 && (
-          <Bookcase totalRows={totalRows} totalCols={totalCols} />
+          <Bookcase
+            totalRows={totalRows}
+            totalCols={totalCols}
+            slotLabels={slotLabels}
+          />
         )}
 
         {placements.map((p) => {
