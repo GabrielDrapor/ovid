@@ -47,7 +47,7 @@ describe('Book Handlers', () => {
 
       // Verify the query filters by user_id IS NULL
       const query = db.prepare.mock.calls[0][0] as string;
-      expect(query).toContain('WHERE user_id IS NULL');
+      expect(query).toContain('WHERE b.user_id IS NULL');
       expect(result).toEqual(publicBooks);
     });
 
@@ -62,7 +62,7 @@ describe('Book Handlers', () => {
 
       // Verify the query includes user_id filter
       const query = db.prepare.mock.calls[0][0] as string;
-      expect(query).toContain('WHERE user_id IS NULL OR user_id = ?');
+      expect(query).toContain('WHERE b.user_id IS NULL OR b.user_id = ?');
       expect(result).toEqual(allBooks);
     });
 
@@ -72,7 +72,7 @@ describe('Book Handlers', () => {
 
       // Verify binding uses the correct userId
       const query = db.prepare.mock.calls[0][0] as string;
-      expect(query).toContain('user_id IS NULL OR user_id = ?');
+      expect(query).toContain('b.user_id IS NULL OR b.user_id = ?');
       expect(db._statement.bind).toHaveBeenCalledWith(2);
     });
   });
@@ -156,7 +156,15 @@ describe('Book Handlers', () => {
       const deleteCalls = db.prepare.mock.calls.filter((c: any) =>
         (c[0] as string).includes('DELETE')
       );
-      expect(deleteCalls.length).toBe(3); // translations, chapters, book
+      expect(deleteCalls.length).toBe(5); // shelf links, translations, chapters, book
+      expect(deleteCalls.map((c: any) => c[0])).toEqual(
+        expect.arrayContaining([
+          'DELETE FROM book_shelf_slots WHERE book_id = ?',
+          'DELETE FROM book_shelves WHERE book_id = ?',
+          'DELETE FROM chapters_v2 WHERE book_id = ?',
+          'DELETE FROM books_v2 WHERE id = ?',
+        ])
+      );
     });
 
     it('prevents deleting another user\'s book', async () => {
