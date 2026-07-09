@@ -22,6 +22,7 @@ import {
 } from './credits';
 import {
   getAllBooksV2,
+  getShelfSlots,
   getBookChaptersV2,
   getChapterContentV2,
   deleteBookV2,
@@ -369,6 +370,13 @@ export default {
 
         if (url.pathname === '/api/books/upload' && request.method === 'POST') {
           return handleBookUpload(request, env, ctx);
+        }
+
+        if (url.pathname === '/api/shelf-slots' && request.method === 'GET') {
+          const slots = await getShelfSlots(env.DB);
+          return new Response(JSON.stringify(slots), {
+            headers: { 'Content-Type': 'application/json' },
+          });
         }
 
         // Translate next chunk (frontend-driven chunked translation)

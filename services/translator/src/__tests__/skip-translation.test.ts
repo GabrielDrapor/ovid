@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { D1Client } from '../d1-client.js';
+import { settleCoverGeneration } from '../upload-helpers.js';
 
 /**
  * Tests for the skip-translation upload path (PR #117).
@@ -26,7 +27,9 @@ function makeFetchSpy(rows: unknown[] = []) {
     status: 200,
     json: async () => ({
       success: true,
-      result: [{ results: rows, success: true, meta: { changes: rows.length } }],
+      result: [
+        { results: rows, success: true, meta: { changes: rows.length } },
+      ],
     }),
     text: async () => 'ok',
   });
@@ -62,10 +65,10 @@ describe('skipTranslation language_pair invariant', () => {
 });
 
 describe('skipTranslation status invariant', () => {
-  it("sets status to 'ready' directly for skip-translation books", () => {
+  it("keeps status 'processing' for skip-translation books until cover/spine are ready", () => {
     const skipTranslation = true;
-    const initialStatus = skipTranslation ? 'ready' : 'processing';
-    expect(initialStatus).toBe('ready');
+    const initialStatus = skipTranslation ? 'processing' : 'processing';
+    expect(initialStatus).toBe('processing');
   });
 
   it("sets status to 'processing' for translated books (awaits translation_jobs)", () => {
@@ -81,18 +84,23 @@ describe('skipTranslation credit deduction SQL', () => {
     vi.stubGlobal('fetch', fetchSpy);
 
     const client = new D1Client(mockConfig);
-    await client.run('UPDATE users SET credits = credits - ? WHERE id = ?', [100, 1]);
+    await client.run(
+      'UPDATE users SET credits = credits - ? WHERE id = ?',
+      [100, 1]
+    );
 
     const body = JSON.parse(fetchSpy.mock.calls[0][1].body);
     expect(body.sql).toContain('credits - ?');
   });
 
-  it('ready-status SQL uses UPDATE books_v2 SET status pattern', async () => {
+  it('ready-status SQL still uses UPDATE books_v2 SET status after artwork generation', async () => {
     const fetchSpy = makeFetchSpy();
     vi.stubGlobal('fetch', fetchSpy);
 
     const client = new D1Client(mockConfig);
-    await client.run("UPDATE books_v2 SET status = 'ready' WHERE uuid = ?", ['book-uuid']);
+    await client.run("UPDATE books_v2 SET status = 'ready' WHERE uuid = ?", [
+      'book-uuid',
+    ]);
 
     const body = JSON.parse(fetchSpy.mock.calls[0][1].body);
     expect(body.sql).toContain("status = 'ready'");
@@ -103,11 +111,34 @@ describe('skipTranslation credit deduction SQL', () => {
   it('translation job SQL is NOT the same as the skip-translation ready SQL', () => {
     // When skipTranslation=false, a translation_jobs INSERT is made instead
     const translationJobSQL = `INSERT INTO translation_jobs (book_id, book_uuid, source_language, target_language, total_chapters, status) VALUES (?, ?, ?, ?, ?, 'pending')`;
-    const skipTranslationSQL = "UPDATE books_v2 SET status = 'ready' WHERE uuid = ?";
+    const skipTranslationSQL =
+      "UPDATE books_v2 SET status = 'ready' WHERE uuid = ?";
 
     expect(translationJobSQL).toContain('translation_jobs');
     expect(skipTranslationSQL).not.toContain('translation_jobs');
     expect(skipTranslationSQL).toContain("'ready'");
+  });
+});
+
+describe('skipTranslation cover-failure resilience', () => {
+  it('resolves even when cover generation rejects, so the ready update still runs', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await expect(
+      settleCoverGeneration(Promise.reject(new Error('sharp failed')), 'uuid1')
+    ).resolves.toBeUndefined();
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Cover generation failed for uuid1'),
+      expect.any(Error)
+    );
+  });
+
+  it('waits for cover generation to finish before resolving', async () => {
+    let finished = false;
+    const coverGeneration = Promise.resolve().then(() => {
+      finished = true;
+    });
+    await settleCoverGeneration(coverGeneration, 'uuid2');
+    expect(finished).toBe(true);
   });
 });
 

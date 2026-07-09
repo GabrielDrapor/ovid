@@ -38,6 +38,17 @@ export async function getAllBooksV2(db: D1Database, userId?: number) {
   return books.results;
 }
 
+export async function getShelfSlots(db: D1Database, shelfId = 'main') {
+  const slots = await db.prepare(
+    `SELECT id, shelf_id, row, col, sort_order, label
+       FROM shelf_slots
+       WHERE shelf_id = ?
+       ORDER BY sort_order ASC, row ASC, col ASC`
+  ).bind(shelfId).all();
+
+  return slots.results;
+}
+
 export async function getBookStatus(db: D1Database, bookUuid: string): Promise<string | null> {
   const book = await db.prepare('SELECT status FROM books_v2 WHERE uuid = ?')
     .bind(bookUuid)

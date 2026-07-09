@@ -23,6 +23,7 @@ export const MAX_CONTENT_COLS = 4;
 export const DEFAULT_SPINE_RATIO = 1 / 5.3;
 export const MIN_SPINE_RATIO = 0.04;
 export const MAX_SPINE_RATIO = 0.35;
+export const UPLOAD_PLACEHOLDER_WIDTH = DEFAULT_SPINE_RATIO;
 
 export function clampSpineRatio(ratio: number): number {
   if (!Number.isFinite(ratio) || ratio <= 0) return DEFAULT_SPINE_RATIO;
@@ -54,9 +55,28 @@ export interface PlacedShelfLabel {
   row: number;
 }
 
+export interface PlacedUploadTarget {
+  shelfSlotId?: number | null;
+  rowCoord: number;
+  colCoord: number;
+  label?: string | null;
+  /**
+   * Row relative to the content grid. The empty visual ring uses -1 above
+   * the content and contentRows below it.
+   */
+  row: number;
+  /** Center of the placeholder spine in wall coordinates. */
+  x: number;
+  width: number;
+  /** Invisible hit area covering the usable remaining shelf space. */
+  hitX: number;
+  hitWidth: number;
+}
+
 export interface ShelfLayout {
   placements: PlacedBook[];
   slotLabels: PlacedShelfLabel[];
+  uploadTargets: PlacedUploadTarget[];
   /** Rows/columns actually holding books. */
   contentRows: number;
   contentCols: number;
@@ -74,9 +94,19 @@ type LayoutBook = {
   shelf_position?: number | null;
   shelf_row?: number | null;
   shelf_col?: number | null;
+  shelf_slot_id?: number | null;
   shelf_slot_order?: number | null;
   shelf_slot_label?: string | null;
   display_order?: number | null;
+};
+
+type LayoutShelfSlot = {
+  id: number;
+  shelf_id?: string | null;
+  row: number;
+  col: number;
+  sort_order?: number | null;
+  label?: string | null;
 };
 
 /**
@@ -88,15 +118,17 @@ export function layoutBooks(
   books: LayoutBook[],
   ratios: Map<string, number>,
   bayInner: number = BAY_INNER,
-  maxCols: number = MAX_CONTENT_COLS
+  maxCols: number = MAX_CONTENT_COLS,
+  shelfSlots: LayoutShelfSlot[] = []
 ): ShelfLayout {
   if (
+    shelfSlots.length > 0 ||
     books.some(
       (book) =>
         Number.isFinite(book.shelf_row) && Number.isFinite(book.shelf_col)
     )
   ) {
-    return layoutPhysicalSlots(books, ratios, bayInner);
+    return layoutPhysicalSlots(books, ratios, bayInner, shelfSlots);
   }
 
   return layoutLegacyBooks(books, ratios, bayInner, maxCols);
@@ -137,9 +169,7 @@ function layoutLegacyBooks(
   }
   const groups = Array.from(grouped.entries())
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([, group]) =>
-      group.slice().sort(sortBooks)
-    )
+    .map(([, group]) => group.slice().sort(sortBooks))
     .filter((g) => g.length > 0);
 
   interface Slot {
@@ -231,6 +261,7 @@ function layoutLegacyBooks(
   return {
     placements,
     slotLabels: [],
+    uploadTargets: [],
     contentRows,
     contentCols,
     totalRows,
@@ -242,16 +273,41 @@ function layoutLegacyBooks(
 interface PhysicalRun {
   rowCoord: number;
   colCoord: number;
+  slotId?: number | null;
+  label?: string | null;
   books: LayoutBook[];
 }
 
 function layoutPhysicalSlots(
   books: LayoutBook[],
   ratios: Map<string, number>,
-  bayInner: number
+  bayInner: number,
+  shelfSlots: LayoutShelfSlot[]
 ): ShelfLayout {
   const runMap = new Map<string, PhysicalRun>();
   const unplaced: LayoutBook[] = [];
+
+  for (const slot of shelfSlots) {
+    if (
+      !Number.isFinite(slot.id) ||
+      !Number.isFinite(slot.row) ||
+      !Number.isFinite(slot.col)
+    ) {
+      continue;
+    }
+    const rowCoord = Number(slot.row);
+    const colCoord = Number(slot.col);
+    const key = `${rowCoord}:${colCoord}`;
+    if (!runMap.has(key)) {
+      runMap.set(key, {
+        rowCoord,
+        colCoord,
+        slotId: Number(slot.id),
+        label: slot.label?.trim() || null,
+        books: [],
+      });
+    }
+  }
 
   const addToRun = (rowCoord: number, colCoord: number, book: LayoutBook) => {
     const key = `${rowCoord}:${colCoord}`;
@@ -259,6 +315,12 @@ function layoutPhysicalSlots(
     if (!run) {
       run = { rowCoord, colCoord, books: [] };
       runMap.set(key, run);
+    }
+    if (Number.isFinite(book.shelf_slot_id)) {
+      run.slotId = Number(book.shelf_slot_id);
+    }
+    if (!run.label && book.shelf_slot_label?.trim()) {
+      run.label = book.shelf_slot_label.trim();
     }
     run.books.push(book);
   };
@@ -310,6 +372,7 @@ function layoutPhysicalSlots(
     return {
       placements: [],
       slotLabels: [],
+      uploadTargets: [],
       contentRows: 0,
       contentCols: 0,
       totalRows: 0,
@@ -337,9 +400,11 @@ function layoutPhysicalSlots(
     const bayCenter = (col + 1 + 0.5 - totalCols / 2) * pitch;
     const widths = run.books.map((book) => spineWidth(ratios.get(book.uuid)));
     const bayLeft = bayCenter - bayInner / 2;
-    const labelText = run.books
-      .map((book) => book.shelf_slot_label?.trim())
-      .find((label): label is string => !!label);
+    const labelText =
+      run.label ??
+      run.books
+        .map((book) => book.shelf_slot_label?.trim())
+        .find((label): label is string => !!label);
 
     if (labelText) {
       slotLabels.push({
@@ -363,9 +428,41 @@ function layoutPhysicalSlots(
     });
   }
 
+  const uploadTargets: PlacedUploadTarget[] = [];
+  for (let visualRow = 0; visualRow < totalRows; visualRow++) {
+    const rowCoord = minRow + visualRow - 1;
+    const row = rowCoord - minRow;
+    for (let visualCol = 0; visualCol < totalCols; visualCol++) {
+      const colCoord = minCol + visualCol - 1;
+      const run = runMap.get(`${rowCoord}:${colCoord}`);
+      const bayCenter = (visualCol + 0.5 - totalCols / 2) * pitch;
+      const bayLeft = bayCenter - bayInner / 2;
+      const widths =
+        run?.books.map((book) => spineWidth(ratios.get(book.uuid))) ?? [];
+      const usedWidth =
+        widths.reduce((sum, width) => sum + width, 0) +
+        Math.max(0, widths.length - 1) * BOOK_GAP;
+      const emptyLeft = bayLeft + usedWidth + (usedWidth > 0 ? BOOK_GAP : 0);
+      const remaining = bayLeft + bayInner - emptyLeft;
+      if (remaining < UPLOAD_PLACEHOLDER_WIDTH - 1e-6) continue;
+      uploadTargets.push({
+        shelfSlotId: Number.isFinite(run?.slotId) ? Number(run?.slotId) : null,
+        rowCoord,
+        colCoord,
+        label: run?.label ?? null,
+        row,
+        x: emptyLeft + UPLOAD_PLACEHOLDER_WIDTH / 2,
+        width: UPLOAD_PLACEHOLDER_WIDTH,
+        hitX: emptyLeft + remaining / 2,
+        hitWidth: remaining,
+      });
+    }
+  }
+
   return {
     placements,
     slotLabels,
+    uploadTargets,
     contentRows,
     contentCols,
     totalRows,

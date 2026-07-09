@@ -17,6 +17,7 @@ import {
 } from './title-sanitizer.js';
 import { generatePreview, PREVIEW_HTML, LOGIN_HTML } from './cover-preview.js';
 import { parseBook, type BookDataV2 } from './book-parser.js';
+import { settleCoverGeneration } from './upload-helpers.js';
 import { calculateBookCredits, TOKENS_PER_CREDIT } from './token-counter.js';
 import { detectLanguage } from './language-detect.js';
 
@@ -394,7 +395,6 @@ async function processUpload(req: UploadAndParseRequest): Promise<void> {
         'SELECT COALESCE(MAX(display_order), 0) as max_order FROM books_v2'
       );
       const nextOrder = (maxOrderRow?.max_order || 0) + 1;
-      const initialStatus = skipTranslation ? 'ready' : 'processing';
       await db.run(
         `INSERT INTO books_v2 (uuid, title, original_title, author, language_pair, styles, user_id, status, display_order)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -406,7 +406,7 @@ async function processUpload(req: UploadAndParseRequest): Promise<void> {
           `${sourceLanguage}-${effectiveTargetLanguage}`,
           bookData.styles || '',
           userId,
-          initialStatus,
+          'processing',
           nextOrder,
         ]
       );
@@ -458,11 +458,9 @@ async function processUpload(req: UploadAndParseRequest): Promise<void> {
     }
 
     if (skipTranslation) {
-      // No translation requested — mark book ready, skip job + translateBook call.
-      await db.run("UPDATE books_v2 SET status = 'ready' WHERE uuid = ?", [
-        bookUuid,
-      ]);
-      console.log(`[upload] Book ${bookUuid} imported without translation`);
+      console.log(
+        `[upload] Book ${bookUuid} imported without translation; preparing cover/spine`
+      );
     } else {
       // 6. Create translation job
       await db.run(
@@ -490,15 +488,22 @@ async function processUpload(req: UploadAndParseRequest): Promise<void> {
 
     // 8. Generate cover images from sanitized metadata. The spine can use a
     // shorter display title, but the cover keeps the full sanitized title.
-    generateCoversForBook(
+    const coverGeneration = generateCoversForBook(
       sanitizedBookTitle,
       bookData.author,
       bookUuid,
       bookData.coverImage,
       { titleIsSanitized: true }
-    ).catch((err) => {
-      console.warn(`[upload] Cover generation failed for ${bookUuid}:`, err);
-    });
+    );
+    if (skipTranslation) {
+      await settleCoverGeneration(coverGeneration, bookUuid);
+      await db.run("UPDATE books_v2 SET status = 'ready' WHERE uuid = ?", [
+        bookUuid,
+      ]);
+      console.log(`[upload] Book ${bookUuid} ready without translation`);
+    } else {
+      void settleCoverGeneration(coverGeneration, bookUuid);
+    }
 
     // 9. Clean up raw upload from R2
     await r2Delete(fileKey);

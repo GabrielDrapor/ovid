@@ -8,7 +8,13 @@ import React, {
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { Canvas, useFrame, useThree, ThreeEvent } from '@react-three/fiber';
-import { Book, UserBookProgress, TranslationProgress } from './types';
+import {
+  Book,
+  ShelfSlot,
+  ShelfUploadTarget,
+  UserBookProgress,
+  TranslationProgress,
+} from './types';
 import {
   BAY_PITCH,
   BOOK_DEPTH,
@@ -25,7 +31,10 @@ import {
   averageColor,
   makeCoverCanvas,
   makePageEdgesCanvas,
+  makeProcessingCoverCanvas,
+  makeProcessingSpineCanvas,
   makeSpineCanvas,
+  makeUploadGhostCanvas,
 } from './fallbackTextures';
 import {
   makeCavityShadeCanvas,
@@ -37,12 +46,21 @@ import './BookShelf3D.css';
 
 interface BookShelf3DProps {
   books: Book[];
+  shelfSlots: ShelfSlot[];
   loading: boolean;
   showProgress: boolean;
   progressMap: Map<string, UserBookProgress>;
   translationProgress: Map<string, TranslationProgress>;
   onRead: (bookUuid: string) => void;
   onDelete: (bookUuid: string) => void;
+  onUploadToSlot?: (target: ShelfUploadTarget) => void;
+}
+
+// Only an in-flight import gates interaction; a 'ready' book missing
+// cover/spine art (e.g. generation failed server-side) renders with fallback
+// textures and stays readable.
+function isBookImportPending(book: Book): boolean {
+  return book.status === 'processing';
 }
 
 const ROOM = '#171210';
@@ -125,6 +143,7 @@ function makeShelfLabelCanvas(text: string): HTMLCanvasElement {
 function useArtTexture(
   url: string | null,
   makeFallback: () => HTMLCanvasElement,
+  fallbackKey: string,
   onLoaded?: (tex: THREE.Texture) => void
 ): THREE.Texture {
   const onLoadedRef = useRef(onLoaded);
@@ -134,18 +153,22 @@ function useArtTexture(
     const tex = new THREE.CanvasTexture(makeFallback());
     tex.colorSpace = THREE.SRGBColorSpace;
     return tex;
-  }, []);
+  }, [fallbackKey]);
+  useEffect(() => () => fallback.dispose(), [fallback]);
 
   const neutral = useMemo(() => {
     if (!url) return null;
     const tex = new THREE.CanvasTexture(makeNeutralCanvas());
     tex.colorSpace = THREE.SRGBColorSpace;
     return tex;
-  }, []);
+  }, [url]);
+  useEffect(() => () => neutral?.dispose(), [neutral]);
 
   const [loaded, setLoaded] = useState<THREE.Texture | null>(null);
+  useEffect(() => () => loaded?.dispose(), [loaded]);
 
   useEffect(() => {
+    setLoaded(null);
     if (!url) return;
     let cancelled = false;
     const loader = new THREE.TextureLoader();
@@ -171,15 +194,7 @@ function useArtTexture(
     return () => {
       cancelled = true;
     };
-  }, [url]);
-
-  useEffect(() => {
-    return () => {
-      fallback.dispose();
-      neutral?.dispose();
-      loaded?.dispose();
-    };
-  }, []);
+  }, [fallback, url]);
 
   // No URL → colorful fallback immediately.
   // URL loading → neutral dark placeholder.
@@ -210,7 +225,10 @@ function ShelfLabel({
   useEffect(() => () => label.texture.dispose(), [label]);
 
   return (
-    <mesh position={[left + label.width / 2, y, BOOK_DEPTH / 2 + 0.15]} renderOrder={5}>
+    <mesh
+      position={[left + label.width / 2, y, BOOK_DEPTH / 2 + 0.15]}
+      renderOrder={5}
+    >
       <planeGeometry args={[label.width, SHELF_LABEL_HEIGHT]} />
       <meshBasicMaterial
         map={label.texture}
@@ -231,6 +249,7 @@ interface BookMeshProps {
   onSelect: (uuid: string) => void;
   onSpineRatio: (uuid: string, ratio: number) => void;
   onArtReady: (uuid: string) => void;
+  processingProgress: number;
   /** Accumulated touch-drag distance; large values suppress the tap-click. */
   dragDist: React.MutableRefObject<number>;
 }
@@ -244,12 +263,12 @@ function BookMesh({
   onSelect,
   onSpineRatio,
   onArtReady,
+  processingProgress,
   dragDist,
 }: BookMeshProps) {
   const group = useRef<THREE.Group>(null);
   const mesh = useRef<THREE.Mesh>(null);
   const [hovered, setHovered] = useState(false);
-  const processing = book.status === 'processing';
 
   // Real shelves aren't perfectly uniform: vary height, push-in depth and a
   // hair of lean per book, deterministically from its uuid.
@@ -270,12 +289,20 @@ function BookMesh({
 
   const hasSpineUrl = !!book.book_spine_img_url;
   const hasCoverUrl = !!book.book_cover_img_url;
+  const processing = isBookImportPending(book);
   const [spineLoaded, setSpineLoaded] = useState(false);
   const [coverLoaded, setCoverLoaded] = useState(false);
+  const displayTitle = book.original_title || book.title;
+  const processingClarity = Math.max(
+    0,
+    Math.min(1, Number.isFinite(processingProgress) ? processingProgress : 0)
+  );
+  const processingTextureStep = Math.round(processingClarity * 10) / 10;
 
   const spineTex = useArtTexture(
     book.book_spine_img_url,
-    () => makeSpineCanvas(book.original_title || book.title),
+    () => makeSpineCanvas(displayTitle),
+    `spine:${displayTitle}`,
     (tex) => {
       setSpineLoaded(true);
       const img = tex.image as HTMLImageElement;
@@ -287,29 +314,61 @@ function BookMesh({
   );
   const coverTex = useArtTexture(
     book.book_cover_img_url,
-    () => makeCoverCanvas(book.original_title || book.title, book.author),
+    () => makeCoverCanvas(displayTitle, book.author),
+    `cover:${displayTitle}:${book.author}`,
     () => setCoverLoaded(true)
   );
+  const processingSpineTex = useMemo(() => {
+    const tex = new THREE.CanvasTexture(
+      makeProcessingSpineCanvas(displayTitle, processingTextureStep)
+    );
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = 8;
+    return tex;
+  }, [displayTitle, processingTextureStep]);
+  const processingCoverTex = useMemo(() => {
+    const tex = new THREE.CanvasTexture(
+      makeProcessingCoverCanvas(
+        displayTitle,
+        book.author,
+        processingTextureStep
+      )
+    );
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = 8;
+    return tex;
+  }, [book.author, displayTitle, processingTextureStep]);
+  useEffect(
+    () => () => {
+      processingSpineTex.dispose();
+      processingCoverTex.dispose();
+    },
+    [processingCoverTex, processingSpineTex]
+  );
+  const effectiveSpineTex = processing ? processingSpineTex : spineTex;
+  const effectiveCoverTex = processing ? processingCoverTex : coverTex;
   // Books without URLs are ready immediately; books with URLs wait for load.
   const artReady =
-    (!hasSpineUrl || spineLoaded) && (!hasCoverUrl || coverLoaded);
+    processing ||
+    ((!hasSpineUrl || spineLoaded) && (!hasCoverUrl || coverLoaded));
   useEffect(() => {
     if (artReady) onArtReady(book.uuid);
   }, [artReady, book.uuid, onArtReady]);
+  const effectiveCloth = processing ? '#5f5a52' : cloth;
   const pagesTex = useMemo(() => {
-    const t = new THREE.CanvasTexture(makePageEdgesCanvas(cloth));
+    const t = new THREE.CanvasTexture(makePageEdgesCanvas(effectiveCloth));
     t.colorSpace = THREE.SRGBColorSpace;
     return t;
-  }, [cloth]);
+  }, [effectiveCloth]);
   useEffect(() => () => pagesTex.dispose(), [pagesTex]);
   // Base tints per material slot; the dim animation multiplies these instead
   // of overwriting them (overwriting is what used to bleach the back cover).
   const baseColors = useMemo(() => {
     const white = new THREE.Color('#ffffff');
-    const clothC = new THREE.Color(cloth);
+    const clothC = new THREE.Color(effectiveCloth);
     // [cover, back cover, top, bottom, spine, fore edge]
     return [white, clothC, white, white, white, white];
-  }, [cloth]);
+  }, [effectiveCloth]);
   const dim = useRef(1);
   // Fade-in: books with image URLs start transparent, fade to opaque once loaded.
   const reveal = useRef(artReady ? 1 : 0);
@@ -402,7 +461,10 @@ function BookMesh({
       let target = 1;
       if (anySelected && !selected) target = 0.35;
       else if (processing) {
-        target = 0.55 + Math.sin(state.clock.elapsedTime * 2.5) * 0.12;
+        const shimmer =
+          Math.sin(state.clock.elapsedTime * 2.5) *
+          (0.1 * (1 - processingClarity));
+        target = 0.62 + processingClarity * 0.32 + shimmer;
       }
       dim.current += (target - dim.current) * k;
       const mats = m.material as THREE.MeshStandardMaterial[];
@@ -417,11 +479,7 @@ function BookMesh({
 
       for (let i = 0; i < mats.length; i++) {
         const base = baseColors[i] ?? baseColors[0];
-        mats[i].color.setRGB(
-          base.r * bright,
-          base.g * bright,
-          base.b * bright
-        );
+        mats[i].color.setRGB(base.r * bright, base.g * bright, base.b * bright);
       }
     }
   });
@@ -460,8 +518,8 @@ function BookMesh({
         {/* +x: front cover (faces camera when the book turns out) */}
         <meshStandardMaterial
           attach="material-0"
-          map={coverTex}
-          roughness={0.62}
+          map={effectiveCoverTex}
+          roughness={processing ? 0.9 - processingClarity * 0.2 : 0.62}
         />
         {/* -x: back cover, cloth colored to match the spine art */}
         <meshStandardMaterial
@@ -483,8 +541,8 @@ function BookMesh({
         {/* +z: spine, -z: fore edge */}
         <meshStandardMaterial
           attach="material-4"
-          map={spineTex}
-          roughness={0.62}
+          map={effectiveSpineTex}
+          roughness={processing ? 0.9 - processingClarity * 0.2 : 0.62}
         />
         <meshStandardMaterial
           attach="material-5"
@@ -492,6 +550,145 @@ function BookMesh({
           roughness={0.9}
         />
       </mesh>
+    </group>
+  );
+}
+
+interface UploadPlaceholderProps {
+  target: {
+    shelfSlotId?: number | null;
+    rowCoord: number;
+    colCoord: number;
+    label?: string | null;
+    x: number;
+    hitX: number;
+    hitWidth: number;
+    width: number;
+  };
+  y: number;
+  hidden: boolean;
+  onUpload: (target: ShelfUploadTarget) => void;
+  dragDist: React.MutableRefObject<number>;
+}
+
+function UploadPlaceholder({
+  target,
+  y,
+  hidden,
+  onUpload,
+  dragDist,
+}: UploadPlaceholderProps) {
+  const [hovered, setHovered] = useState(false);
+  const bookRef = useRef<THREE.Group>(null);
+  const spineRef = useRef<THREE.MeshBasicMaterial>(null);
+  const bodyRef = useRef<THREE.MeshStandardMaterial>(null);
+  const bookHeight = BOOK_HEIGHT * 0.94;
+  const shelfY = y - (BOOK_HEIGHT - bookHeight) / 2;
+
+  const geometry = useMemo(
+    () => new RoundedBoxGeometry(target.width, bookHeight, BOOK_DEPTH, 2, 0.02),
+    [target.width, bookHeight]
+  );
+  useEffect(() => () => geometry.dispose(), [geometry]);
+
+  const ghostTex = useMemo(() => {
+    const t = new THREE.CanvasTexture(makeUploadGhostCanvas());
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.anisotropy = 8;
+    return t;
+  }, []);
+  useEffect(() => () => ghostTex.dispose(), [ghostTex]);
+
+  useEffect(() => {
+    if (hidden) {
+      setHovered(false);
+      document.body.style.cursor = '';
+      return;
+    }
+    document.body.style.cursor = hovered ? 'copy' : '';
+    return () => {
+      document.body.style.cursor = '';
+    };
+  }, [hovered, hidden]);
+
+  useFrame((state, delta) => {
+    const group = bookRef.current;
+    const body = bodyRef.current;
+    const spine = spineRef.current;
+    if (!group || !body || !spine) return;
+    const k = 1 - Math.exp(-delta * 9);
+    // Body: barely-there cream volume behind the ghost, hover only.
+    const bodyTarget = !hidden && hovered ? 0.14 : 0;
+    body.opacity += (bodyTarget - body.opacity) * k;
+    // Plus glyph: hover only — idle slots stay clean so the wall doesn't
+    // fill up with plus signs.
+    const ghostTarget = !hidden && hovered ? 0.95 : 0;
+    spine.opacity += (ghostTarget - spine.opacity) * k;
+    group.position.z =
+      (hovered && !hidden ? 0.05 : 0) +
+      Math.sin(state.clock.elapsedTime * 2.4) * (hovered && !hidden ? 0.01 : 0);
+  });
+
+  const handleClick = useCallback(
+    (e: ThreeEvent<MouseEvent>) => {
+      e.stopPropagation();
+      if (hidden || dragDist.current > 12) return;
+      onUpload({
+        shelfSlotId: target.shelfSlotId,
+        row: target.rowCoord,
+        col: target.colCoord,
+        label: target.label ?? null,
+      });
+    },
+    [dragDist, hidden, onUpload, target]
+  );
+
+  return (
+    <group>
+      <mesh
+        position={[target.hitX, y, BOOK_DEPTH / 2 + 0.1]}
+        onPointerOver={(e) => {
+          e.stopPropagation();
+          if (!hidden) setHovered(true);
+        }}
+        onPointerOut={() => setHovered(false)}
+        onClick={handleClick}
+      >
+        <boxGeometry args={[target.hitWidth, BOOK_HEIGHT, 0.16]} />
+        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+      </mesh>
+      <group ref={bookRef} position={[target.x, shelfY, 0]}>
+        <mesh
+          geometry={geometry}
+          position={[0, 0, 0.03]}
+          onPointerOver={(e) => {
+            e.stopPropagation();
+            if (!hidden) setHovered(true);
+          }}
+          onPointerOut={() => setHovered(false)}
+          onClick={handleClick}
+        >
+          <meshStandardMaterial
+            ref={bodyRef}
+            color="#efe3cf"
+            roughness={0.78}
+            transparent
+            opacity={0}
+            depthWrite={false}
+          />
+        </mesh>
+        <mesh position={[0, 0, BOOK_DEPTH / 2 + 0.064]}>
+          <planeGeometry args={[target.width, bookHeight]} />
+          <meshBasicMaterial
+            ref={spineRef}
+            map={ghostTex}
+            transparent
+            opacity={0}
+            depthWrite={false}
+            toneMapped={false}
+          />
+        </mesh>
+      </group>
     </group>
   );
 }
@@ -840,12 +1037,14 @@ function SelectionLight({ active }: { active: boolean }) {
 
 const BookShelf3D: React.FC<BookShelf3DProps> = ({
   books,
+  shelfSlots,
   loading,
   showProgress,
   progressMap,
   translationProgress,
   onRead,
   onDelete,
+  onUploadToSlot,
 }) => {
   const [spineRatios, setSpineRatios] = useState<Map<string, number>>(
     new Map()
@@ -854,7 +1053,8 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
 
   // Track how many books with image URLs have finished loading.
   const booksWithUrls = useMemo(
-    () => books.filter((b) => b.book_spine_img_url || b.book_cover_img_url).length,
+    () =>
+      books.filter((b) => b.book_spine_img_url || b.book_cover_img_url).length,
     [books]
   );
   const [readyCount, setReadyCount] = useState(0);
@@ -880,12 +1080,16 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
   const {
     placements,
     slotLabels,
+    uploadTargets,
     contentRows,
     contentCols,
     totalRows,
     totalCols,
     wallWidth,
-  } = useMemo(() => layoutBooks(books, spineRatios), [books, spineRatios]);
+  } = useMemo(
+    () => layoutBooks(books, spineRatios, undefined, undefined, shelfSlots),
+    [books, spineRatios, shelfSlots]
+  );
   const rowCenters = useMemo(() => rowYCenters(totalRows), [totalRows]);
   const caseTop =
     totalRows > 0 ? rowCenters[0] + BOOK_HEIGHT / 2 + 0.18 + 0.09 : 3;
@@ -974,6 +1178,11 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
           const book = bookByUuid.get(p.uuid);
           if (!book) return null;
           const y = rowCenters[p.row + 1];
+          const progress = translationProgress.get(book.uuid);
+          const processingProgress =
+            progress && progress.chaptersTotal > 0
+              ? progress.chaptersCompleted / progress.chaptersTotal
+              : 0;
           return (
             <BookMesh
               key={p.uuid}
@@ -985,10 +1194,26 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
               onSelect={setSelectedUuid}
               onSpineRatio={handleSpineRatio}
               onArtReady={handleArtReady}
+              processingProgress={processingProgress}
               dragDist={dragDist}
             />
           );
         })}
+
+        {onUploadToSlot &&
+          uploadTargets.map((target) => {
+            const y = rowCenters[target.row + 1];
+            return (
+              <UploadPlaceholder
+                key={`upload-${target.rowCoord}:${target.colCoord}`}
+                target={target}
+                y={y}
+                hidden={loading || selectedUuid !== null}
+                onUpload={onUploadToSlot}
+                dragDist={dragDist}
+              />
+            );
+          })}
 
         <CameraRig
           focused={selectedUuid !== null}
@@ -1033,7 +1258,7 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
             )}
           <p className="closet3d-author">By {selectedBook.author}</p>
 
-          {selectedBook.status === 'processing' ? (
+          {isBookImportPending(selectedBook) ? (
             <div className="closet3d-processing">
               {(() => {
                 const tp = translationProgress.get(selectedBook.uuid);
@@ -1057,7 +1282,10 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
                   <span>
                     {tp?.phase === 'glossary'
                       ? 'Extracting glossary…'
-                      : 'Translating…'}
+                      : selectedBook.status === 'processing' &&
+                          !selectedBook.language_pair?.endsWith('-none')
+                        ? 'Translating…'
+                        : 'Preparing cover and spine…'}
                   </span>
                 );
               })()}

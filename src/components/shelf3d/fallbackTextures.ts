@@ -90,6 +90,34 @@ export function makePageEdgesCanvas(cloth: string): HTMLCanvasElement {
   return canvas;
 }
 
+/**
+ * Ghost spine for an empty upload slot: just a plus glyph in the shelf's
+ * cream ink on a transparent background. Same 112x560 aspect as a real
+ * spine so it sits in the slot undistorted.
+ */
+export function makeUploadGhostCanvas(): HTMLCanvasElement {
+  const canvas = document.createElement('canvas');
+  canvas.width = 112;
+  canvas.height = 560;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return canvas;
+
+  const cx = canvas.width / 2;
+  const cy = canvas.height / 2;
+  const arm = 16;
+  ctx.strokeStyle = 'rgba(255, 246, 226, 0.9)';
+  ctx.lineWidth = 6;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(cx - arm, cy);
+  ctx.lineTo(cx + arm, cy);
+  ctx.moveTo(cx, cy - arm);
+  ctx.lineTo(cx, cy + arm);
+  ctx.stroke();
+
+  return canvas;
+}
+
 export function makeSpineCanvas(title: string): HTMLCanvasElement {
   const canvas = document.createElement('canvas');
   canvas.width = 112;
@@ -118,6 +146,139 @@ export function makeSpineCanvas(title: string): HTMLCanvasElement {
   }
   ctx.fillText(text, 0, 0);
   ctx.restore();
+
+  return canvas;
+}
+
+function clampProgress(progress: number): number {
+  if (!Number.isFinite(progress)) return 0;
+  return Math.max(0, Math.min(1, progress));
+}
+
+function isPlaceholderTitle(title: string): boolean {
+  return title.trim().toLowerCase() === 'processing...';
+}
+
+export function makeProcessingSpineCanvas(
+  title: string,
+  progress: number
+): HTMLCanvasElement {
+  const canvas = document.createElement('canvas');
+  canvas.width = 112;
+  canvas.height = 560;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return canvas;
+
+  const p = clampProgress(progress);
+  const fog = 0.62 * (1 - p);
+  const blur = 8 * (1 - p);
+
+  const grad = ctx.createLinearGradient(0, 0, canvas.width, 0);
+  grad.addColorStop(0, '#4c4942');
+  grad.addColorStop(0.45, '#777268');
+  grad.addColorStop(1, '#393730');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Soft cloth grain and bands. Low progress keeps this intentionally out of
+  // focus; high progress reveals a more book-like spine.
+  ctx.save();
+  ctx.filter = `blur(${blur}px)`;
+  for (let y = 0; y < canvas.height; y += 18) {
+    const alpha = 0.05 + Math.abs(Math.sin(y * 0.07)) * 0.04;
+    ctx.fillStyle = `rgba(255, 246, 226, ${alpha * (0.4 + p)})`;
+    ctx.fillRect(10, y, canvas.width - 20, 3);
+  }
+  const shine = ctx.createLinearGradient(0, 0, canvas.width, 0);
+  shine.addColorStop(0, 'rgba(255,255,255,0)');
+  shine.addColorStop(0.55, `rgba(255,255,255,${0.12 + p * 0.18})`);
+  shine.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = shine;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  if (!isPlaceholderTitle(title) && p > 0.45) {
+    ctx.translate(canvas.width / 2, canvas.height / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillStyle = `rgba(255, 250, 240, ${(p - 0.45) / 0.55})`;
+    ctx.font = '600 38px Georgia, "Songti SC", serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    let text = title;
+    while (
+      text.length > 1 &&
+      ctx.measureText(text).width > canvas.height - 70
+    ) {
+      text = text.slice(0, -2) + '...';
+    }
+    ctx.fillText(text, 0, 0);
+  } else {
+    ctx.fillStyle = `rgba(255, 250, 240, ${0.12 + p * 0.18})`;
+    ctx.fillRect(canvas.width / 2 - 10, 90, 20, canvas.height - 180);
+  }
+  ctx.restore();
+
+  ctx.fillStyle = `rgba(238, 232, 220, ${fog})`;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  ctx.strokeStyle = `rgba(255, 250, 240, ${0.18 + p * 0.3})`;
+  ctx.lineWidth = 2;
+  ctx.strokeRect(4, 5, canvas.width - 8, canvas.height - 10);
+
+  return canvas;
+}
+
+export function makeProcessingCoverCanvas(
+  title: string,
+  author: string,
+  progress: number
+): HTMLCanvasElement {
+  const canvas = document.createElement('canvas');
+  canvas.width = 600;
+  canvas.height = 880;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return canvas;
+
+  const p = clampProgress(progress);
+  const fog = 0.58 * (1 - p);
+  const blur = 10 * (1 - p);
+
+  const grad = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+  grad.addColorStop(0, '#6f695f');
+  grad.addColorStop(0.52, '#45423b');
+  grad.addColorStop(1, '#898174');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  ctx.save();
+  ctx.filter = `blur(${blur}px)`;
+  ctx.strokeStyle = `rgba(255, 250, 240, ${0.22 + p * 0.36})`;
+  ctx.lineWidth = 5;
+  ctx.strokeRect(42, 42, canvas.width - 84, canvas.height - 84);
+
+  if (!isPlaceholderTitle(title) && p > 0.45) {
+    ctx.fillStyle = `rgba(255, 250, 240, ${(p - 0.45) / 0.55})`;
+    ctx.textAlign = 'center';
+    ctx.font = '600 50px Georgia, "Songti SC", serif';
+    const lines = wrapText(ctx, title, canvas.width - 150);
+    const startY = canvas.height / 2 - ((lines.length - 1) * 62) / 2 - 40;
+    lines.forEach((line, i) => {
+      ctx.fillText(line, canvas.width / 2, startY + i * 62);
+    });
+    if (author) {
+      ctx.font = '400 30px Georgia, "Songti SC", serif';
+      ctx.fillStyle = `rgba(255, 250, 240, ${0.35 + p * 0.35})`;
+      ctx.fillText(author, canvas.width / 2, canvas.height - 130);
+    }
+  } else {
+    ctx.fillStyle = `rgba(255, 250, 240, ${0.12 + p * 0.22})`;
+    ctx.fillRect(150, 310, 300, 28);
+    ctx.fillRect(190, 360, 220, 20);
+    ctx.fillRect(230, 700, 140, 16);
+  }
+  ctx.restore();
+
+  ctx.fillStyle = `rgba(238, 232, 220, ${fog})`;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   return canvas;
 }
