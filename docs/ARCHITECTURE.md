@@ -36,6 +36,7 @@ SQLite-based. Stores all persistent data:
 - Users (Google OAuth) and sessions
 - Reading progress (per user per book)
 - Credit transactions (Stripe purchases, translation usage)
+- Physical shelf-slot placement (`shelf_slots`/`book_shelf_slots`) — where each book sits on the 3D closet wall
 
 ### Cloudflare R2 (Asset Storage)
 Object storage served at `assets.ovid.jrd.pub`:

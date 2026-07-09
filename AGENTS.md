@@ -59,6 +59,7 @@ Production runs on the **v2 schema** (`database/schema_v2.sql`); `database/schem
 - `users`, `sessions` — auth
 - `user_book_progress` — completion + cloud-synced reading position
 - `credit_transactions` — credit ledger (signup_bonus, purchase, usage, refund)
+- `shelf_slots` (physical row/col + label on the 3D wall) / `book_shelf_slots` (book ↔ slot) — the physical-slot placement system; slots are created on the fly when a user clicks an empty slot to upload
 
 ### D1 Gotchas
 - **SQLITE_BUSY**: Avoid many small writes. Use single SQL file ingestion: `--sql-out=exports/book.sql --apply=local`
@@ -78,9 +79,17 @@ Production runs on the **v2 schema** (`database/schema_v2.sql`); `database/schem
 
 ### BookShelf
 - Default view: 3D closet (`shelf3d/BookShelf3D.tsx`, three + @react-three/fiber,
-  lazy-loaded) — gaze/zoom camera, click a book to fly it out with an info panel;
-  shelf-packing math lives in `shelf3d/layout.ts` (pure, unit-tested)
-- Classic 2D wall remains as the no-WebGL fallback inside `BookShelf.tsx`
+  lazy-loaded) — gaze/zoom camera, click a book to fly it out with an info panel,
+  click an empty slot to upload into it; shelf-packing math lives in
+  `shelf3d/layout.ts` (pure, unit-tested)
+- Layout: books explicitly placed in a physical slot (`shelf_row`/`shelf_col`,
+  set via `shelf_slots`/`book_shelf_slots`) render at that coordinate.
+  Everything else (not yet migrated to a slot) packs into a stable block of
+  rows below the physical slots, grouped by `shelf_id`/ownership — anchored so
+  a new slot appearing elsewhere never reshuffles it
+- A classic 2D wall still exists inside `BookShelf.tsx` as a no-WebGL fallback,
+  but it's legacy: it has no upload entry point (upload is only reachable by
+  clicking an empty slot in the 3D closet) and is slated for removal
 - Cover/spine images from R2, loaded with `crossOrigin` (see R2 CORS note above)
 
 ### iOS PWA Gotchas
