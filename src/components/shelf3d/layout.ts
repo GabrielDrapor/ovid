@@ -338,32 +338,25 @@ function layoutPhysicalSlots(
   }
 
   if (unplaced.length > 0) {
-    const occupied = new Set(runMap.keys());
-    const grouped = new Map<string, LayoutBook[]>();
-    for (const book of unplaced) {
-      const key = groupKey(book);
-      const group = grouped.get(key);
-      if (group) group.push(book);
-      else grouped.set(key, [book]);
-    }
-
-    for (const [, group] of Array.from(grouped.entries()).sort(([a], [b]) =>
-      a.localeCompare(b)
-    )) {
-      let currentRun: PhysicalRun | null = null;
-      let cursor = 0;
-      for (const book of group.slice().sort(sortBooks)) {
-        const w = spineWidth(ratios.get(book.uuid));
-        if (!currentRun || (cursor + w > bayInner + 1e-6 && cursor > 0)) {
-          const [rowCoord, colCoord] = nextCenterOutCoord(occupied);
-          currentRun = { rowCoord, colCoord, books: [] };
-          runMap.set(`${rowCoord}:${colCoord}`, currentRun);
-          occupied.add(`${rowCoord}:${colCoord}`);
-          cursor = 0;
-        }
-        currentRun.books.push(book);
-        cursor += w + BOOK_GAP;
-      }
+    // Books with no slot of their own (not yet migrated to a physical slot)
+    // get a stable block of their own rows, packed the same way the legacy
+    // wall used to: grouped, fresh row per group, left-to-right wrap. It's
+    // anchored one row below whatever physical slots already exist so it
+    // never collides with them, and it only grows as those unplaced books
+    // themselves change — placing one more explicit slot elsewhere on the
+    // shelf can't reshuffle it.
+    const explicitRows = Array.from(runMap.values()).map((run) => run.rowCoord);
+    const startRow =
+      explicitRows.length > 0 ? Math.max(...explicitRows) + 1 : 0;
+    const packed = packBookGroups(
+      unplaced,
+      ratios,
+      bayInner,
+      MAX_CONTENT_COLS,
+      startRow
+    );
+    for (const run of Array.from(packed.values())) {
+      runMap.set(`${run.rowCoord}:${run.colCoord}`, run);
     }
   }
 
@@ -471,27 +464,63 @@ function layoutPhysicalSlots(
   };
 }
 
-function nextCenterOutCoord(occupied: Set<string>): [number, number] {
-  for (let radius = 0; radius < 50; radius++) {
-    const candidates: Array<[number, number]> = [];
-    for (let row = -radius; row <= radius; row++) {
-      for (let col = -radius; col <= radius; col++) {
-        if (Math.max(Math.abs(row), Math.abs(col)) !== radius) continue;
-        candidates.push([row, col]);
-      }
+/**
+ * Packs ungrouped books into a block of fresh rows starting at `startRow`:
+ * each shelf_id/ownership group gets its own row, wrapping left-to-right at
+ * `maxCols` bays — the same packing legacy (non-physical) books use.
+ */
+function packBookGroups(
+  books: LayoutBook[],
+  ratios: Map<string, number>,
+  bayInner: number,
+  maxCols: number,
+  startRow: number
+): Map<string, PhysicalRun> {
+  const grouped = new Map<string, LayoutBook[]>();
+  for (const book of books) {
+    const key = groupKey(book);
+    const group = grouped.get(key);
+    if (group) group.push(book);
+    else grouped.set(key, [book]);
+  }
+
+  const runs = new Map<string, PhysicalRun>();
+  let row = startRow;
+  let col = 0;
+  let cursor = 0;
+  let started = false;
+
+  for (const [, group] of Array.from(grouped.entries()).sort(([a], [b]) =>
+    a.localeCompare(b)
+  )) {
+    if (started) {
+      row++;
+      col = 0;
+      cursor = 0;
     }
-    candidates.sort(([rowA, colA], [rowB, colB]) => {
-      const distA = Math.abs(rowA) + Math.abs(colA);
-      const distB = Math.abs(rowB) + Math.abs(colB);
-      if (distA !== distB) return distA - distB;
-      if (rowA !== rowB) return rowA - rowB;
-      return colA - colB;
-    });
-    for (const [row, col] of candidates) {
-      if (!occupied.has(`${row}:${col}`)) return [row, col];
+    for (const book of group.slice().sort(sortBooks)) {
+      started = true;
+      const w = spineWidth(ratios.get(book.uuid));
+      if (cursor + w > bayInner + 1e-6 && cursor > 0) {
+        col++;
+        cursor = 0;
+        if (col >= maxCols) {
+          col = 0;
+          row++;
+        }
+      }
+      const key = `${row}:${col}`;
+      let run = runs.get(key);
+      if (!run) {
+        run = { rowCoord: row, colCoord: col, books: [] };
+        runs.set(key, run);
+      }
+      run.books.push(book);
+      cursor += w + BOOK_GAP;
     }
   }
-  return [0, occupied.size + 1];
+
+  return runs;
 }
 
 /** Vertical center of each row, rows stacked symmetrically around y = 0. */

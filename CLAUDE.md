@@ -37,7 +37,7 @@ Guidance for Claude Code working on this repo.
 TypeScript-first across frontend, backend, CLI, and translator service.
 
 ### Components
-- **React SPA** (`src/components/`) — BookShelf (classic 2D + 3D closet views), BilingualReaderV2, ErrorBoundary
+- **React SPA** (`src/components/`) — BookShelf (3D closet, with a legacy 2D wall fallback), BilingualReaderV2, ErrorBoundary
 - **CF Worker** (`src/worker/`) — API server: auth, book-handlers, credits, db, types
 - **Railway Translator** (`services/translator/`) — Long-running translation service (Hono + Sharp)
   - Receives webhook from Worker on EPUB upload
@@ -58,9 +58,9 @@ TypeScript-first across frontend, backend, CLI, and translator service.
 - `src/worker/credits.ts` — Credit balance, Stripe checkout/webhooks
 - `src/worker/db.ts` — Database helpers, migrations
 - `src/components/BilingualReaderV2.tsx` — Main reader (scroll nav, paragraph toggle, progress)
-- `src/components/BookShelf.tsx` — Library UI: hosts the 3D closet (default) with the classic 2D wall as no-WebGL fallback
-- `src/components/shelf3d/BookShelf3D.tsx` — 3D closet view (three + @react-three/fiber, lazy-loaded): gaze/zoom camera, click-to-fly-out book with info panel. Requires CORS on the R2 assets domain (configured on bucket `ovid`)
-- `src/components/shelf3d/layout.ts` — Pure shelf-packing math for the 3D view (adaptive case width, unit-tested)
+- `src/components/BookShelf.tsx` — Library UI: hosts the 3D closet (default). Falls back to a classic 2D wall when WebGL is unavailable, but that fallback is legacy/deprecated — it has no upload entry point (upload only happens by clicking an empty slot in the 3D closet) and is slated for removal
+- `src/components/shelf3d/BookShelf3D.tsx` — 3D closet view (three + @react-three/fiber, lazy-loaded): gaze/zoom camera, click-to-fly-out book with info panel, click-empty-slot-to-upload. Requires CORS on the R2 assets domain (configured on bucket `ovid`)
+- `src/components/shelf3d/layout.ts` — Pure shelf-packing math for the 3D view: books explicitly placed in a physical slot (`shelf_row`/`shelf_col`) render at that coordinate; everything else packs into a stable block of rows below the physical slots, grouped by shelf/ownership (adaptive case width, unit-tested)
 - `src/components/ErrorBoundary.tsx` — Error boundary wrapper
 - `src/utils/translator.ts` — Unified translation module (used by CLI scripts)
 - `services/translator/src/index.ts` — Railway service entry (Hono routes)
@@ -82,13 +82,14 @@ TypeScript-first across frontend, backend, CLI, and translator service.
 ### Books
 - `GET /api/books` (alias `/api/v2/books`) — List books (public + user's private)
 - `POST /api/books/estimate` — Parse an EPUB via Railway and return a translation cost estimate
-- `POST /api/books/upload` — Upload EPUB (auth required, deducts credits; Railway handles the rest via `/upload-and-parse`)
+- `POST /api/books/upload` — Upload EPUB (auth required, deducts credits; Railway handles the rest via `/upload-and-parse`). Accepts an optional shelf target (`shelfSlotId`, or `shelfRow`/`shelfCol` to create one on the fly) from clicking an empty slot in the 3D closet
 - `GET /api/book/:uuid/status` — Parsing/translation progress (polled by the shelf)
 - `GET /api/book/:uuid/chapters` — Chapter list
 - `GET /api/book/:uuid/chapter/:number` — Chapter content (XPath-mapped paragraphs)
 - `GET /api/book/:uuid/content` — Full book content
 - `DELETE /api/book/:uuid` — Delete book (owner only)
 - `POST /api/book/:uuid/share` / `GET /api/shared/:token/...` — Share links
+- `GET /api/shelf-slots` — Physical shelf-slot grid (row/col/label) for the 3D closet's slot-based upload targets
 
 ### Reading Progress
 - `POST /api/book/:uuid/mark-complete` — Mark book read/unread (`{isCompleted: bool}`)
@@ -121,6 +122,11 @@ Production runs the **v2 schema** (`database/schema_v2.sql` + `database/migratio
 ### User Data
 - **user_book_progress** — `id, user_id, book_uuid, is_completed, completed_at, last_read_at, chapter_number, paragraph_xpath, show_original` (UNIQUE user_id + book_uuid)
 - **credit_transactions** — `id, user_id, amount, type (purchase/usage), stripe_payment_intent_id, balance_after, created_at`
+
+### Shelf Layout
+- **shelf_slots** — `id, shelf_id, row, col, sort_order, label` (UNIQUE shelf_id+row+col, UNIQUE shelf_id+sort_order). Physical coordinates on the 3D closet wall; created on the fly when a user clicks an empty slot to upload, or pre-labeled (e.g. "Gutenberg books") for curated bays
+- **book_shelf_slots** — `book_id (PK), slot_id, position` — links a book to the physical slot it was uploaded into
+- **book_shelves** — `shelf_id, book_id, position` — dormant/legacy named-shelf grouping (no current app writer; `shelf3d/layout.ts` still reads `shelf_id` off books for stable grouping of anything not yet in a physical slot)
 
 ## Environment Variables
 

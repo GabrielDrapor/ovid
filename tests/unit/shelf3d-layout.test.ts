@@ -185,6 +185,105 @@ describe('layoutBooks', () => {
     );
   });
 
+  it('packs books with no slot of their own into a stable block below existing physical slots', () => {
+    const shelfSlots = [
+      { id: 1, shelf_id: 'main', row: 0, col: 0, sort_order: 0, label: null },
+    ];
+    const slotted = {
+      uuid: 'slotted',
+      user_id: null,
+      shelf_slot_id: 1,
+      shelf_row: 0,
+      shelf_col: 0,
+      shelf_position: 1,
+    };
+    const unplaced = [
+      { uuid: 'public-a', user_id: null, display_order: 1 },
+      { uuid: 'user-a', user_id: 9, display_order: 1 },
+    ];
+
+    const layout = layoutBooks(
+      [slotted, ...unplaced],
+      ratios,
+      BAY_INNER,
+      4,
+      shelfSlots
+    );
+    const byUuid = new Map(layout.placements.map((p) => [p.uuid, p]));
+
+    // Unplaced groups start one row below the explicit slot (row 0), each
+    // getting its own fresh row, and never share a row with the slotted book.
+    expect(byUuid.get('slotted')?.row).toBe(0);
+    expect(byUuid.get('public-a')?.row).toBe(1);
+    expect(byUuid.get('user-a')?.row).toBe(2);
+  });
+
+  it('does not reshuffle already-unplaced books when a new physical slot appears elsewhere', () => {
+    const unplaced = [
+      { uuid: 'public-a', user_id: null, display_order: 1 },
+      { uuid: 'user-a', user_id: 9, display_order: 1 },
+    ];
+
+    const before = layoutBooks(
+      [
+        {
+          uuid: 'slotted',
+          user_id: null,
+          shelf_slot_id: 1,
+          shelf_row: 0,
+          shelf_col: 0,
+          shelf_position: 1,
+        },
+        ...unplaced,
+      ],
+      ratios,
+      BAY_INNER,
+      4,
+      [{ id: 1, shelf_id: 'main', row: 0, col: 0, sort_order: 0, label: null }]
+    );
+
+    // A second explicit slot is created at the same row (a neighboring bay),
+    // as happens when another user uploads into an adjacent empty slot —
+    // the row bound doesn't grow, so the unplaced block shouldn't move.
+    const after = layoutBooks(
+      [
+        {
+          uuid: 'slotted',
+          user_id: null,
+          shelf_slot_id: 1,
+          shelf_row: 0,
+          shelf_col: 0,
+          shelf_position: 1,
+        },
+        {
+          uuid: 'new-slotted',
+          user_id: null,
+          shelf_slot_id: 2,
+          shelf_row: 0,
+          shelf_col: 1,
+          shelf_position: 1,
+        },
+        ...unplaced,
+      ],
+      ratios,
+      BAY_INNER,
+      4,
+      [
+        { id: 1, shelf_id: 'main', row: 0, col: 0, sort_order: 0, label: null },
+        { id: 2, shelf_id: 'main', row: 0, col: 1, sort_order: 1, label: null },
+      ]
+    );
+
+    const beforeByUuid = new Map(before.placements.map((p) => [p.uuid, p]));
+    const afterByUuid = new Map(after.placements.map((p) => [p.uuid, p]));
+    expect(afterByUuid.get('public-a')?.row).toBe(
+      beforeByUuid.get('public-a')?.row
+    );
+    expect(afterByUuid.get('user-a')?.row).toBe(
+      beforeByUuid.get('user-a')?.row
+    );
+  });
+
   it('creates upload targets for missing interior cells', () => {
     const layout = layoutBooks([], ratios, BAY_INNER, 4, [
       {
