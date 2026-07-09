@@ -66,6 +66,15 @@ function isBookImportPending(book: Book): boolean {
 const ROOM = '#171210';
 const CLOTH_FALLBACK = '#3a3026';
 
+// Shown under the loading spinner — the shelf-keeper tidying up before
+// opening the doors. One is picked at random per visit.
+const LOADING_QUIPS = [
+  'Sweeping the dust off the shelves…',
+  'Straightening the spines…',
+  'Lighting the reading lamp…',
+  'Waking the librarian…',
+];
+
 const MIN_ZOOM = 2.5;
 const SHELF_LABEL_HEIGHT = 0.084;
 const SHELF_LABEL_FONT = '900 58px Arial, Helvetica, sans-serif';
@@ -187,8 +196,11 @@ function useArtTexture(
       if (cancelled) return;
       const bust = url + (url.includes('?') ? '&' : '?') + 'cors=1';
       loader.load(bust, apply, undefined, () => {
-        // Both attempts failed — show the colorful fallback.
+        if (cancelled) return;
+        // Both attempts failed — settle on the colorful fallback, and report
+        // it as loaded so the shelf's reveal gate doesn't wait forever.
         setLoaded(fallback);
+        onLoadedRef.current?.(fallback);
       });
     });
     return () => {
@@ -1066,6 +1078,27 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
   }, []);
   const allArtReady = booksWithUrls === 0 || readyCount >= booksWithUrls;
 
+  // The loading veil blocks interaction until every spine has settled, but
+  // only for the initial reveal — art streaming in later (fresh uploads,
+  // artwork refresh) must not re-lock the UI. A timeout caps how long a
+  // stalled network can hold the shelf hostage.
+  const [revealed, setRevealed] = useState(false);
+  // One quip per visit, shared by the fetch screen and the art veil so the
+  // two loading phases read as a single moment.
+  const quip = useMemo(
+    () => LOADING_QUIPS[Math.floor(Math.random() * LOADING_QUIPS.length)],
+    []
+  );
+  useEffect(() => {
+    if (revealed || loading) return;
+    if (allArtReady) {
+      setRevealed(true);
+      return;
+    }
+    const t = setTimeout(() => setRevealed(true), 10000);
+    return () => clearTimeout(t);
+  }, [allArtReady, loading, revealed]);
+
   const handleSpineRatio = useCallback((uuid: string, ratio: number) => {
     setSpineRatios((prev) => {
       if (Math.abs((prev.get(uuid) ?? DEFAULT_SPINE_RATIO) - ratio) < 0.001) {
@@ -1228,13 +1261,17 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
 
       {!loading && (
         <div
-          className={`closet3d-blur-overlay ${allArtReady ? 'closet3d-blur-clear' : ''}`}
-        />
+          className={`closet3d-blur-overlay ${revealed ? 'closet3d-blur-clear' : ''}`}
+        >
+          <div className="closet3d-spinner closet3d-blur-spinner" />
+          <p className="closet3d-loading-quip">{quip}</p>
+        </div>
       )}
 
       {loading && (
         <div className="closet3d-loading">
           <div className="closet3d-spinner" />
+          <p className="closet3d-loading-quip">{quip}</p>
         </div>
       )}
 

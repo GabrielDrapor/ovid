@@ -27,11 +27,18 @@
 .closet3d-blur-overlay {
   position: absolute;
   inset: 0;
-  pointer-events: none;
   z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  align-items: center;
+  justify-content: center;
+  background: rgba(23, 18, 16, 0.38);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
-  transition: backdrop-filter 0.6s ease-out, -webkit-backdrop-filter 0.6s ease-out,
+  transition:
+    backdrop-filter 0.6s ease-out,
+    -webkit-backdrop-filter 0.6s ease-out,
     opacity 0.6s ease-out;
 }
 
@@ -39,16 +46,28 @@
   backdrop-filter: blur(0px);
   -webkit-backdrop-filter: blur(0px);
   opacity: 0;
+  pointer-events: none;
 }
 
 .closet3d-loading {
   position: absolute;
   inset: 0;
   display: flex;
+  flex-direction: column;
+  gap: 16px;
   align-items: center;
   justify-content: center;
   background: #171210;
   z-index: 4;
+}
+
+.closet3d-loading-quip {
+  margin: 0;
+  font-family: Georgia, 'Songti SC', serif;
+  font-style: italic;
+  font-size: 14px;
+  letter-spacing: 0.02em;
+  color: rgba(244, 234, 217, 0.65);
 }
 
 .closet3d-spinner {
@@ -58,6 +77,11 @@
   border-top-color: rgba(255, 240, 220, 0.85);
   border-radius: 50%;
   animation: closet3d-spin 0.9s linear infinite;
+}
+
+.closet3d-spinner.closet3d-blur-spinner {
+  width: 26px;
+  height: 26px;
 }
 
 @keyframes closet3d-spin {
