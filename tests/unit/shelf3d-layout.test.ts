@@ -60,6 +60,7 @@ describe('layoutBooks', () => {
         uuid: 'sherlock',
         user_id: null,
         shelf_id: 'main',
+        shelf_slot_id: 1,
         shelf_row: 0,
         shelf_col: 0,
         shelf_position: 1,
@@ -68,6 +69,7 @@ describe('layoutBooks', () => {
         uuid: 'gutenberg-left',
         user_id: null,
         shelf_id: 'main',
+        shelf_slot_id: 2,
         shelf_row: 0,
         shelf_col: -1,
         shelf_position: 1,
@@ -76,6 +78,7 @@ describe('layoutBooks', () => {
         uuid: 'gutenberg-top',
         user_id: null,
         shelf_id: 'main',
+        shelf_slot_id: 3,
         shelf_row: -1,
         shelf_col: 0,
         shelf_slot_label: 'Gutenberg books',
@@ -105,6 +108,16 @@ describe('layoutBooks', () => {
         row: 0,
       }),
     ]);
+    expect(layout.uploadTargets).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          shelfSlotId: 3,
+          rowCoord: -1,
+          colCoord: 0,
+          label: 'Gutenberg books',
+        }),
+      ])
+    );
   });
 
   it('preserves spine widths in crowded physical slots', () => {
@@ -126,4 +139,80 @@ describe('layoutBooks', () => {
     expect(right - left).toBeGreaterThan(BAY_INNER);
   });
 
+  it('creates upload targets for empty physical slots', () => {
+    const layout = layoutBooks([], ratios, BAY_INNER, 4, [
+      {
+        id: 7,
+        shelf_id: 'main',
+        row: 1,
+        col: -1,
+        sort_order: 7,
+        label: 'Empty slot',
+      },
+    ]);
+
+    expect(layout.placements).toHaveLength(0);
+    expect(layout.contentRows).toBe(1);
+    expect(layout.contentCols).toBe(1);
+    expect(layout.uploadTargets).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          shelfSlotId: 7,
+          rowCoord: 1,
+          colCoord: -1,
+          label: 'Empty slot',
+        }),
+        expect.objectContaining({
+          shelfSlotId: null,
+          rowCoord: 0,
+          colCoord: -2,
+          label: null,
+        }),
+        expect.objectContaining({
+          shelfSlotId: null,
+          rowCoord: 2,
+          colCoord: 0,
+          label: null,
+        }),
+      ])
+    );
+    const slotTarget = layout.uploadTargets.find(
+      (target) => target.rowCoord === 1 && target.colCoord === -1
+    );
+    expect(slotTarget!.x - slotTarget!.width / 2).toBeCloseTo(
+      -BAY_INNER / 2,
+      4
+    );
+  });
+
+  it('creates upload targets for missing interior cells', () => {
+    const layout = layoutBooks([], ratios, BAY_INNER, 4, [
+      {
+        id: 1,
+        shelf_id: 'main',
+        row: 1,
+        col: 1,
+        sort_order: 1,
+        label: null,
+      },
+      {
+        id: 2,
+        shelf_id: 'main',
+        row: -1,
+        col: 0,
+        sort_order: 2,
+        label: null,
+      },
+    ]);
+
+    expect(layout.uploadTargets).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          shelfSlotId: null,
+          rowCoord: 1,
+          colCoord: -1,
+        }),
+      ])
+    );
+  });
 });

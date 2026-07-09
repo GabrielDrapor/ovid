@@ -55,7 +55,104 @@ export async function handleBookUpload(
     let targetLanguage = 'zh';
     let sourceLanguage = 'auto';
     let skipTranslation = false;
+    let shelfTarget: {
+      slotId?: number | null;
+      row?: number | null;
+      col?: number | null;
+    } | null = null;
     const bookUuid = crypto.randomUUID();
+
+    const parseShelfSlotId = (value: unknown): number | null | undefined => {
+      if (value === undefined || value === null || value === '') return null;
+      if (typeof value !== 'string' && typeof value !== 'number')
+        return undefined;
+      const parsed = Number(value);
+      return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+    };
+
+    const parseShelfCoord = (value: unknown): number | null | undefined => {
+      if (value === undefined || value === null || value === '') return null;
+      if (typeof value !== 'string' && typeof value !== 'number')
+        return undefined;
+      const parsed = Number(value);
+      return Number.isInteger(parsed) && Math.abs(parsed) <= 50
+        ? parsed
+        : undefined;
+    };
+
+    const parseShelfTarget = (
+      slotValue: unknown,
+      rowValue: unknown,
+      colValue: unknown
+    ): typeof shelfTarget | undefined => {
+      const slotId = parseShelfSlotId(slotValue);
+      const row = parseShelfCoord(rowValue);
+      const col = parseShelfCoord(colValue);
+      if (slotId === undefined || row === undefined || col === undefined) {
+        return undefined;
+      }
+      if (slotId !== null) return { slotId, row, col };
+      if (row === null && col === null) return null;
+      if (row === null || col === null) return undefined;
+      return { row, col };
+    };
+
+    const invalidShelfSlotResponse = () =>
+      new Response(JSON.stringify({ error: 'Invalid shelf slot' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+
+    const validateShelfTarget = async () => {
+      if (!shelfTarget?.slotId) return null;
+      const slot = await env.DB.prepare(
+        "SELECT id FROM shelf_slots WHERE id = ? AND shelf_id = 'main' LIMIT 1"
+      )
+        .bind(shelfTarget.slotId)
+        .first<{ id: number }>();
+      if (!slot) return invalidShelfSlotResponse();
+      return null;
+    };
+
+    const findShelfSlot = async (row: number, col: number) =>
+      env.DB.prepare(
+        "SELECT id FROM shelf_slots WHERE shelf_id = 'main' AND row = ? AND col = ? LIMIT 1"
+      )
+        .bind(row, col)
+        .first<{ id: number }>();
+
+    const resolveShelfSlotId = async (): Promise<number | null> => {
+      if (!shelfTarget) return null;
+      if (shelfTarget.slotId) return shelfTarget.slotId;
+      if (shelfTarget.row === null || shelfTarget.row === undefined)
+        return null;
+      if (shelfTarget.col === null || shelfTarget.col === undefined)
+        return null;
+
+      const existing = await findShelfSlot(shelfTarget.row, shelfTarget.col);
+      if (existing) return existing.id;
+
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const orderRow = await env.DB.prepare(
+          "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_order FROM shelf_slots WHERE shelf_id = 'main'"
+        ).first<{ next_order: number }>();
+        try {
+          await env.DB.prepare(
+            `INSERT INTO shelf_slots (shelf_id, row, col, sort_order, label)
+             VALUES ('main', ?, ?, ?, NULL)`
+          )
+            .bind(shelfTarget.row, shelfTarget.col, orderRow?.next_order ?? 0)
+            .run();
+        } catch {
+          // Another request may have created this coordinate or sort_order.
+        }
+
+        const slot = await findShelfSlot(shelfTarget.row, shelfTarget.col);
+        if (slot) return slot.id;
+      }
+
+      throw new Error('Failed to create shelf slot');
+    };
 
     if (contentType.includes('application/json')) {
       // Fast path: file already in R2 from estimate phase — just copy it
@@ -64,6 +161,9 @@ export async function handleBookUpload(
         targetLanguage?: string;
         sourceLanguage?: string;
         skipTranslation?: boolean;
+        shelfSlotId?: number | string | null;
+        shelfRow?: number | string | null;
+        shelfCol?: number | string | null;
       };
 
       if (!body.fileKey) {
@@ -76,6 +176,15 @@ export async function handleBookUpload(
       targetLanguage = body.targetLanguage || 'zh';
       sourceLanguage = body.sourceLanguage || 'auto';
       skipTranslation = body.skipTranslation === true;
+      const parsedShelfTarget = parseShelfTarget(
+        body.shelfSlotId,
+        body.shelfRow,
+        body.shelfCol
+      );
+      if (parsedShelfTarget === undefined) return invalidShelfSlotResponse();
+      shelfTarget = parsedShelfTarget;
+      const shelfSlotError = await validateShelfTarget();
+      if (shelfSlotError) return shelfSlotError;
 
       // Derive extension from the temp key
       const supportedExtensions = ['.epub', '.mobi', '.azw3'];
@@ -115,6 +224,15 @@ export async function handleBookUpload(
       targetLanguage = (formData.get('targetLanguage') as string) || 'zh';
       sourceLanguage = (formData.get('sourceLanguage') as string) || 'auto';
       skipTranslation = formData.get('skipTranslation') === 'true';
+      const parsedShelfTarget = parseShelfTarget(
+        formData.get('shelfSlotId'),
+        formData.get('shelfRow'),
+        formData.get('shelfCol')
+      );
+      if (parsedShelfTarget === undefined) return invalidShelfSlotResponse();
+      shelfTarget = parsedShelfTarget;
+      const shelfSlotError = await validateShelfTarget();
+      if (shelfSlotError) return shelfSlotError;
 
       if (!file) {
         return new Response(JSON.stringify({ error: 'No file provided' }), {
@@ -162,6 +280,28 @@ export async function handleBookUpload(
         nextOrder
       )
       .run();
+
+    const shelfSlotId = await resolveShelfSlotId();
+    if (shelfSlotId !== null) {
+      const bookRow = await env.DB.prepare(
+        'SELECT id FROM books_v2 WHERE uuid = ? LIMIT 1'
+      )
+        .bind(bookUuid)
+        .first<{ id: number }>();
+      if (bookRow) {
+        const positionRow = await env.DB.prepare(
+          'SELECT COALESCE(MAX(position), 0) + 1 AS next_position FROM book_shelf_slots WHERE slot_id = ?'
+        )
+          .bind(shelfSlotId)
+          .first<{ next_position: number }>();
+        await env.DB.prepare(
+          `INSERT INTO book_shelf_slots (book_id, slot_id, position)
+           VALUES (?, ?, ?)`
+        )
+          .bind(bookRow.id, shelfSlotId, positionRow?.next_position || 1)
+          .run();
+      }
+    }
 
     // Delegate everything to Railway (parsing, DB writes, credits, translation)
     const translatorUrl = env.TRANSLATOR_SERVICE_URL;

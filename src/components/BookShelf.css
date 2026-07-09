@@ -267,6 +267,21 @@
   font-weight: 400;
 }
 
+.upload-target-note {
+  width: fit-content;
+  max-width: 100%;
+  margin: -18px auto 24px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: rgba(216, 178, 113, 0.14);
+  border: 1px solid rgba(216, 178, 113, 0.24);
+  color: rgba(244, 234, 217, 0.86);
+  font-size: 0.78rem;
+  line-height: 1.25;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
 .upload-area {
   display: flex;
   flex-direction: column;
@@ -547,25 +562,6 @@
   background: rgba(100, 100, 100, 0.5);
 }
 
-.shelf-upload-btn {
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
-  border: none;
-  padding: 0;
-  cursor: pointer;
-  background: none;
-  color: rgba(255, 255, 255, 0.85);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: opacity 0.2s ease;
-}
-
-.shelf-upload-btn:hover {
-  opacity: 0.7;
-}
-
 .shelf-signin-btn {
   display: flex;
   align-items: center;
@@ -810,6 +806,27 @@
   box-shadow:
     inset 2px 0 5px rgba(255, 255, 255, 0.1),
     inset -2px 0 5px rgba(0, 0, 0, 0.3);
+}
+
+.book-spine-default.book-spine-pending {
+  background:
+    linear-gradient(
+      90deg,
+      rgba(76, 73, 66, 0.95),
+      rgba(119, 114, 104, 0.95),
+      rgba(57, 55, 48, 0.95)
+    ),
+    #5f5a52;
+  filter: blur(1.5px) saturate(0.65);
+  opacity: 0.86;
+}
+
+.book-spine-default.book-spine-pending::before {
+  content: '';
+  width: 28%;
+  height: 72%;
+  border-radius: 999px;
+  background: rgba(255, 250, 240, 0.18);
 }
 
 .spine-title {
@@ -1213,16 +1230,6 @@
   .shelf-avatar-btn {
     width: 30px;
     height: 30px;
-  }
-
-  .shelf-upload-btn {
-    width: 35px;
-    height: 35px;
-  }
-
-  .shelf-upload-btn svg {
-    width: 20px;
-    height: 20px;
   }
 
   .shelf-help-btn {
@@ -1862,7 +1869,6 @@
   line-height: 1.5;
 }
 
-.empty-shelf-upload-btn,
 .empty-shelf-login-btn {
   display: inline-block;
   padding: 10px 28px;
@@ -1872,15 +1878,6 @@
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s;
-}
-
-.empty-shelf-upload-btn {
-  background: #1a1a1a;
-  color: #fff;
-}
-
-.empty-shelf-upload-btn:hover {
-  background: #333;
 }
 
 .empty-shelf-login-btn {

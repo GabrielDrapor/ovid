@@ -40,3 +40,19 @@ export interface TranslationProgress {
   chaptersCompleted: number;
   chaptersTotal: number;
 }
+
+export interface ShelfUploadTarget {
+  shelfSlotId?: number | null;
+  row: number;
+  col: number;
+  label?: string | null;
+}
+
+export interface ShelfSlot {
+  id: number;
+  shelf_id: string;
+  row: number;
+  col: number;
+  sort_order: number;
+  label?: string | null;
+}

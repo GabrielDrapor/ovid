@@ -9,7 +9,12 @@ import React, {
 import { SUPPORTED_LANGUAGES } from '../utils/translator';
 import { useUser } from '../contexts/UserContext';
 import { ApiError, fetchApi } from '../utils/api';
-import { Book, UserBookProgress } from './shelf3d/types';
+import {
+  Book,
+  ShelfSlot,
+  ShelfUploadTarget,
+  UserBookProgress,
+} from './shelf3d/types';
 import './BookShelf.css';
 
 const BookShelf3D = React.lazy(() => import('./shelf3d/BookShelf3D'));
@@ -37,8 +42,33 @@ const DEFAULT_SPINE_RATIO = 1 / 5.3;
 const MIN_SPINE_RATIO = 0.04;
 const MAX_SPINE_RATIO = 0.35;
 
+// Covers normally land within seconds of a book turning 'ready'; past this
+// window assume generation failed and stop refreshing for that book.
+const ARTWORK_REFRESH_WINDOW_MS = 2 * 60 * 1000;
+
+function hasCompleteArtwork(book: Book): boolean {
+  return !!book.book_cover_img_url && !!book.book_spine_img_url;
+}
+
+// Cover generation can fail server-side without flipping status to 'error',
+// so missing artwork must never gate opening a book — a 'ready' book without
+// cover/spine renders with fallback art and stays readable. isArtworkPending
+// only drives the time-bounded artwork refresh in pollProcessingBooks.
+function isArtworkPending(book: Book): boolean {
+  return book.status !== 'error' && !hasCompleteArtwork(book);
+}
+
+function isBookImportPending(book: Book): boolean {
+  return book.status === 'processing';
+}
+
+function needsTranslationDrive(book: Book): boolean {
+  return book.status === 'processing' && !book.language_pair?.endsWith('-none');
+}
+
 const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
   const [books, setBooks] = useState<Book[]>([]);
+  const [shelfSlots, setShelfSlots] = useState<ShelfSlot[]>([]);
   const [spineRatios, setSpineRatios] = useState<Map<string, number>>(
     new Map()
   );
@@ -67,6 +97,9 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
   const [currentPage, setCurrentPage] = useState(0);
   const [pageDir, setPageDir] = useState<'up' | 'down'>('up');
   const [showUploadModal, setShowUploadModal] = useState(false);
+  const [uploadTarget, setUploadTarget] = useState<ShelfUploadTarget | null>(
+    null
+  );
   const [showCreditsModal, setShowCreditsModal] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState('');
@@ -108,6 +141,22 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
     refreshCredits,
   } = useUser();
 
+  const openUploadModal = useCallback((target?: ShelfUploadTarget) => {
+    setUploadTarget(target ?? null);
+    setUploadError(null);
+    setEstimate(null);
+    setSkipTranslation(false);
+    setShowUploadModal(true);
+  }, []);
+
+  const closeUploadModal = useCallback(() => {
+    setShowUploadModal(false);
+    setUploadTarget(null);
+    setUploadError(null);
+    setEstimate(null);
+    setSkipTranslation(false);
+  }, []);
+
   const handleSpineImageLoad = useCallback(
     (bookUuid: string, event: React.SyntheticEvent<HTMLImageElement>) => {
       const img = event.currentTarget;
@@ -142,6 +191,15 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
       const booksData = await response.json();
       const booksList = Array.isArray(booksData) ? (booksData as Book[]) : [];
       setBooks(booksList);
+      try {
+        const slotsResponse = await fetch('/api/shelf-slots');
+        if (slotsResponse.ok) {
+          const slotsData = await slotsResponse.json();
+          setShelfSlots(Array.isArray(slotsData) ? slotsData : []);
+        }
+      } catch {
+        setShelfSlots([]);
+      }
       if (booksData.length > 0 && !hoveredBook) {
         setHoveredBook(booksData[0]);
       }
@@ -328,8 +386,8 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
   // .books-grid's overflow:hidden. Recompute on resize and any scroll
   // (the books grid scrolls horizontally).
   //
-  // Bottom-row spines sit near the avatar/upload buttons, so the box may
-  // need to slide sideways to clear them — the tail tracks the spine
+  // Bottom-row spines sit near the shelf action dock, so the box may need to
+  // slide sideways to clear it — the tail tracks the spine
   // independently via --tail-left.
   useLayoutEffect(() => {
     if (!uploadedBookUuid) return;
@@ -347,8 +405,8 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
       const cy = spineRect.top - th - 14;
       let cx = spineCenterX;
 
-      // If the box would collide with .shelf-actions (avatar + upload btn),
-      // slide it horizontally to whichever side has more room.
+      // If the box would collide with .shelf-actions, slide it horizontally
+      // to whichever side has more room.
       const actions = document.querySelector('.shelf-actions');
       if (actions) {
         const a = actions.getBoundingClientRect();
@@ -397,15 +455,34 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
     >
   >(new Map());
   const translatingRef = useRef<Set<string>>(new Set());
+  const lastTranslationPollRef = useRef<Map<string, number>>(new Map());
+  const lastArtworkRefreshRef = useRef(0);
+  const artworkPendingSinceRef = useRef<Map<string, number>>(new Map());
   const pollProcessingBooks = useCallback(async () => {
     const booksList = Array.isArray(books) ? books : [];
-    const processingBooks = booksList.filter((b) => b.status === 'processing');
-    if (processingBooks.length === 0) return;
+    const translationBooks = booksList.filter(needsTranslationDrive);
+    const now = Date.now();
+    const pendingSince = artworkPendingSinceRef.current;
+    const artworkPendingBooks = booksList.filter((book) => {
+      if (!isArtworkPending(book)) {
+        pendingSince.delete(book.uuid);
+        return false;
+      }
+      const since = pendingSince.get(book.uuid) ?? now;
+      pendingSince.set(book.uuid, since);
+      return now - since < ARTWORK_REFRESH_WINDOW_MS;
+    });
+    if (translationBooks.length === 0 && artworkPendingBooks.length === 0) {
+      return;
+    }
 
     let changed = false;
-    for (const book of processingBooks) {
+    for (const book of translationBooks) {
+      const lastPoll = lastTranslationPollRef.current.get(book.uuid) ?? 0;
+      if (Date.now() - lastPoll < 2800) continue;
       // Don't send a new request while a previous one is still in-flight
       if (translatingRef.current.has(book.uuid)) continue;
+      lastTranslationPollRef.current.set(book.uuid, Date.now());
       translatingRef.current.add(book.uuid);
 
       try {
@@ -448,22 +525,30 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
         translatingRef.current.delete(book.uuid);
       }
     }
-    if (changed) {
+    const shouldRefreshArtwork =
+      artworkPendingBooks.length > 0 &&
+      Date.now() - lastArtworkRefreshRef.current > 2800;
+    if (changed || shouldRefreshArtwork) {
+      if (shouldRefreshArtwork) lastArtworkRefreshRef.current = Date.now();
       await fetchBooks();
     }
   }, [books]);
 
-  // Fetch initial translation progress for processing books on mount
+  // Fetch initial translation progress and keep importing books fresh until
+  // both translation and artwork generation have settled.
   const initialProgressFetched = useRef(false);
   useEffect(() => {
     const booksList = Array.isArray(books) ? books : [];
-    const processingBooks = booksList.filter((b) => b.status === 'processing');
-    if (processingBooks.length === 0) return;
+    const translationBooks = booksList.filter(needsTranslationDrive);
+    const artworkPendingBooks = booksList.filter(isArtworkPending);
+    if (translationBooks.length === 0 && artworkPendingBooks.length === 0) {
+      return;
+    }
 
     // Fetch current progress from server only once per processing book
-    if (!initialProgressFetched.current) {
+    if (translationBooks.length > 0 && !initialProgressFetched.current) {
       initialProgressFetched.current = true;
-      processingBooks.forEach(async (book) => {
+      translationBooks.forEach(async (book) => {
         try {
           const res = await fetch(`/api/book/${book.uuid}/status`);
           if (res.ok) {
@@ -630,6 +715,15 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
     );
   };
 
+  const appendUploadTarget = (formData: FormData) => {
+    if (!uploadTarget) return;
+    if (uploadTarget.shelfSlotId) {
+      formData.append('shelfSlotId', String(uploadTarget.shelfSlotId));
+    }
+    formData.append('shelfRow', String(uploadTarget.row));
+    formData.append('shelfCol', String(uploadTarget.col));
+  };
+
   const handleConfirmUpload = async () => {
     if (!estimate) return;
 
@@ -652,6 +746,9 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
             targetLanguage: estimate.targetLanguage,
             sourceLanguage: estimate.sourceLanguage,
             skipTranslation,
+            shelfSlotId: uploadTarget?.shelfSlotId,
+            shelfRow: uploadTarget?.row,
+            shelfCol: uploadTarget?.col,
           }),
         });
 
@@ -663,6 +760,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
           formData.append('targetLanguage', estimate.targetLanguage);
           formData.append('sourceLanguage', estimate.sourceLanguage);
           formData.append('skipTranslation', String(skipTranslation));
+          appendUploadTarget(formData);
 
           response = await fetchApi('/api/books/upload', {
             method: 'POST',
@@ -676,6 +774,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
         formData.append('targetLanguage', estimate.targetLanguage);
         formData.append('sourceLanguage', estimate.sourceLanguage);
         formData.append('skipTranslation', String(skipTranslation));
+        appendUploadTarget(formData);
 
         response = await fetchApi('/api/books/upload', {
           method: 'POST',
@@ -716,6 +815,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
 
       // Close modal immediately - book will appear on shelf in processing state
       setShowUploadModal(false);
+      setUploadTarget(null);
       setUploadProgress('');
       setUploading(false);
       setEstimate(null);
@@ -814,7 +914,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
             );
           }
           const renderBook = (book: Book) => {
-            const isProcessing = book.status === 'processing';
+            const isProcessing = isBookImportPending(book);
             const isJustUploaded = book.uuid === uploadedBookUuid;
             return (
               <div
@@ -851,7 +951,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                     <strong>Book uploaded!</strong>
                     <span>
                       {book.language_pair?.endsWith('-none')
-                        ? 'Ready to read — original language only.'
+                        ? 'Preparing cover and spine — original language only.'
                         : 'Translation is in progress — you can safely close this page.'}
                     </span>
                   </div>
@@ -873,12 +973,18 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                     />
                   ) : (
                     <div
-                      className="book-spine-default"
-                      style={{ backgroundColor: stringToColor(book.title) }}
+                      className={`book-spine-default ${isProcessing ? 'book-spine-pending' : ''}`}
+                      style={
+                        isProcessing
+                          ? undefined
+                          : { backgroundColor: stringToColor(book.title) }
+                      }
                     >
-                      <span className="spine-title">
-                        {book.original_title || book.title}
-                      </span>
+                      {!isProcessing && (
+                        <span className="spine-title">
+                          {book.original_title || book.title}
+                        </span>
+                      )}
                     </div>
                   )}
                 </div>
@@ -908,12 +1014,14 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                 >
                   <BookShelf3D
                     books={safeBooks}
+                    shelfSlots={shelfSlots}
                     loading={loading}
                     showProgress={!!user}
                     progressMap={bookProgressMap}
                     translationProgress={translationProgress}
                     onRead={onSelectBook}
                     onDelete={handleDeleteBook}
+                    onUploadToSlot={user ? openUploadModal : undefined}
                   />
                 </Suspense>
               )}
@@ -951,26 +1059,6 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                           {user.name?.charAt(0) || user.email.charAt(0)}
                         </div>
                       )}
-                    </button>
-                    <button
-                      className="shelf-upload-btn"
-                      onClick={() => setShowUploadModal(true)}
-                      title="Upload Book"
-                    >
-                      <svg
-                        viewBox="0 0 24 24"
-                        width="20"
-                        height="20"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                        <polyline points="17 8 12 3 7 8" />
-                        <line x1="12" y1="3" x2="12" y2="15" />
-                      </svg>
                     </button>
                     {showUserMenu && (
                       <div className="shelf-user-dropdown">
@@ -1156,7 +1244,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                   )}
                 <p className="author">By {hoveredBook.author}</p>
 
-                {hoveredBook.status === 'processing' ? (
+                {isBookImportPending(hoveredBook) ? (
                   <div className="book-status-processing">
                     <div className="processing-spinner"></div>
                     {(() => {
@@ -1184,7 +1272,9 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                         <span>
                           {tp?.phase === 'glossary'
                             ? 'Extracting glossary...'
-                            : 'Translating...'}
+                            : needsTranslationDrive(hoveredBook)
+                              ? 'Translating...'
+                              : 'Preparing cover and spine...'}
                         </span>
                       );
                     })()}
@@ -1211,7 +1301,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                   return (
                     <>
                       {/* Progress bar - show only for ready books */}
-                      {user && hoveredBook.status !== 'processing' && (
+                      {user && !isBookImportPending(hoveredBook) && (
                         <div className="progress-section">
                           <div className="progress-bar">
                             <div
@@ -1303,7 +1393,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                 : progressPercent > 0
                   ? `${progressPercent}% read`
                   : 'Not started';
-              return user && mobileSelectedBook.status !== 'processing' ? (
+              return user && !isBookImportPending(mobileSelectedBook) ? (
                 <div className="progress-section">
                   <div className="progress-bar">
                     <div
@@ -1316,7 +1406,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
               ) : null;
             })()}
 
-            {mobileSelectedBook.status === 'processing' ? (
+            {isBookImportPending(mobileSelectedBook) ? (
               <div className="sheet-status">
                 <div
                   className="processing-spinner"
@@ -1335,7 +1425,13 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                       </span>
                     );
                   }
-                  return <span>Translating...</span>;
+                  return (
+                    <span>
+                      {needsTranslationDrive(mobileSelectedBook)
+                        ? 'Translating...'
+                        : 'Preparing cover and spine...'}
+                    </span>
+                  );
                 })()}
                 <span className="safe-to-close-hint">
                   You can safely close this page — the book will be ready when
@@ -1396,14 +1492,19 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
             !estimating &&
             !uploadError &&
             !estimate &&
-            setShowUploadModal(false)
+            closeUploadModal()
           }
         >
           <div
             className="upload-modal-content"
             onClick={(e) => e.stopPropagation()}
           >
-            <h2>Upload Book</h2>
+            <h2>{uploadTarget ? 'Add Book Here' : 'Upload Book'}</h2>
+            {uploadTarget && (
+              <div className="upload-target-note">
+                {uploadTarget.label || 'Selected shelf'}
+              </div>
+            )}
             {uploadError ? (
               <div className="upload-error">
                 <svg
@@ -1449,8 +1550,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                   <button
                     className="buy-credits-btn-primary"
                     onClick={() => {
-                      setShowUploadModal(false);
-                      setUploadError(null);
+                      closeUploadModal();
                       setShowCreditsModal(true);
                     }}
                   >
@@ -1458,10 +1558,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                   </button>
                   <button
                     className="cancel-upload-btn"
-                    onClick={() => {
-                      setShowUploadModal(false);
-                      setUploadError(null);
-                    }}
+                    onClick={closeUploadModal}
                   >
                     Cancel
                   </button>
@@ -1636,9 +1733,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                         <button
                           className="buy-credits-btn-primary"
                           onClick={() => {
-                            setShowUploadModal(false);
-                            setEstimate(null);
-                            setSkipTranslation(false);
+                            closeUploadModal();
                             setShowCreditsModal(true);
                           }}
                           disabled={reEstimating}
@@ -1705,7 +1800,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                 </label>
                 <button
                   className="cancel-upload-btn"
-                  onClick={() => setShowUploadModal(false)}
+                  onClick={closeUploadModal}
                 >
                   Cancel
                 </button>
