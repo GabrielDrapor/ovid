@@ -32,6 +32,10 @@ const env = {
   OPENAI_API_BASE_URL:
     process.env.OPENAI_API_BASE_URL || 'https://api.openai.com/v1',
   OPENAI_MODEL: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+  // Optional cheaper tiers (wenyi-style: fast for digests/glossary extraction,
+  // cheap for the review pass). Both fall back to OPENAI_MODEL when unset.
+  OPENAI_MODEL_FAST: process.env.OPENAI_MODEL_FAST || '',
+  OPENAI_MODEL_CHEAP: process.env.OPENAI_MODEL_CHEAP || '',
   TRANSLATOR_SECRET: process.env.TRANSLATOR_SECRET!,
 };
 
@@ -48,6 +52,8 @@ function getLlmConfig() {
     apiKey: env.OPENAI_API_KEY,
     baseURL: env.OPENAI_API_BASE_URL,
     model: env.OPENAI_MODEL,
+    fastModel: env.OPENAI_MODEL_FAST || undefined,
+    cheapModel: env.OPENAI_MODEL_CHEAP || undefined,
   };
 }
 

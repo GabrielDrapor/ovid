@@ -2,9 +2,51 @@
  * Core translation logic for Railway service.
  * Mirrors the CF Worker's handleTranslateNext but without batch limits —
  * translates an entire book in one go.
+ *
+ * Quality pipeline (style guide, book understanding, chapter-scoped glossary
+ * injection, incremental glossary, chapter-end review) adapted from wenyi
+ * (https://github.com/BigDawnGhost/wenyi, MIT) — see prompts.ts,
+ * book-analysis.ts, glossary.ts, review.ts for the per-piece provenance.
+ * Each piece is controlled by a feature flag so the eval harness
+ * (services/translator/eval/) can A/B ablate them.
  */
 
 import { D1Client } from './d1-client.js';
+import {
+  LLMConfig,
+  estimateTokens,
+  languageName,
+  llmChat,
+  tierConfig,
+} from './llm-client.js';
+import {
+  buildGlossaryStr,
+  extractGlossary,
+  extractIncrementalGlossary,
+  mergeGlossary,
+} from './glossary.js';
+import {
+  StaticPromptContext,
+  formatStyleGuide,
+  translatorBatchSystem,
+  translatorBatchUser,
+  translatorSingleSystem,
+  translatorSingleUser,
+} from './prompts.js';
+import {
+  BookContext,
+  analyzeStyle,
+  digestChapters,
+  synthesizeSynopsis,
+} from './book-analysis.js';
+import {
+  ReviewPair,
+  SEVERE_ISSUE_TYPES,
+  fixTranslation,
+  reviewPairs,
+} from './review.js';
+
+export type { LLMConfig } from './llm-client.js';
 
 interface TranslationJob {
   id: number;
@@ -22,6 +64,8 @@ interface TranslationJob {
   translated_title: string | null;
   status: string;
   error_message: string | null;
+  book_context_json?: string | null;
+  review_summary_json?: string | null;
 }
 
 interface TextNode {
@@ -31,21 +75,18 @@ interface TextNode {
   orderIndex: number;
 }
 
-interface LLMConfig {
-  apiKey: string;
-  baseURL: string;
-  model: string;
-}
-
 // In-progress jobs tracked in memory for status queries
-export const activeJobs = new Map<string, {
-  phase: string;
-  chaptersCompleted: number;
-  chaptersTotal: number;
-  currentChapter: number;
-  detail?: string;
-  startedAt: number;
-}>();
+export const activeJobs = new Map<
+  string,
+  {
+    phase: string;
+    chaptersCompleted: number;
+    chaptersTotal: number;
+    currentChapter: number;
+    detail?: string;
+    startedAt: number;
+  }
+>();
 
 /** Maximum time a translation job can run before being timed out (4 hours) */
 const JOB_TIMEOUT_MS = 4 * 60 * 60 * 1000;
@@ -57,188 +98,97 @@ const TRANSLATION_FAILED_MARKER = '[Translation failed]';
 const LARGE_NODE_CHAR_THRESHOLD = 3000;
 
 /** Column list for translations_v2 batch inserts */
-const TRANSLATIONS_V2_COLUMNS = ['chapter_id', 'xpath', 'original_text', 'original_html', 'translated_text', 'order_index'] as const;
+const TRANSLATIONS_V2_COLUMNS = [
+  'chapter_id',
+  'xpath',
+  'original_text',
+  'original_html',
+  'translated_text',
+  'order_index',
+] as const;
 
-/** Language code to display name mapping */
-const LANGUAGE_NAMES: Record<string, string> = {
-  zh: 'Chinese', en: 'English', es: 'Spanish', fr: 'French',
-  de: 'German', ja: 'Japanese', ko: 'Korean', ru: 'Russian',
+/** Cap on chapters digested during the pre-scan (evenly sampled beyond this) */
+const MAX_DIGEST_CHAPTERS = 60;
+
+/**
+ * Feature flags for the wenyi-derived quality pipeline. All default ON;
+ * disable individually via env (FEATURE_X=0) or wholesale via
+ * TRANSLATOR_FEATURES=off. The eval harness passes these explicitly.
+ */
+export interface PipelineFeatures {
+  /** Pre-translation style analysis injected into every call (wenyi analyzer) */
+  styleGuide: boolean;
+  /** Chapter digests + whole-book synopsis injected into every call (wenyi book understanding) */
+  bookContext: boolean;
+  /** Post-chapter glossary extraction from actual translations (wenyi extractor) */
+  incrementalGlossary: boolean;
+  /** Chapter-end review comparing source/translation pairs (wenyi reviewer) */
+  reviewPass: boolean;
+  /** Retranslate severe review findings (wenyi autofix_severe) */
+  autofixSevere: boolean;
+}
+
+export const ALL_FEATURES_OFF: PipelineFeatures = {
+  styleGuide: false,
+  bookContext: false,
+  incrementalGlossary: false,
+  reviewPass: false,
+  autofixSevere: false,
 };
+
+export function resolveFeaturesFromEnv(
+  env: Record<string, string | undefined> = process.env
+): PipelineFeatures {
+  if ((env.TRANSLATOR_FEATURES || '').toLowerCase() === 'off') {
+    return { ...ALL_FEATURES_OFF };
+  }
+  const flag = (name: string) => {
+    const v = env[name];
+    if (v === undefined || v === '') return true;
+    return !['0', 'false', 'off', 'no'].includes(v.toLowerCase());
+  };
+  return {
+    styleGuide: flag('FEATURE_STYLE_GUIDE'),
+    bookContext: flag('FEATURE_BOOK_CONTEXT'),
+    incrementalGlossary: flag('FEATURE_INCREMENTAL_GLOSSARY'),
+    reviewPass: flag('FEATURE_REVIEW_PASS'),
+    autofixSevere: flag('FEATURE_AUTOFIX_SEVERE'),
+  };
+}
 
 function checkJobTimeout(bookUuid: string): void {
   const job = activeJobs.get(bookUuid);
   if (job && Date.now() - job.startedAt > JOB_TIMEOUT_MS) {
-    throw new Error(`Job timed out after ${JOB_TIMEOUT_MS / 1000 / 60} minutes`);
+    throw new Error(
+      `Job timed out after ${JOB_TIMEOUT_MS / 1000 / 60} minutes`
+    );
   }
 }
 
 /**
- * Simple LLM chat call (replicates LLMClient.chat for essential use)
+ * Translate a single text segment.
+ * The static context (style guide / synopsis / chapter digest) is injected
+ * user-side in static→dynamic order; the glossary subset is built per text.
  */
-async function llmChat(config: LLMConfig, messages: Array<{ role: string; content: string }>, options?: { maxTokens?: number; temperature?: number }): Promise<string> {
-  const maxRetries = 3;
-  let lastError: Error | null = null;
-
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 120000);
-
-      const res = await fetch(`${config.baseURL}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${config.apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: config.model,
-          messages,
-          max_tokens: options?.maxTokens ?? 8192,
-          temperature: options?.temperature ?? 0.3,
-        }),
-        signal: controller.signal,
-      }).finally(() => clearTimeout(timeout));
-
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(`LLM API ${res.status}: ${text}`);
-      }
-
-      const json = await res.json() as any;
-      const content = json.choices?.[0]?.message?.content?.trim();
-      if (!content) throw new Error('Empty LLM response');
-      return content;
-    } catch (err) {
-      lastError = err as Error;
-      if (attempt < maxRetries) {
-        const delay = Math.pow(2, attempt) * 1000;
-        console.warn(`LLM retry ${attempt + 1}: ${(err as Error).message}`);
-        await new Promise(r => setTimeout(r, delay));
-      }
-    }
-  }
-  throw lastError!;
-}
-
-/**
- * Try to parse a JSON object string, repairing truncated output by trimming
- * back to the last complete `"key": "value"` entry and re-closing the brace.
- */
-function parseGlossaryJson(raw: string): Record<string, string> {
-  let jsonStr = raw.trim();
-  if (jsonStr.startsWith('```')) {
-    jsonStr = jsonStr.replace(/```json?\n?/g, '').replace(/```$/g, '').trim();
-  }
-
-  try {
-    return JSON.parse(jsonStr);
-  } catch {
-    // Repair truncated JSON: trim back to the last `",` (complete entry boundary)
-    // and close the object. Handles truncation mid-key or mid-value.
-    const lastComma = jsonStr.lastIndexOf('",');
-    if (lastComma > 0) {
-      const repaired = jsonStr.slice(0, lastComma + 1) + '}';
-      try {
-        return JSON.parse(repaired);
-      } catch { /* fall through */ }
-    }
-    throw new Error('Unrepairable glossary JSON');
-  }
-}
-
-/**
- * Extract proper nouns glossary from book text
- */
-async function extractGlossary(
-  config: LLMConfig,
-  allTexts: string[],
-  sourceLanguage: string,
-  targetLanguage: string
-): Promise<Record<string, string>> {
-  const targetLang = LANGUAGE_NAMES[targetLanguage] || targetLanguage;
-  const total = allTexts.length;
-
-  // Two attempts with progressively smaller samples to keep output within token budget
-  const sampleSizes: Array<[number, number, number]> = [
-    [100, 50, 50],
-    [50, 25, 25],
-  ];
-
-  for (let attempt = 0; attempt < sampleSizes.length; attempt++) {
-    const [head, mid, tail] = sampleSizes[attempt];
-    const samples: string[] = [];
-    samples.push(...allTexts.slice(0, Math.min(head, total)));
-    if (total > head * 2) {
-      const midStart = Math.floor(total / 2) - Math.floor(mid / 2);
-      samples.push(...allTexts.slice(midStart, midStart + mid));
-    }
-    if (total > head + tail) {
-      samples.push(...allTexts.slice(-tail));
-    }
-    const combinedText = samples.join('\n\n');
-
-    try {
-      const response = await llmChat(config, [
-        {
-          role: 'system',
-          content: `You are a professional literary translator specializing in proper noun extraction.
-Extract ALL proper nouns (people, places, organizations, brands, acronyms) from the given ${sourceLanguage} text and provide consistent ${targetLang} translations.
-For acronyms with no standard ${targetLang} translation, keep them as-is in the value (e.g. {"NBA": "NBA"}).
-Return ONLY a valid JSON object. Be concise — short values, no commentary. Example: {"Whymper": "温珀", "NBA": "NBA"}`,
-        },
-        {
-          role: 'user',
-          content: `Extract all proper nouns and provide ${targetLang} translations. Return ONLY valid JSON.\n\nText:\n${combinedText}`,
-        },
-      ], { temperature: 0.1, maxTokens: 16384 });
-
-      const parsed = parseGlossaryJson(response);
-      const count = Object.keys(parsed).length;
-      console.log(`[glossary] Extracted ${count} terms (attempt ${attempt + 1}, sample size ${samples.length})`);
-      return parsed;
-    } catch (err) {
-      console.warn(`[glossary] Attempt ${attempt + 1} failed:`, (err as Error).message);
-    }
-  }
-
-  throw new Error('All glossary extraction attempts failed (empty LLM response)');
-}
-
-/**
- * Translate a single text segment with glossary context
- */
-async function translateText(
+export async function translateText(
   config: LLMConfig,
   text: string,
   glossary: Record<string, string>,
   sourceLanguage: string,
   targetLanguage: string,
-  context?: string[]
+  context?: string[],
+  staticCtx?: Omit<StaticPromptContext, 'glossaryStr'>
 ): Promise<string> {
-  const targetLang = LANGUAGE_NAMES[targetLanguage] || targetLanguage;
-  const glossaryStr = buildGlossaryStr(text, glossary);
-
-  const contextStr = context?.length
-    ? `\n\n<context>\n${context.join('\n')}\n</context>\n`
-    : '';
+  const srcLang = sourceLanguage;
+  const targetLang = languageName(targetLanguage);
+  const ctx: StaticPromptContext = {
+    ...staticCtx,
+    glossaryStr: buildGlossaryStr(text, glossary),
+  };
 
   const translation = await llmChat(config, [
-    {
-      role: 'system',
-      content: `You are a professional literary translator. Translate the following ${sourceLanguage} text to ${targetLang}.
-
-**CRITICAL RULES:**
-1. Return ONLY the translation of the text inside <translate> tags.
-2. Do NOT wrap in quotes unless the source has them.
-3. Maintain style, tone, and formatting.
-4. For proper nouns, use exact translations from the Glossary.
-5. Output ONLY the translated text.
-6. NEVER leave English words in the output, except for proper nouns with no standard ${targetLang} translation. If a word is difficult to translate, find the closest natural expression.${glossaryStr}`,
-    },
-    {
-      role: 'user',
-      content: `${contextStr}\n<translate>\n${text}\n</translate>`,
-    },
+    { role: 'system', content: translatorSingleSystem(srcLang, targetLang) },
+    { role: 'user', content: translatorSingleUser(ctx, text, context) },
   ]);
 
   let result = translation
@@ -249,22 +199,23 @@ async function translateText(
   // Step 2: Detect English residue and retry once with stronger prompt
   const residue = detectEnglishResidue(result, glossary);
   if (residue.length > 0) {
-    console.warn(`[translation] English residue detected: [${residue.join(', ')}] — retrying with stronger prompt`);
+    console.warn(
+      `[translation] English residue detected: [${residue.join(', ')}] — retrying with stronger prompt`
+    );
 
-    const retryTranslation = await llmChat(config, [
-      {
-        role: 'system',
-        content: `You are a professional literary translator. Translate the following ${sourceLanguage} text to ${targetLang}.
+    const retryTranslation = await llmChat(
+      config,
+      [
+        {
+          role: 'system',
+          content: `You are a professional literary translator. Translate the following ${srcLang} text to ${targetLang}.
 
-**ABSOLUTE REQUIREMENT:** The output must be ENTIRELY in ${targetLang}. Do NOT leave ANY English words in the translation. The previous attempt incorrectly left these English words untranslated: ${residue.join(', ')}. You MUST translate every single word.
-
-${glossaryStr}`,
-      },
-      {
-        role: 'user',
-        content: `${contextStr}\n<translate>\n${text}\n</translate>`,
-      },
-    ], { temperature: 0.1 });
+**ABSOLUTE REQUIREMENT:** The output must be ENTIRELY in ${targetLang}. Do NOT leave ANY English words in the translation. The previous attempt incorrectly left these English words untranslated: ${residue.join(', ')}. You MUST translate every single word.`,
+        },
+        { role: 'user', content: translatorSingleUser(ctx, text, context) },
+      ],
+      { temperature: 0.1 }
+    );
 
     const retryResult = retryTranslation
       .replace(/<\/?translate>/gi, '')
@@ -276,7 +227,9 @@ ${glossaryStr}`,
       result = retryResult;
     }
     if (retryResidue.length > 0) {
-      console.warn(`[translation] Retry still has residue: [${retryResidue.join(', ')}] — using ${retryResidue.length < residue.length ? 'retry' : 'original'}`);
+      console.warn(
+        `[translation] Retry still has residue: [${retryResidue.join(', ')}] — using ${retryResidue.length < residue.length ? 'retry' : 'original'}`
+      );
     }
   }
 
@@ -294,23 +247,50 @@ async function translateLargeNode(
   glossary: Record<string, string>,
   sourceLanguage: string,
   targetLanguage: string,
-  bookUuid: string
+  bookUuid: string,
+  staticCtx?: Omit<StaticPromptContext, 'glossaryStr'>
 ): Promise<string> {
   // Split on double-newline (paragraph breaks)
-  const chunks = text.split(/\n\n+/).filter(c => c.trim().length > 0);
+  const chunks = text.split(/\n\n+/).filter((c) => c.trim().length > 0);
 
   if (chunks.length <= 1) {
     // No paragraph breaks found — try splitting on single newlines if text is very large
-    const fallbackChunks = text.split(/\n/).filter(c => c.trim().length > 0);
+    const fallbackChunks = text.split(/\n/).filter((c) => c.trim().length > 0);
     if (fallbackChunks.length <= 1) {
       // Can't split — just translate as-is (will be truncated but nothing we can do)
-      console.warn(`[${bookUuid}] Large node (${text.length} chars) has no splittable boundaries`);
-      return translateText(config, text, glossary, sourceLanguage, targetLanguage);
+      console.warn(
+        `[${bookUuid}] Large node (${text.length} chars) has no splittable boundaries`
+      );
+      return translateText(
+        config,
+        text,
+        glossary,
+        sourceLanguage,
+        targetLanguage,
+        undefined,
+        staticCtx
+      );
     }
-    return translateChunkedParagraphs(config, fallbackChunks, glossary, sourceLanguage, targetLanguage, bookUuid);
+    return translateChunkedParagraphs(
+      config,
+      fallbackChunks,
+      glossary,
+      sourceLanguage,
+      targetLanguage,
+      bookUuid,
+      staticCtx
+    );
   }
 
-  return translateChunkedParagraphs(config, chunks, glossary, sourceLanguage, targetLanguage, bookUuid);
+  return translateChunkedParagraphs(
+    config,
+    chunks,
+    glossary,
+    sourceLanguage,
+    targetLanguage,
+    bookUuid,
+    staticCtx
+  );
 }
 
 /** Translate an array of paragraph chunks with concurrency, return joined result */
@@ -320,9 +300,12 @@ async function translateChunkedParagraphs(
   glossary: Record<string, string>,
   sourceLanguage: string,
   targetLanguage: string,
-  bookUuid: string
+  bookUuid: string,
+  staticCtx?: Omit<StaticPromptContext, 'glossaryStr'>
 ): Promise<string> {
-  console.log(`[${bookUuid}] Splitting large node into ${chunks.length} chunks for translation`);
+  console.log(
+    `[${bookUuid}] Splitting large node into ${chunks.length} chunks for translation`
+  );
 
   // Group chunks into batches of ~2000 chars to avoid too many LLM calls
   const CHUNK_BATCH_SIZE = 2000;
@@ -331,7 +314,10 @@ async function translateChunkedParagraphs(
   let currentLen = 0;
 
   for (const chunk of chunks) {
-    if (currentBatch.length > 0 && currentLen + chunk.length > CHUNK_BATCH_SIZE) {
+    if (
+      currentBatch.length > 0 &&
+      currentLen + chunk.length > CHUNK_BATCH_SIZE
+    ) {
       batches.push(currentBatch);
       currentBatch = [];
       currentLen = 0;
@@ -348,32 +334,23 @@ async function translateChunkedParagraphs(
   for (let i = 0; i < batches.length; i += CONCURRENCY) {
     const concurrent = batches.slice(i, i + CONCURRENCY);
     const results = await Promise.all(
-      concurrent.map(batch => {
+      concurrent.map((batch) => {
         const batchText = batch.join('\n\n');
-        return translateText(config, batchText, glossary, sourceLanguage, targetLanguage);
+        return translateText(
+          config,
+          batchText,
+          glossary,
+          sourceLanguage,
+          targetLanguage,
+          undefined,
+          staticCtx
+        );
       })
     );
     translatedBatches.push(...results);
   }
 
   return translatedBatches.join('\n\n');
-}
-
-/** Build glossary string for relevant terms found in text */
-function buildGlossaryStr(text: string, glossary: Record<string, string>): string {
-  const relevant: Record<string, string> = {};
-  const textLower = text.toLowerCase();
-  for (const [key, value] of Object.entries(glossary)) {
-    if (textLower.includes(key.toLowerCase())) {
-      relevant[key] = value;
-    }
-  }
-  if (Object.keys(relevant).length === 0) return '';
-  const entries = Object.entries(relevant)
-    .sort((a, b) => b[0].length - a[0].length)
-    .map(([k, v]) => `  "${k}" → "${v}"`)
-    .join('\n');
-  return `\n\n**GLOSSARY (MUST use these exact translations):**\n${entries}\n`;
 }
 
 /**
@@ -389,7 +366,7 @@ function stripCitations(text: string): string {
     .replace(/\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b/g, ' ')
     .replace(
       /\b(?:[\w-]+\.)+(?:com|org|net|gov|edu|io|co|cn|jp|de|fr|uk|us|ru|au|tv|info|news|me)(?:\.[a-z]{2})?(?:\/[\w\-./?#=&%~+]*)?/gi,
-      ' ',
+      ' '
     )
     .replace(/\.(?:shtml|html?|pdf|txt|aspx?|jsp|php|csv|json|xml)\b/gi, ' ');
 }
@@ -398,7 +375,10 @@ function stripCitations(text: string): string {
  * Detect non-proper-noun English words left in a translation.
  * Returns the offending words, or an empty array if clean.
  */
-export function detectEnglishResidue(text: string, glossary: Record<string, string>): string[] {
+export function detectEnglishResidue(
+  text: string,
+  glossary: Record<string, string>
+): string[] {
   // Strip URLs/emails/file extensions first — citations and reference URLs
   // legitimately remain verbatim and must not count as untranslated text.
   const stripped = stripCitations(text);
@@ -431,14 +411,46 @@ export function detectEnglishResidue(text: string, glossary: Record<string, stri
 
   // Common acceptable English tokens in translated text
   const commonAllowed = new Set([
-    'the', 'and', 'for', 'with', 'from', 'that', 'this', 'not', 'but',
-    'are', 'was', 'were', 'has', 'had', 'have', 'will', 'can', 'may',
-    'app', 'web', 'api', 'url', 'http', 'https', 'www', 'html', 'css',
-    'pdf', 'jpg', 'png', 'gif', 'xml', 'json', 'sql',
-    'seg', 'translate', 'context',  // XML tag residue from prompt
+    'the',
+    'and',
+    'for',
+    'with',
+    'from',
+    'that',
+    'this',
+    'not',
+    'but',
+    'are',
+    'was',
+    'were',
+    'has',
+    'had',
+    'have',
+    'will',
+    'can',
+    'may',
+    'app',
+    'web',
+    'api',
+    'url',
+    'http',
+    'https',
+    'www',
+    'html',
+    'css',
+    'pdf',
+    'jpg',
+    'png',
+    'gif',
+    'xml',
+    'json',
+    'sql',
+    'seg',
+    'translate',
+    'context', // XML tag residue from prompt
   ]);
 
-  const residue = englishWords.filter(w => {
+  const residue = englishWords.filter((w) => {
     const lower = w.toLowerCase();
     if (allowed.has(lower) || commonAllowed.has(lower)) return false;
     // All-uppercase tokens are almost always acronyms (NBA, BBC, MTK, CBF, FIFA, GDP)
@@ -455,66 +467,51 @@ export function detectEnglishResidue(text: string, glossary: Record<string, stri
   // transliteration the model legitimately preserved. Retrying won't change it
   // and just costs another LLM call.
   if (cjkCount > 0) {
-    const allTitleCase = residue.every(w => /^[A-Z][a-z]+$/.test(w));
+    const allTitleCase = residue.every((w) => /^[A-Z][a-z]+$/.test(w));
     const looksLikePinyin =
       residue.length >= 2 &&
-      residue.some(w => /^[A-Z][a-z]+$/.test(w)) &&
-      residue.every(w => /^[A-Z][a-z]+$/.test(w) || /^[a-z]{1,5}$/.test(w));
+      residue.some((w) => /^[A-Z][a-z]+$/.test(w)) &&
+      residue.every((w) => /^[A-Z][a-z]+$/.test(w) || /^[a-z]{1,5}$/.test(w));
     if (allTitleCase || looksLikePinyin) return [];
   }
 
   return residue;
 }
 
-/** Rough token estimate: ~4 chars per token for English, ~2 for CJK */
-function estimateTokens(text: string): number {
-  const cjk = text.match(/[\u3000-\u9fff\uac00-\ud7af]/g)?.length ?? 0;
-  return Math.ceil(cjk / 2 + (text.length - cjk) / 4);
-}
-
 /**
  * Translate multiple text segments in a single LLM call using tagged segments.
  * Returns a Map from segment index to translated text.
  * Segments that fail parsing are returned as null so the caller can retry individually.
+ *
+ * The system prompt is static (no glossary) and the user prompt is ordered
+ * static → dynamic, so all batches of a chapter share a cacheable prefix
+ * (wenyi's prompt-cache discipline — see prompts.ts).
  */
-async function translateBatch(
+export async function translateBatch(
   config: LLMConfig,
   segments: { index: number; text: string }[],
-  glossary: Record<string, string>,
+  staticCtx: StaticPromptContext,
   sourceLanguage: string,
-  targetLanguage: string,
+  targetLanguage: string
 ): Promise<Map<number, string | null>> {
-  const targetLang = LANGUAGE_NAMES[targetLanguage] || targetLanguage;
-
-  // Build combined glossary from all segments
-  const allText = segments.map(s => s.text).join(' ');
-  const glossaryStr = buildGlossaryStr(allText, glossary);
+  const targetLang = languageName(targetLanguage);
 
   // Build tagged input
   const taggedInput = segments
-    .map(s => `<seg id="${s.index}">${s.text}</seg>`)
+    .map((s) => `<seg id="${s.index}">${s.text}</seg>`)
     .join('\n');
 
-  const response = await llmChat(config, [
-    {
-      role: 'system',
-      content: `You are a professional literary translator. Translate the following ${sourceLanguage} text segments to ${targetLang}.
-
-**CRITICAL RULES:**
-1. Each segment is wrapped in <seg id="N">...</seg> tags.
-2. Return each translation wrapped in the SAME <seg id="N">...</seg> tags with matching IDs.
-3. Translate EVERY segment. Do not skip or merge segments.
-4. Maintain style, tone, and formatting within each segment.
-5. Do NOT wrap in quotes unless the source has them.
-6. For proper nouns, use exact translations from the Glossary.
-7. Output ONLY the translated segments with their tags, nothing else.
-8. NEVER leave English words in the output, except for proper nouns with no standard ${targetLang} translation. Translate every word into ${targetLang}.${glossaryStr}`,
-    },
-    {
-      role: 'user',
-      content: taggedInput,
-    },
-  ], { maxTokens: 16384 });
+  const response = await llmChat(
+    config,
+    [
+      {
+        role: 'system',
+        content: translatorBatchSystem(sourceLanguage, targetLang),
+      },
+      { role: 'user', content: translatorBatchUser(staticCtx, taggedInput) },
+    ],
+    { maxTokens: 16384 }
+  );
 
   // Parse tagged response
   const resultMap = new Map<number, string | null>();
@@ -535,15 +532,53 @@ async function translateBatch(
   return resultMap;
 }
 
+/** Load chapter texts (joined text nodes) for pre-scan phases. */
+async function loadChapterTexts(
+  db: D1Client,
+  bookId: number,
+  totalChapters: number
+): Promise<Array<{ number: number; text: string }>> {
+  const chapters: Array<{ number: number; text: string }> = [];
+  for (let ch = 1; ch <= totalChapters; ch++) {
+    const row = await db.first<{ text_nodes_json: string }>(
+      'SELECT text_nodes_json FROM chapters_v2 WHERE book_id = ? AND chapter_number = ?',
+      [bookId, ch]
+    );
+    if (row?.text_nodes_json) {
+      const nodes: TextNode[] = JSON.parse(row.text_nodes_json);
+      chapters.push({ number: ch, text: nodes.map((n) => n.text).join('\n') });
+    } else {
+      chapters.push({ number: ch, text: '' });
+    }
+  }
+  return chapters;
+}
+
+/** Evenly sample chapters for digesting when the book is very long. */
+function sampleChaptersForDigest(
+  chapters: Array<{ number: number; text: string }>
+): Array<{ number: number; text: string }> {
+  const nonEmpty = chapters.filter((c) => c.text.trim().length > 0);
+  if (nonEmpty.length <= MAX_DIGEST_CHAPTERS) return nonEmpty;
+  const step = nonEmpty.length / MAX_DIGEST_CHAPTERS;
+  const sampled: Array<{ number: number; text: string }> = [];
+  for (let i = 0; i < MAX_DIGEST_CHAPTERS; i++) {
+    sampled.push(nonEmpty[Math.floor(i * step)]);
+  }
+  return sampled;
+}
+
 /**
  * Main translation orchestrator — translates an entire book
  */
 export async function translateBook(
   db: D1Client,
   llmConfig: LLMConfig,
-  bookUuid: string
+  bookUuid: string,
+  featuresOverride?: PipelineFeatures
 ): Promise<void> {
   console.log(`[${bookUuid}] Starting translation`);
+  const features = featuresOverride ?? resolveFeaturesFromEnv();
 
   const job = await db.first<TranslationJob>(
     'SELECT * FROM translation_jobs WHERE book_uuid = ? LIMIT 1',
@@ -553,7 +588,11 @@ export async function translateBook(
   if (job.status === 'completed') return;
 
   const jobStartedAt = Date.now();
-  const setProgress = (phase: string, chaptersCompleted: number, detail?: string) => {
+  const setProgress = (
+    phase: string,
+    chaptersCompleted: number,
+    detail?: string
+  ) => {
     activeJobs.set(bookUuid, {
       phase,
       chaptersCompleted,
@@ -565,6 +604,90 @@ export async function translateBook(
   };
 
   try {
+    // Phase 0: Book understanding pre-scan (style guide + digests + synopsis).
+    // Adapted from wenyi's analyzer/book_understanding phases. Best-effort:
+    // any failure degrades to translating without the corresponding context.
+    let bookContext: BookContext | null = null;
+    if (job.book_context_json) {
+      try {
+        bookContext = JSON.parse(job.book_context_json);
+      } catch {
+        bookContext = null;
+      }
+    }
+    if ((features.styleGuide || features.bookContext) && !bookContext) {
+      setProgress('analyzing', 0, 'Analyzing book style and structure...');
+      await db.run(
+        "UPDATE translation_jobs SET status = 'extracting_glossary', updated_at = CURRENT_TIMESTAMP WHERE book_uuid = ?",
+        [bookUuid]
+      );
+      const chapters = await loadChapterTexts(
+        db,
+        job.book_id,
+        job.total_chapters
+      );
+
+      let styleGuide = null;
+      if (features.styleGuide) {
+        // Style analysis is a one-off judgment call — strong tier (wenyi: 全局分析 strong)
+        styleGuide = await analyzeStyle(
+          llmConfig,
+          chapters.map((c) => c.text),
+          job.source_language,
+          job.target_language
+        );
+        console.log(
+          `[${bookUuid}] Style analysis ${styleGuide ? 'done' : 'failed (continuing without)'}`
+        );
+      }
+
+      let digests: Record<string, string> = {};
+      let synopsis: string | null = null;
+      if (features.bookContext) {
+        const fastConfig = tierConfig(llmConfig, 'fast');
+        digests = await digestChapters(
+          fastConfig,
+          sampleChaptersForDigest(chapters),
+          job.source_language,
+          job.target_language
+        );
+        synopsis = await synthesizeSynopsis(
+          fastConfig,
+          digests,
+          job.target_language
+        );
+        console.log(
+          `[${bookUuid}] Pre-scan: ${Object.keys(digests).length} digests, synopsis ${synopsis ? 'ok' : 'failed'}`
+        );
+      }
+
+      bookContext = { styleGuide, synopsis, digests };
+      try {
+        await db.run(
+          'UPDATE translation_jobs SET book_context_json = ?, updated_at = CURRENT_TIMESTAMP WHERE book_uuid = ?',
+          [JSON.stringify(bookContext), bookUuid]
+        );
+      } catch (err) {
+        // Column may not exist yet (worker migration pending) — keep in memory
+        console.warn(
+          `[${bookUuid}] Could not persist book context:`,
+          (err as Error).message
+        );
+      }
+    }
+
+    const bookStatic: Omit<StaticPromptContext, 'glossaryStr' | 'digestText'> =
+      {
+        styleGuideText:
+          features.styleGuide && bookContext?.styleGuide
+            ? formatStyleGuide(bookContext.styleGuide)
+            : undefined,
+        synopsisText:
+          features.bookContext && bookContext?.synopsis
+            ? bookContext.synopsis
+            : undefined,
+      };
+
     // Phase 1: Glossary extraction
     let glossary: Record<string, string> = {};
     if (!job.glossary_extracted) {
@@ -588,8 +711,15 @@ export async function translateBook(
 
       let glossaryWarning: string | null = null;
       try {
-        glossary = await extractGlossary(llmConfig, allTexts, job.source_language, job.target_language);
-        console.log(`[${bookUuid}] Glossary: ${Object.keys(glossary).length} terms`);
+        glossary = await extractGlossary(
+          llmConfig,
+          allTexts,
+          job.source_language,
+          job.target_language
+        );
+        console.log(
+          `[${bookUuid}] Glossary: ${Object.keys(glossary).length} terms`
+        );
       } catch (err) {
         glossaryWarning = `Glossary extraction failed: ${(err as Error).message}. Proceeding without glossary.`;
         console.warn(`[${bookUuid}] ${glossaryWarning}`);
@@ -612,29 +742,56 @@ export async function translateBook(
         [bookUuid]
       );
       const originalTitle = bookRow?.original_title || 'Untitled';
-      const translatedTitle = await translateText(llmConfig, originalTitle, glossary, job.source_language, job.target_language);
+      const translatedTitle = await translateText(
+        llmConfig,
+        originalTitle,
+        glossary,
+        job.source_language,
+        job.target_language
+      );
 
-      await db.run('UPDATE books_v2 SET title = ? WHERE uuid = ?', [translatedTitle, bookUuid]);
+      await db.run('UPDATE books_v2 SET title = ? WHERE uuid = ?', [
+        translatedTitle,
+        bookUuid,
+      ]);
       await db.run(
         'UPDATE translation_jobs SET title_translated = 1, translated_title = ?, updated_at = CURRENT_TIMESTAMP WHERE book_uuid = ?',
         [translatedTitle, bookUuid]
       );
-      console.log(`[${bookUuid}] Title: "${originalTitle}" → "${translatedTitle}"`);
+      console.log(
+        `[${bookUuid}] Title: "${originalTitle}" → "${translatedTitle}"`
+      );
     }
 
     // Phase 3: Translate chapters
-    const startChapter = job.glossary_extracted ? (job.current_chapter || 1) : 1;
+    const startChapter = job.glossary_extracted ? job.current_chapter || 1 : 1;
     let completedChapters = job.completed_chapters || 0;
+
+    // Per-chapter review stats, persisted to translation_jobs.review_summary_json
+    let reviewSummary: Record<string, { issues: number; fixed: number }> = {};
+    if (job.review_summary_json) {
+      try {
+        reviewSummary = JSON.parse(job.review_summary_json);
+      } catch {
+        /* keep empty */
+      }
+    }
 
     for (let chNum = startChapter; chNum <= job.total_chapters; chNum++) {
       checkJobTimeout(bookUuid);
-      setProgress('translating', completedChapters, `Chapter ${chNum}/${job.total_chapters}`);
+      setProgress(
+        'translating',
+        completedChapters,
+        `Chapter ${chNum}/${job.total_chapters}`
+      );
 
       const row = await db.first<{ text_nodes_json: string }>(
         'SELECT text_nodes_json FROM chapters_v2 WHERE book_id = ? AND chapter_number = ?',
         [job.book_id, chNum]
       );
-      const textNodes: TextNode[] = row?.text_nodes_json ? JSON.parse(row.text_nodes_json) : [];
+      const textNodes: TextNode[] = row?.text_nodes_json
+        ? JSON.parse(row.text_nodes_json)
+        : [];
 
       if (textNodes.length === 0) {
         completedChapters++;
@@ -655,22 +812,41 @@ export async function translateBook(
         continue;
       }
 
+      // Chapter-scoped static context: the glossary subset is computed once
+      // over the whole chapter (wenyi glossary_scope: chapter) so every batch
+      // in the chapter shares the same cacheable user-prompt prefix.
+      const chapterText = textNodes.map((n) => n.text).join('\n');
+      const staticCtx: StaticPromptContext = {
+        ...bookStatic,
+        glossaryStr: buildGlossaryStr(chapterText, glossary),
+        digestText: features.bookContext
+          ? bookContext?.digests?.[String(chNum)]
+          : undefined,
+      };
+
       // Resume from offset if partially done
-      const startOffset = (chNum === startChapter && job.current_item_offset > 0) ? job.current_item_offset : 0;
+      const startOffset =
+        chNum === startChapter && job.current_item_offset > 0
+          ? job.current_item_offset
+          : 0;
 
       // Group text nodes into LLM-sized batches (~2000 tokens each), then run batches concurrently
       const MAX_BATCH_TOKENS = 2000;
       const CONCURRENCY = 5;
 
       // Build batches based on token budget
-      const llmBatches: { index: number; text: string; node: TextNode }[][] = [];
+      const llmBatches: { index: number; text: string; node: TextNode }[][] =
+        [];
       let currentBatch: { index: number; text: string; node: TextNode }[] = [];
       let currentTokens = 0;
 
       for (let i = startOffset; i < textNodes.length; i++) {
         const node = textNodes[i];
         const tokens = estimateTokens(node.text);
-        if (currentBatch.length > 0 && currentTokens + tokens > MAX_BATCH_TOKENS) {
+        if (
+          currentBatch.length > 0 &&
+          currentTokens + tokens > MAX_BATCH_TOKENS
+        ) {
           llmBatches.push(currentBatch);
           currentBatch = [];
           currentTokens = 0;
@@ -680,9 +856,19 @@ export async function translateBook(
       }
       if (currentBatch.length > 0) llmBatches.push(currentBatch);
 
-      console.log(`[${bookUuid}] Chapter ${chNum}: ${textNodes.length - startOffset} nodes → ${llmBatches.length} batched LLM calls (concurrency ${CONCURRENCY})`);
+      console.log(
+        `[${bookUuid}] Chapter ${chNum}: ${textNodes.length - startOffset} nodes → ${llmBatches.length} batched LLM calls (concurrency ${CONCURRENCY})`
+      );
 
       const failedNodes: TextNode[] = [];
+      // Everything translated in this run of the chapter, for the review pass
+      // and incremental glossary extraction (node index → pair).
+      const chapterPairs = new Map<
+        number,
+        { node: TextNode; translated: string }
+      >();
+      const nodeIndex = new Map<TextNode, number>();
+      textNodes.forEach((n, i) => nodeIndex.set(n, i));
 
       for (let b = 0; b < llmBatches.length; b += CONCURRENCY) {
         const concurrentBatches = llmBatches.slice(b, b + CONCURRENCY);
@@ -691,26 +877,54 @@ export async function translateBook(
             if (batch.length === 1) {
               // Single node — use simple translateText (more reliable for short text)
               const { node } = batch[0];
-              const translated = node.text.length > LARGE_NODE_CHAR_THRESHOLD
-                ? await translateLargeNode(llmConfig, node.text, glossary, job.source_language, job.target_language, bookUuid)
-                : await translateText(llmConfig, node.text, glossary, job.source_language, job.target_language);
+              const translated =
+                node.text.length > LARGE_NODE_CHAR_THRESHOLD
+                  ? await translateLargeNode(
+                      llmConfig,
+                      node.text,
+                      glossary,
+                      job.source_language,
+                      job.target_language,
+                      bookUuid,
+                      bookStatic
+                    )
+                  : await translateText(
+                      llmConfig,
+                      node.text,
+                      glossary,
+                      job.source_language,
+                      job.target_language,
+                      undefined,
+                      bookStatic
+                    );
               return new Map([[batch[0].index, { node, translated }]]);
             }
 
             // Multi-node batch translation
-            const segments = batch.map(b => ({ index: b.index, text: b.text }));
+            const segments = batch.map((b) => ({
+              index: b.index,
+              text: b.text,
+            }));
             const resultMap = await translateBatch(
-              llmConfig, segments, glossary,
-              job.source_language, job.target_language
+              llmConfig,
+              segments,
+              staticCtx,
+              job.source_language,
+              job.target_language
             );
-            const out = new Map<number, { node: TextNode; translated: string | null }>();
+            const out = new Map<
+              number,
+              { node: TextNode; translated: string | null }
+            >();
             for (const item of batch) {
               const translated = resultMap.get(item.index) ?? null;
               // Check for English residue — if found, mark as null to trigger individual retry with stronger prompt
               if (translated !== null) {
                 const residue = detectEnglishResidue(translated, glossary);
                 if (residue.length > 0) {
-                  console.warn(`[${bookUuid}] Batch seg ${item.index} has English residue: [${residue.join(', ')}] — will retry individually`);
+                  console.warn(
+                    `[${bookUuid}] Batch seg ${item.index} has English residue: [${residue.join(', ')}] — will retry individually`
+                  );
                   out.set(item.index, { node: item.node, translated: null });
                   continue;
                 }
@@ -727,14 +941,22 @@ export async function translateBook(
           const result = batchResults[r];
           if (result.status === 'rejected') {
             // Entire batch failed — collect all nodes for individual retry
-            failedNodes.push(...concurrentBatches[r].map(b => b.node));
+            failedNodes.push(...concurrentBatches[r].map((b) => b.node));
             continue;
           }
-          for (const [, { node, translated }] of result.value) {
+          for (const [idx, { node, translated }] of result.value) {
             if (translated === null) {
               failedNodes.push(node);
             } else {
-              successRows.push([chapterRow.id, node.xpath, node.text, node.html, translated, node.orderIndex]);
+              successRows.push([
+                chapterRow.id,
+                node.xpath,
+                node.text,
+                node.html,
+                translated,
+                node.orderIndex,
+              ]);
+              chapterPairs.set(idx, { node, translated });
             }
           }
         }
@@ -758,26 +980,170 @@ export async function translateBook(
 
       // Retry failed nodes one at a time
       if (failedNodes.length > 0) {
-        console.log(`[${bookUuid}] Retrying ${failedNodes.length} failed node(s) in chapter ${chNum}`);
+        console.log(
+          `[${bookUuid}] Retrying ${failedNodes.length} failed node(s) in chapter ${chNum}`
+        );
         const retryRows: unknown[][] = [];
         for (const node of failedNodes) {
           let translated: string;
           try {
             translated = await translateText(
-              llmConfig, node.text, glossary,
-              job.source_language, job.target_language
+              llmConfig,
+              node.text,
+              glossary,
+              job.source_language,
+              job.target_language,
+              undefined,
+              bookStatic
             );
+            const idx = nodeIndex.get(node);
+            if (idx !== undefined) chapterPairs.set(idx, { node, translated });
           } catch (retryErr) {
-            console.warn(`[${bookUuid}] Retry failed for ${node.xpath}:`, retryErr);
+            console.warn(
+              `[${bookUuid}] Retry failed for ${node.xpath}:`,
+              retryErr
+            );
             translated = TRANSLATION_FAILED_MARKER;
           }
-          retryRows.push([chapterRow.id, node.xpath, node.text, node.html, translated, node.orderIndex]);
+          retryRows.push([
+            chapterRow.id,
+            node.xpath,
+            node.text,
+            node.html,
+            translated,
+            node.orderIndex,
+          ]);
         }
         if (retryRows.length > 0) {
           await db.batchInsert(
             'translations_v2',
             [...TRANSLATIONS_V2_COLUMNS],
             retryRows
+          );
+        }
+      }
+
+      // Post-chapter: incremental glossary extraction (wenyi extractor).
+      // New terms from this chapter's actual translations become available
+      // to all following chapters. Best-effort — never fails the chapter.
+      if (features.incrementalGlossary && chapterPairs.size > 0) {
+        const pairs = [...chapterPairs.values()].map((p) => ({
+          source: p.node.text,
+          translated: p.translated,
+        }));
+        const extracted = await extractIncrementalGlossary(
+          tierConfig(llmConfig, 'fast'),
+          pairs,
+          glossary,
+          job.source_language,
+          job.target_language
+        );
+        const { merged, added } = mergeGlossary(glossary, extracted);
+        if (added.length > 0) {
+          glossary = merged;
+          console.log(
+            `[${bookUuid}] Chapter ${chNum}: +${added.length} glossary terms (${added.slice(0, 5).join(', ')}${added.length > 5 ? ', …' : ''})`
+          );
+          try {
+            await db.run(
+              'UPDATE translation_jobs SET glossary_json = ?, updated_at = CURRENT_TIMESTAMP WHERE book_uuid = ?',
+              [JSON.stringify(glossary), bookUuid]
+            );
+          } catch (err) {
+            console.warn(
+              `[${bookUuid}] Could not persist glossary update:`,
+              (err as Error).message
+            );
+          }
+        }
+      }
+
+      // Post-chapter: review pass + severe-issue autofix (wenyi reviewer).
+      // Best-effort — review problems are logged; only validated fixes are adopted.
+      if (features.reviewPass && chapterPairs.size > 0) {
+        setProgress(
+          'reviewing',
+          completedChapters,
+          `Reviewing chapter ${chNum}/${job.total_chapters}`
+        );
+        try {
+          const pairs: ReviewPair[] = [...chapterPairs.entries()]
+            .sort((a, b) => a[0] - b[0])
+            .map(([index, p]) => ({
+              index,
+              source: p.node.text,
+              translated: p.translated,
+            }));
+          const issues = await reviewPairs(
+            tierConfig(llmConfig, 'cheap'),
+            pairs,
+            staticCtx.glossaryStr ?? '',
+            job.source_language,
+            job.target_language
+          );
+
+          let fixedCount = 0;
+          if (features.autofixSevere) {
+            const severe = issues.filter((i) => SEVERE_ISSUE_TYPES.has(i.type));
+            for (const issue of severe) {
+              const entry = chapterPairs.get(issue.index);
+              if (!entry) continue;
+              const feedback = `${issue.type}: ${issue.detail}${issue.suggestion ? ` | suggestion: ${issue.suggestion}` : ''}`;
+              const fixed = await fixTranslation(
+                llmConfig,
+                staticCtx,
+                {
+                  index: issue.index,
+                  source: entry.node.text,
+                  translated: entry.translated,
+                },
+                feedback,
+                job.source_language,
+                job.target_language
+              );
+              if (fixed && fixed !== entry.translated) {
+                await db.run(
+                  'UPDATE translations_v2 SET translated_text = ? WHERE chapter_id = ? AND xpath = ? AND order_index = ?',
+                  [
+                    fixed,
+                    chapterRow.id,
+                    entry.node.xpath,
+                    entry.node.orderIndex,
+                  ]
+                );
+                chapterPairs.set(issue.index, {
+                  node: entry.node,
+                  translated: fixed,
+                });
+                fixedCount++;
+              }
+            }
+          }
+
+          if (issues.length > 0) {
+            console.log(
+              `[${bookUuid}] Chapter ${chNum} review: ${issues.length} issue(s), ${fixedCount} fixed`
+            );
+          }
+          reviewSummary[String(chNum)] = {
+            issues: issues.length,
+            fixed: fixedCount,
+          };
+          try {
+            await db.run(
+              'UPDATE translation_jobs SET review_summary_json = ?, updated_at = CURRENT_TIMESTAMP WHERE book_uuid = ?',
+              [JSON.stringify(reviewSummary), bookUuid]
+            );
+          } catch (err) {
+            console.warn(
+              `[${bookUuid}] Could not persist review summary:`,
+              (err as Error).message
+            );
+          }
+        } catch (err) {
+          console.warn(
+            `[${bookUuid}] Review pass failed for chapter ${chNum}:`,
+            (err as Error).message
           );
         }
       }
@@ -790,14 +1156,19 @@ export async function translateBook(
       if (chTitleRow?.original_title) {
         try {
           const translatedChTitle = await translateText(
-            llmConfig, chTitleRow.original_title, glossary,
-            job.source_language, job.target_language
+            llmConfig,
+            chTitleRow.original_title,
+            glossary,
+            job.source_language,
+            job.target_language
           );
           await db.run(
             'UPDATE chapters_v2 SET title = ? WHERE book_id = ? AND chapter_number = ?',
             [translatedChTitle, job.book_id, chNum]
           );
-        } catch { /* keep original */ }
+        } catch {
+          /* keep original */
+        }
       }
 
       completedChapters++;
@@ -809,15 +1180,19 @@ export async function translateBook(
     }
 
     // Done — mark completed
-    await db.run("UPDATE books_v2 SET status = 'ready' WHERE uuid = ?", [bookUuid]);
-    await db.run('UPDATE chapters_v2 SET text_nodes_json = NULL WHERE book_id = ?', [job.book_id]);
+    await db.run("UPDATE books_v2 SET status = 'ready' WHERE uuid = ?", [
+      bookUuid,
+    ]);
+    await db.run(
+      'UPDATE chapters_v2 SET text_nodes_json = NULL WHERE book_id = ?',
+      [job.book_id]
+    );
     await db.run(
       "UPDATE translation_jobs SET status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE book_uuid = ?",
       [bookUuid]
     );
     activeJobs.delete(bookUuid);
     console.log(`[${bookUuid}] Translation complete!`);
-
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`[${bookUuid}] Translation error:`, msg);
@@ -828,8 +1203,12 @@ export async function translateBook(
         "UPDATE translation_jobs SET status = 'error', error_message = ?, updated_at = CURRENT_TIMESTAMP WHERE book_uuid = ?",
         [msg, bookUuid]
       );
-      await db.run("UPDATE books_v2 SET status = 'error' WHERE uuid = ?", [bookUuid]);
-    } catch { /* ignore cleanup errors */ }
+      await db.run("UPDATE books_v2 SET status = 'error' WHERE uuid = ?", [
+        bookUuid,
+      ]);
+    } catch {
+      /* ignore cleanup errors */
+    }
 
     throw err;
   }
