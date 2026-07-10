@@ -1006,6 +1006,15 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
   const totalPages = 1 + Math.ceil(userOverflow / (BOOKS_PER_ROW * 2));
   const page = Math.min(currentPage, totalPages - 1);
 
+  // Same label regardless of which upload-modal phase is rendering — kept as
+  // a single computed value so every phase's dialog root reports it
+  // identically to how the old single-wrapper markup did.
+  const uploadDialogLabel = estimate
+    ? 'Confirm book upload'
+    : uploadTarget
+      ? 'Add book here'
+      : 'Upload book';
+
   return (
     <div className="bookshelf-container">
       <div
@@ -1602,7 +1611,10 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
         </>
       )}
 
-      {/* Upload Modal */}
+      {/* Upload Modal — "library forms": Form 1 (Acquisition) covers the
+          file-pick / analyzing / uploading / insufficient-credits states;
+          Form 2 (Catalogue) is the estimate confirmation once a book has
+          been parsed. */}
       {showUploadModal && (
         <div
           className="upload-modal-overlay"
@@ -1614,278 +1626,317 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
             closeUploadModal()
           }
         >
-          <div
-            className="upload-modal-content"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h2>{uploadTarget ? 'Add Book Here' : 'Upload Book'}</h2>
-            {uploadTarget && (
-              <div className="upload-target-note">
-                {uploadTarget.label || 'Selected shelf'}
+          {uploadError ? (
+            <div
+              className="uf-doc"
+              role="dialog"
+              aria-label={uploadDialogLabel}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="uf-form-no">
+                Form 1 <small>· Acquisition</small>
               </div>
-            )}
-            {uploadError ? (
-              <div className="upload-error">
-                <svg
-                  width="48"
-                  height="48"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="#ff6b6b"
-                  strokeWidth="2"
+              <p className="uf-entry uf-stamp-text">{uploadError.message}</p>
+              {uploadError.required &&
+                uploadError.available !== undefined && (
+                  <>
+                    <div className="uf-gap" />
+                    <div className="uf-row">
+                      <span className="uf-print">required</span>
+                      <span className="uf-entry uf-num">
+                        {uploadError.required.toLocaleString()}
+                      </span>
+                    </div>
+                    <div className="uf-row">
+                      <span className="uf-print">available</span>
+                      <span className="uf-entry uf-num">
+                        {uploadError.available.toLocaleString()}
+                      </span>
+                    </div>
+                    <div className="uf-row">
+                      <span className="uf-print uf-stamp-text">need</span>
+                      <span className="uf-entry uf-num uf-stamp-text">
+                        {(
+                          uploadError.required - uploadError.available
+                        ).toLocaleString()}{' '}
+                        more
+                      </span>
+                    </div>
+                  </>
+                )}
+              <div className="uf-actions">
+                <button
+                  className="uf-btn-primary"
+                  onClick={() => {
+                    closeUploadModal();
+                    setShowCreditsModal(true);
+                  }}
                 >
-                  <circle cx="12" cy="12" r="10" />
-                  <line x1="12" y1="8" x2="12" y2="12" />
-                  <line x1="12" y1="16" x2="12.01" y2="16" />
-                </svg>
-                <p className="error-message">{uploadError.message}</p>
-                {uploadError.required &&
-                  uploadError.available !== undefined && (
-                    <div className="credit-details">
-                      <div className="credit-row">
-                        <span>Required:</span>
-                        <span className="required">
-                          {uploadError.required.toLocaleString()} credits
-                        </span>
-                      </div>
-                      <div className="credit-row">
-                        <span>Available:</span>
-                        <span className="available">
-                          {uploadError.available.toLocaleString()} credits
-                        </span>
-                      </div>
-                      <div className="credit-row">
-                        <span>Need:</span>
-                        <span className="needed">
-                          {(
-                            uploadError.required - uploadError.available
-                          ).toLocaleString()}{' '}
-                          more credits
-                        </span>
-                      </div>
+                  Buy Credits
+                </button>
+                <button
+                  className="uf-btn-quiet-paper"
+                  onClick={closeUploadModal}
+                >
+                  Cancel
+                </button>
+              </div>
+              <div className="uf-hole" />
+            </div>
+          ) : estimate ? (
+            <div
+              className="uf-doc"
+              role="dialog"
+              aria-label={uploadDialogLabel}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="uf-form-no">
+                Form 2 <small>· Catalogue</small>
+              </div>
+              <p className="uf-card-title">{estimate.title}</p>
+              <p className="uf-card-author">{estimate.author}</p>
+
+              {uploading ? (
+                <div className="uf-doc-status">
+                  <div className="uf-spinner" />
+                  <p className="uf-print">{uploadProgress}</p>
+                </div>
+              ) : (
+                <>
+                  <div className="uf-gap" />
+                  <div
+                    className="uf-mode-selector"
+                    role="radiogroup"
+                    aria-label="Upload mode"
+                  >
+                    <label
+                      className={`uf-mode-row ${!skipTranslation ? 'checked' : 'dim'}`}
+                    >
+                      <input
+                        type="radio"
+                        name="upload-mode"
+                        className="uf-sr-only"
+                        checked={!skipTranslation}
+                        disabled={reEstimating}
+                        onChange={() => setSkipTranslation(false)}
+                      />
+                      <span className="uf-box" aria-hidden="true" />
+                      <span className="uf-entry">Translate this book</span>
+                      <span className="uf-mode-note uf-print">
+                        bilingual
+                      </span>
+                    </label>
+                    <label
+                      className={`uf-mode-row ${skipTranslation ? 'checked' : 'dim'}`}
+                    >
+                      <input
+                        type="radio"
+                        name="upload-mode"
+                        className="uf-sr-only"
+                        checked={skipTranslation}
+                        disabled={reEstimating}
+                        onChange={() => setSkipTranslation(true)}
+                      />
+                      <span className="uf-box" aria-hidden="true" />
+                      <span className="uf-entry">Import original only</span>
+                      <span className="uf-mode-note uf-print">free</span>
+                    </label>
+                  </div>
+                  {!skipTranslation && (
+                    <div className="uf-row uf-lang-line">
+                      <span className="uf-print">languages</span>
+                      <span className="uf-lang-fields">
+                        <select
+                          id="estimate-source-language"
+                          aria-label="Source language"
+                          value={estimate.sourceLanguage}
+                          disabled={reEstimating}
+                          onChange={(e) =>
+                            handleChangeSourceLanguage(e.target.value)
+                          }
+                        >
+                          {Object.entries(SUPPORTED_LANGUAGES).map(
+                            ([code, label]) => (
+                              <option key={code} value={code}>
+                                {label}
+                              </option>
+                            )
+                          )}
+                        </select>
+                        <span className="uf-print uf-arrow">→</span>
+                        <select
+                          id="estimate-target-language"
+                          aria-label="Target language"
+                          value={estimate.targetLanguage}
+                          disabled={reEstimating}
+                          onChange={(e) =>
+                            handleChangeTargetLanguage(e.target.value)
+                          }
+                        >
+                          {Object.entries(SUPPORTED_LANGUAGES).map(
+                            ([code, label]) => (
+                              <option key={code} value={code}>
+                                {label}
+                              </option>
+                            )
+                          )}
+                        </select>
+                      </span>
                     </div>
                   )}
-                <div className="error-actions">
-                  <button
-                    className="buy-credits-btn-primary"
-                    onClick={() => {
-                      closeUploadModal();
-                      setShowCreditsModal(true);
-                    }}
-                  >
-                    Buy Credits
-                  </button>
-                  <button
-                    className="cancel-upload-btn"
-                    onClick={closeUploadModal}
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            ) : estimate ? (
-              <div className="estimate-confirmation">
-                <div className="book-info">
-                  <h3>{estimate.title}</h3>
-                  <p className="author">by {estimate.author}</p>
-                </div>
-                {uploading ? (
-                  <div className="upload-progress-inline">
-                    <div className="spinner"></div>
-                    <p>{uploadProgress}</p>
-                  </div>
-                ) : (
-                  <>
-                    <div
-                      className="estimate-mode-selector"
-                      role="radiogroup"
-                      aria-label="Upload mode"
-                    >
-                      <label
-                        className={`estimate-mode-option ${!skipTranslation ? 'selected' : ''}`}
-                      >
-                        <input
-                          type="radio"
-                          name="upload-mode"
-                          checked={!skipTranslation}
-                          disabled={reEstimating}
-                          onChange={() => setSkipTranslation(false)}
-                        />
-                        <div className="estimate-mode-text">
-                          <strong>Translate this book</strong>
-                          <span>
-                            Bilingual reading with paragraph-level toggle.
-                          </span>
-                        </div>
-                      </label>
-                      <label
-                        className={`estimate-mode-option ${skipTranslation ? 'selected' : ''}`}
-                      >
-                        <input
-                          type="radio"
-                          name="upload-mode"
-                          checked={skipTranslation}
-                          disabled={reEstimating}
-                          onChange={() => setSkipTranslation(true)}
-                        />
-                        <div className="estimate-mode-text">
-                          <strong>Import without translation</strong>
-                          <span>
-                            Read the original text only. No credits charged.
-                          </span>
-                        </div>
-                      </label>
-                    </div>
-                    {!skipTranslation && (
-                      <div className="estimate-language-pickers">
-                        <div className="estimate-language-field">
-                          <label htmlFor="estimate-source-language">From</label>
-                          <select
-                            id="estimate-source-language"
-                            value={estimate.sourceLanguage}
-                            disabled={reEstimating}
-                            onChange={(e) =>
-                              handleChangeSourceLanguage(e.target.value)
-                            }
-                          >
-                            {Object.entries(SUPPORTED_LANGUAGES).map(
-                              ([code, label]) => (
-                                <option key={code} value={code}>
-                                  {label}
-                                </option>
-                              )
-                            )}
-                          </select>
-                          <span className="estimate-language-hint">
-                            {estimate.sourceLanguage ===
-                            estimate.detectedSourceLanguage
-                              ? 'Detected automatically — change if wrong.'
-                              : `Detected ${SUPPORTED_LANGUAGES[estimate.detectedSourceLanguage] || estimate.detectedSourceLanguage}.`}
-                          </span>
-                        </div>
-                        <div className="estimate-language-field">
-                          <label htmlFor="estimate-target-language">To</label>
-                          <select
-                            id="estimate-target-language"
-                            value={estimate.targetLanguage}
-                            disabled={reEstimating}
-                            onChange={(e) =>
-                              handleChangeTargetLanguage(e.target.value)
-                            }
-                          >
-                            {Object.entries(SUPPORTED_LANGUAGES).map(
-                              ([code, label]) => (
-                                <option key={code} value={code}>
-                                  {label}
-                                </option>
-                              )
-                            )}
-                          </select>
-                        </div>
-                      </div>
-                    )}
-                    {!skipTranslation && (
-                      <div className="estimate-details">
-                        <div className="estimate-row cost">
-                          <span>Translation cost:</span>
-                          <span
-                            className={
-                              estimate.canAfford
-                                ? 'affordable'
-                                : 'not-affordable'
-                            }
-                          >
-                            {reEstimating
-                              ? 'Recalculating…'
-                              : `${estimate.requiredCredits.toLocaleString()} credits`}
-                          </span>
-                        </div>
-                        <div className="estimate-row balance">
-                          <span>Your balance:</span>
-                          <span>
-                            {estimate.availableCredits.toLocaleString()} credits
-                          </span>
-                        </div>
-                        {!estimate.canAfford && !reEstimating && (
-                          <div className="estimate-row needed">
-                            <span>Need:</span>
-                            <span className="not-affordable">
+
+                  {!skipTranslation && (
+                    <>
+                      <div className="uf-gap" />
+                      <div className="uf-fee-zone">
+                        <div className="uf-fee-lines">
+                          <div className="uf-row">
+                            <span className="uf-print">balance</span>
+                            <span className="uf-entry uf-num">
+                              {estimate.availableCredits.toLocaleString()}
+                            </span>
+                          </div>
+                          <div className="uf-row">
+                            <span className="uf-print">after</span>
+                            <span className="uf-entry uf-num">
+                              {reEstimating
+                                ? '—'
+                                : (
+                                    estimate.availableCredits -
+                                    estimate.requiredCredits
+                                  ).toLocaleString()}
+                            </span>
+                          </div>
+                          {!estimate.canAfford && !reEstimating && (
+                            <p className="uf-print uf-stamp-text uf-need-more">
+                              need{' '}
                               {(
                                 estimate.requiredCredits -
                                 estimate.availableCredits
                               ).toLocaleString()}{' '}
-                              more credits
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                    {!skipTranslation &&
-                      estimate.sourceLanguage === estimate.targetLanguage && (
-                        <div className="estimate-language-warning">
-                          Source and target language are the same. Change one to
-                          continue.
+                              more
+                            </p>
+                          )}
                         </div>
-                      )}
-                    <div className="estimate-actions">
-                      {skipTranslation ? (
-                        <button
-                          className="confirm-upload-btn"
-                          onClick={handleConfirmUpload}
-                          disabled={uploading || reEstimating}
-                        >
-                          Import without Translation
-                        </button>
-                      ) : estimate.canAfford ? (
-                        <button
-                          className="confirm-upload-btn"
-                          onClick={handleConfirmUpload}
-                          disabled={
-                            uploading ||
-                            reEstimating ||
-                            estimate.sourceLanguage === estimate.targetLanguage
-                          }
-                        >
-                          Confirm & Translate
-                        </button>
-                      ) : (
-                        <button
-                          className="buy-credits-btn-primary"
-                          onClick={() => {
-                            closeUploadModal();
-                            setShowCreditsModal(true);
-                          }}
-                          disabled={reEstimating}
-                        >
-                          Buy Credits
-                        </button>
-                      )}
+                        <div className="uf-stamp">
+                          <div className="uf-stamp-num">
+                            {reEstimating
+                              ? '…'
+                              : estimate.requiredCredits.toLocaleString()}
+                          </div>
+                          <div className="uf-stamp-unit">credits</div>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                  {!skipTranslation &&
+                    estimate.sourceLanguage === estimate.targetLanguage && (
+                      <p className="uf-print uf-stamp-text uf-lang-warning">
+                        source and target language are the same — change one
+                        to continue
+                      </p>
+                    )}
+                  <div className="uf-actions">
+                    {skipTranslation ? (
                       <button
-                        className="cancel-upload-btn"
-                        onClick={handleCancelEstimate}
+                        className="uf-btn-primary"
+                        onClick={handleConfirmUpload}
+                        disabled={uploading || reEstimating}
+                      >
+                        Import without Translation
+                      </button>
+                    ) : estimate.canAfford ? (
+                      <button
+                        className="uf-btn-primary"
+                        onClick={handleConfirmUpload}
+                        disabled={
+                          uploading ||
+                          reEstimating ||
+                          estimate.sourceLanguage === estimate.targetLanguage
+                        }
+                      >
+                        Confirm & Translate
+                      </button>
+                    ) : (
+                      <button
+                        className="uf-btn-primary"
+                        onClick={() => {
+                          closeUploadModal();
+                          setShowCreditsModal(true);
+                        }}
                         disabled={reEstimating}
                       >
-                        Cancel
+                        Buy Credits
                       </button>
-                    </div>
-                  </>
+                    )}
+                    <button
+                      className="uf-btn-quiet-paper"
+                      onClick={handleCancelEstimate}
+                      disabled={reEstimating}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </>
+              )}
+              <div className="uf-hole" />
+            </div>
+          ) : estimating ? (
+            <div
+              className="uf-doc"
+              role="dialog"
+              aria-label={uploadDialogLabel}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="uf-form-no">
+                Form 1 <small>· Acquisition</small>
+              </div>
+              <div className="uf-doc-status">
+                <div className="uf-spinner" />
+                <p className="uf-print">analyzing book…</p>
+              </div>
+              <div className="uf-hole" />
+            </div>
+          ) : uploading ? (
+            <div
+              className="uf-doc"
+              role="dialog"
+              aria-label={uploadDialogLabel}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="uf-form-no">
+                Form 1 <small>· Acquisition</small>
+              </div>
+              <div className="uf-doc-status">
+                <div className="uf-spinner" />
+                <p className="uf-print">{uploadProgress}</p>
+              </div>
+              <div className="uf-hole" />
+            </div>
+          ) : (
+            <div
+              className="uf-doc"
+              role="dialog"
+              aria-label={uploadDialogLabel}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="uf-form-no">
+                Form 1 <small>· Acquisition</small>
+              </div>
+              <label htmlFor="epub-file-input" className="uf-doc-affix">
+                {uploadTarget && (
+                  <div className="uf-row">
+                    <span className="uf-print">shelf</span>
+                    <span className="uf-entry">
+                      {uploadTarget.label || 'Selected shelf'}
+                    </span>
+                  </div>
                 )}
-              </div>
-            ) : estimating ? (
-              <div className="upload-progress">
-                <div className="spinner"></div>
-                <p>Analyzing book…</p>
-              </div>
-            ) : uploading ? (
-              <div className="upload-progress">
-                <div className="spinner"></div>
-                <p>{uploadProgress}</p>
-              </div>
-            ) : (
-              <div className="upload-area">
-                <div className="current-credits">
-                  Your credits:{' '}
-                  <strong>{credits?.toLocaleString() ?? '...'}</strong>
+                <div className="uf-row">
+                  <span className="uf-print">credits</span>
+                  <span className="uf-entry uf-num">
+                    {credits?.toLocaleString() ?? '...'}
+                  </span>
                 </div>
                 <input
                   type="file"
@@ -1899,33 +1950,30 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                   id="epub-file-input"
                   style={{ display: 'none' }}
                 />
-                <label htmlFor="epub-file-input" className="upload-label">
-                  <svg
-                    width="48"
-                    height="48"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                  >
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                    <polyline points="17 8 12 3 7 8" />
-                    <line x1="12" y1="3" x2="12" y2="15" />
-                  </svg>
-                  <span>Click to select EPUB file</span>
-                  <span className="upload-hint">
-                    You'll pick source and target languages next.
+                <div className="uf-affix-box">
+                  <div className="uf-plus" aria-hidden="true">
+                    +
+                  </div>
+                  <div className="uf-affix-note">affix epub here</div>
+                </div>
+                <div className="uf-row" style={{ justifyContent: 'center' }}>
+                  <span className="uf-print">
+                    languages chosen on the next form
                   </span>
-                </label>
+                </div>
+              </label>
+              <div className="uf-actions">
                 <button
-                  className="cancel-upload-btn"
+                  className="uf-btn-quiet-paper"
+                  style={{ flex: 1 }}
                   onClick={closeUploadModal}
                 >
                   Cancel
                 </button>
               </div>
-            )}
-          </div>
+              <div className="uf-hole" />
+            </div>
+          )}
         </div>
       )}
 
@@ -1937,6 +1985,8 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
         >
           <div
             className="upload-modal-content credits-modal"
+            role="dialog"
+            aria-label="Buy credits"
             onClick={(e) => e.stopPropagation()}
           >
             <h2>Buy Credits</h2>
@@ -1964,12 +2014,15 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
             <p className="credits-info">
               Credits are used for book translations.
             </p>
-            <button
-              className="cancel-upload-btn"
-              onClick={() => setShowCreditsModal(false)}
-            >
-              Cancel
-            </button>
+            <div className="uf-actions">
+              <button
+                className="uf-btn-quiet"
+                style={{ flex: 1 }}
+                onClick={() => setShowCreditsModal(false)}
+              >
+                Cancel
+              </button>
+            </div>
           </div>
         </div>
       )}
