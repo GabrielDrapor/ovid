@@ -26,6 +26,7 @@ import {
   getBookChaptersV2,
   getChapterContentV2,
   deleteBookV2,
+  moveBookToSlot,
   getBookStatus,
   getTranslationJob,
   upsertUserBookProgress,
@@ -185,6 +186,14 @@ export default {
         FOREIGN KEY (slot_id) REFERENCES shelf_slots(id) ON DELETE CASCADE
       )`);
       await runMigration('book_shelf_slots_slot_position_index', 'CREATE INDEX IF NOT EXISTS idx_book_shelf_slots_slot_position ON book_shelf_slots(slot_id, position, book_id)');
+      await runMigration('shelf_slots_is_public', 'ALTER TABLE shelf_slots ADD COLUMN is_public INTEGER NOT NULL DEFAULT 0');
+      // Slots holding the seeded public collection (Gutenberg) are locked:
+      // books can be neither dragged into nor out of a public shelf.
+      await runMigration('shelf_slots_mark_public_collection', `UPDATE shelf_slots SET is_public = 1 WHERE id IN (
+        SELECT DISTINCT bss.slot_id FROM book_shelf_slots bss
+        JOIN books_v2 b ON b.id = bss.book_id
+        WHERE b.user_id IS NULL
+      )`);
       migrationsRan = true;
     }
 
@@ -446,6 +455,79 @@ export default {
           return new Response(JSON.stringify({ success: true }), {
             headers: { 'Content-Type': 'application/json' },
           });
+        }
+
+        // Move a book to a new shelf slot / position within a slot (drag-and-drop)
+        const positionMatch = url.pathname.match(/^\/api\/book\/([^\/]+)\/position$/);
+        if (positionMatch && request.method === 'PUT') {
+          const user = await getCurrentUser(env.DB, request);
+          if (!user) {
+            return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+              status: 401, headers: { 'Content-Type': 'application/json' },
+            });
+          }
+          try {
+            const body = await request.json() as {
+              targetSlotId?: number;
+              targetRow?: number;
+              targetCol?: number;
+              insertIndex?: number;
+            };
+            if (!Number.isInteger(body.insertIndex) || (body.insertIndex as number) < 0) {
+              return new Response(JSON.stringify({ error: 'Invalid insertIndex' }), {
+                status: 400, headers: { 'Content-Type': 'application/json' },
+              });
+            }
+            // Same bounds the upload flow enforces (parseShelfCoord): an
+            // unbounded coordinate would mint a shelf_slots row light-years
+            // from the wall and blow up the layout grid for every visitor.
+            const validCoord = (v: unknown) =>
+              v === undefined || v === null ||
+              (Number.isInteger(v) && Math.abs(v as number) <= 50);
+            const validSlotId = (v: unknown) =>
+              v === undefined || v === null ||
+              (Number.isInteger(v) && (v as number) > 0);
+            if (
+              !validCoord(body.targetRow) ||
+              !validCoord(body.targetCol) ||
+              !validSlotId(body.targetSlotId)
+            ) {
+              return new Response(JSON.stringify({ error: 'Invalid target' }), {
+                status: 400, headers: { 'Content-Type': 'application/json' },
+              });
+            }
+            const result = await moveBookToSlot(
+              env.DB,
+              positionMatch[1],
+              user.id,
+              {
+                slotId: body.targetSlotId ?? null,
+                row: body.targetRow ?? null,
+                col: body.targetCol ?? null,
+              },
+              body.insertIndex
+            );
+            return new Response(JSON.stringify({ success: true, ...result }), {
+              headers: { 'Content-Type': 'application/json' },
+            });
+          } catch (e: any) {
+            if (e.message?.includes('Forbidden')) {
+              return new Response(JSON.stringify({ error: 'Forbidden' }), {
+                status: 403, headers: { 'Content-Type': 'application/json' },
+              });
+            }
+            if (e.message === 'Book not found') {
+              return new Response(JSON.stringify({ error: 'Book not found' }), {
+                status: 404, headers: { 'Content-Type': 'application/json' },
+              });
+            }
+            if (e.message === 'Invalid target') {
+              return new Response(JSON.stringify({ error: 'Invalid target' }), {
+                status: 400, headers: { 'Content-Type': 'application/json' },
+              });
+            }
+            throw e;
+          }
         }
 
         // Mark book as completed/read (supports both public and user-owned books)

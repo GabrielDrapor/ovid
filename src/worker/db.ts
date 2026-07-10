@@ -40,13 +40,176 @@ export async function getAllBooksV2(db: D1Database, userId?: number) {
 
 export async function getShelfSlots(db: D1Database, shelfId = 'main') {
   const slots = await db.prepare(
-    `SELECT id, shelf_id, row, col, sort_order, label
+    `SELECT id, shelf_id, row, col, sort_order, label, is_public
        FROM shelf_slots
        WHERE shelf_id = ?
        ORDER BY sort_order ASC, row ASC, col ASC`
   ).bind(shelfId).all();
 
   return slots.results;
+}
+
+/**
+ * Look up an existing shelf slot by id or (row, col), creating one if a
+ * (row, col) target doesn't have a slot yet. Retries a few times to ride out
+ * races with other requests creating the same coordinate concurrently.
+ */
+export async function resolveOrCreateShelfSlot(
+  db: D1Database,
+  target: { slotId?: number | null; row?: number | null; col?: number | null } | null,
+  shelfId = 'main'
+): Promise<number | null> {
+  if (!target) return null;
+
+  const hasCoords =
+    target.row !== null && target.row !== undefined &&
+    target.col !== null && target.col !== undefined;
+
+  if (target.slotId) {
+    // Validate the caller-supplied id: it must exist on this shelf and, when
+    // coordinates were also sent, match them — a stale client layout could
+    // otherwise attach the book to an unrelated slot.
+    const slot = await db.prepare(
+      'SELECT id, row, col FROM shelf_slots WHERE id = ? AND shelf_id = ? LIMIT 1'
+    )
+      .bind(target.slotId, shelfId)
+      .first<{ id: number; row: number; col: number }>();
+    if (
+      slot &&
+      (!hasCoords || (slot.row === target.row && slot.col === target.col))
+    ) {
+      return slot.id;
+    }
+    // Stale or mismatched id — fall through to coordinate resolution.
+  }
+
+  if (!hasCoords) return null;
+
+  const findShelfSlot = () =>
+    db.prepare(
+      'SELECT id, is_public FROM shelf_slots WHERE shelf_id = ? AND row = ? AND col = ? LIMIT 1'
+    )
+      .bind(shelfId, target.row, target.col)
+      .first<{ id: number; is_public: number }>();
+
+  // A coordinate lookup must never silently hand back a locked public slot —
+  // an id-validated caller (upload's validateShelfTarget checks the id, not
+  // the coordinates) would otherwise be routed onto a public shelf unchecked.
+  const guardPublic = (slot: { id: number; is_public: number }) => {
+    if (slot.is_public) {
+      throw new Error('Forbidden: public shelf slot');
+    }
+    return slot.id;
+  };
+
+  const existing = await findShelfSlot();
+  if (existing) return guardPublic(existing);
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const orderRow = await db.prepare(
+      "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_order FROM shelf_slots WHERE shelf_id = ?"
+    ).bind(shelfId).first<{ next_order: number }>();
+    try {
+      await db.prepare(
+        `INSERT INTO shelf_slots (shelf_id, row, col, sort_order, label)
+         VALUES (?, ?, ?, ?, NULL)`
+      )
+        .bind(shelfId, target.row, target.col, orderRow?.next_order ?? 0)
+        .run();
+    } catch {
+      // Another request may have created this coordinate or sort_order.
+    }
+    const slot = await findShelfSlot();
+    if (slot) return guardPublic(slot);
+  }
+
+  throw new Error('Failed to create shelf slot');
+}
+
+/**
+ * Move a user's own book to a new shelf slot, inserting it at `insertIndex`
+ * among the target slot's existing books (dragged book excluded). Runs as a
+ * single db.batch() so the renumber + upsert commit atomically.
+ */
+export async function moveBookToSlot(
+  db: D1Database,
+  bookUuid: string,
+  userId: number,
+  target: { slotId?: number | null; row?: number | null; col?: number | null },
+  insertIndex: number
+): Promise<{ shelfSlotId: number; position: number }> {
+  const book = await db.prepare('SELECT id, user_id FROM books_v2 WHERE uuid = ?')
+    .bind(bookUuid)
+    .first<{ id: number; user_id: number | null }>();
+
+  if (!book) {
+    throw new Error('Book not found');
+  }
+  if (book.user_id === null || book.user_id !== userId) {
+    throw new Error('Forbidden: you can only move your own books');
+  }
+
+  const bookId = book.id;
+
+  // Public shelves (the seeded Gutenberg collection) are locked: reject
+  // moving a book out of one...
+  const sourceSlot = await db.prepare(
+    `SELECT ss.is_public FROM book_shelf_slots bss
+     JOIN shelf_slots ss ON ss.id = bss.slot_id
+     WHERE bss.book_id = ?`
+  )
+    .bind(bookId)
+    .first<{ is_public: number }>();
+  if (sourceSlot?.is_public) {
+    throw new Error('Forbidden: books cannot be moved off a public shelf');
+  }
+
+  const targetSlotId = await resolveOrCreateShelfSlot(db, target);
+  if (targetSlotId === null) {
+    throw new Error('Invalid target');
+  }
+
+  // ...and reject moving a book onto one.
+  const targetSlot = await db.prepare(
+    'SELECT is_public FROM shelf_slots WHERE id = ?'
+  )
+    .bind(targetSlotId)
+    .first<{ is_public: number }>();
+  if (targetSlot?.is_public) {
+    throw new Error('Forbidden: books cannot be moved onto a public shelf');
+  }
+
+  const siblingsResult = await db.prepare(
+    'SELECT book_id, position FROM book_shelf_slots WHERE slot_id = ? AND book_id != ? ORDER BY position ASC, book_id ASC'
+  )
+    .bind(targetSlotId, bookId)
+    .all<{ book_id: number; position: number }>();
+  const siblings = siblingsResult.results ?? [];
+
+  const clamped = Math.max(0, Math.min(insertIndex, siblings.length));
+  // Land at the position currently held by the sibling at insertIndex (or one
+  // past the last sibling), shifting everything at/after it right by one in a
+  // single UPDATE. Gaps left behind are fine — ordering is relative — and
+  // keeping the batch to two statements means concurrent moves into the same
+  // slot degrade to slightly-off ordering instead of stomping a full renumber.
+  const newPosition =
+    clamped < siblings.length
+      ? siblings[clamped].position
+      : siblings.length > 0
+        ? siblings[siblings.length - 1].position + 1
+        : 0;
+
+  await db.batch([
+    db.prepare(
+      'UPDATE book_shelf_slots SET position = position + 1 WHERE slot_id = ? AND position >= ? AND book_id != ?'
+    ).bind(targetSlotId, newPosition, bookId),
+    db.prepare(
+      `INSERT INTO book_shelf_slots (book_id, slot_id, position) VALUES (?, ?, ?)
+       ON CONFLICT(book_id) DO UPDATE SET slot_id = excluded.slot_id, position = excluded.position`
+    ).bind(bookId, targetSlotId, newPosition),
+  ]);
+
+  return { shelfSlotId: targetSlotId, position: newPosition };
 }
 
 export async function getBookStatus(db: D1Database, bookUuid: string): Promise<string | null> {

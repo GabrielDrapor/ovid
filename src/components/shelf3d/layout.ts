@@ -73,10 +73,29 @@ export interface PlacedUploadTarget {
   hitWidth: number;
 }
 
+export interface PlacedBay {
+  rowCoord: number;
+  colCoord: number;
+  /** Content-relative row — same convention as `PlacedBook.row`. */
+  row: number;
+  /** World-space X center of the bay. */
+  x: number;
+  shelfSlotId: number | null;
+  /** Public (seeded-collection) shelves reject drag-and-drop entirely. */
+  isPublic: boolean;
+  /** Book uuids in this bay, left-to-right layout order. */
+  bookUuids: string[];
+}
+
 export interface ShelfLayout {
   placements: PlacedBook[];
   slotLabels: PlacedShelfLabel[];
   uploadTargets: PlacedUploadTarget[];
+  /**
+   * Every bay in the full wall grid (content plus the empty ring), whether
+   * occupied or not. Drives drag-and-drop drop-target resolution.
+   */
+  bays: PlacedBay[];
   /** Rows/columns actually holding books. */
   contentRows: number;
   contentCols: number;
@@ -107,6 +126,7 @@ type LayoutShelfSlot = {
   col: number;
   sort_order?: number | null;
   label?: string | null;
+  is_public?: number | boolean | null;
 };
 
 /**
@@ -262,6 +282,9 @@ function layoutLegacyBooks(
     placements,
     slotLabels: [],
     uploadTargets: [],
+    // Legacy layout has no real (row, col) coordinate system to drop onto —
+    // drag-and-drop is disabled in this mode (see resolveDropTarget callers).
+    bays: [],
     contentRows,
     contentCols,
     totalRows,
@@ -275,6 +298,7 @@ interface PhysicalRun {
   colCoord: number;
   slotId?: number | null;
   label?: string | null;
+  isPublic?: boolean;
   books: LayoutBook[];
 }
 
@@ -304,6 +328,7 @@ function layoutPhysicalSlots(
         colCoord,
         slotId: Number(slot.id),
         label: slot.label?.trim() || null,
+        isPublic: !!slot.is_public,
         books: [],
       });
     }
@@ -366,6 +391,7 @@ function layoutPhysicalSlots(
       placements: [],
       slotLabels: [],
       uploadTargets: [],
+      bays: [],
       contentRows: 0,
       contentCols: 0,
       totalRows: 0,
@@ -422,6 +448,7 @@ function layoutPhysicalSlots(
   }
 
   const uploadTargets: PlacedUploadTarget[] = [];
+  const bays: PlacedBay[] = [];
   for (let visualRow = 0; visualRow < totalRows; visualRow++) {
     const rowCoord = minRow + visualRow - 1;
     const row = rowCoord - minRow;
@@ -430,6 +457,24 @@ function layoutPhysicalSlots(
       const run = runMap.get(`${rowCoord}:${colCoord}`);
       const bayCenter = (visualCol + 0.5 - totalCols / 2) * pitch;
       const bayLeft = bayCenter - bayInner / 2;
+      const slotId = Number.isFinite(run?.slotId) ? Number(run?.slotId) : null;
+
+      // Full grid enumeration (content + ring, occupied or not) for
+      // drag-drop hit-testing — unlike uploadTargets below, this never
+      // skips a bay just because it's full.
+      bays.push({
+        rowCoord,
+        colCoord,
+        row,
+        x: bayCenter,
+        shelfSlotId: slotId,
+        isPublic: !!run?.isPublic,
+        bookUuids: run ? run.books.map((book) => book.uuid) : [],
+      });
+
+      // Public shelves accept no uploads — no ghost placeholder, no hit area.
+      if (run?.isPublic) continue;
+
       const widths =
         run?.books.map((book) => spineWidth(ratios.get(book.uuid))) ?? [];
       const usedWidth =
@@ -439,7 +484,7 @@ function layoutPhysicalSlots(
       const remaining = bayLeft + bayInner - emptyLeft;
       if (remaining < UPLOAD_PLACEHOLDER_WIDTH - 1e-6) continue;
       uploadTargets.push({
-        shelfSlotId: Number.isFinite(run?.slotId) ? Number(run?.slotId) : null,
+        shelfSlotId: slotId,
         rowCoord,
         colCoord,
         label: run?.label ?? null,
@@ -456,6 +501,7 @@ function layoutPhysicalSlots(
     placements,
     slotLabels,
     uploadTargets,
+    bays,
     contentRows,
     contentCols,
     totalRows,
@@ -533,4 +579,92 @@ export function rowYCenters(
     centers.push(((rowCount - 1) / 2 - i) * rowHeight);
   }
   return centers;
+}
+
+export interface DropTarget {
+  rowCoord: number;
+  colCoord: number;
+  /** Content-relative row — same convention as `PlacedBook.row`. */
+  row: number;
+  /** World-space X center of the candidate bay. */
+  x: number;
+  /** 0-based insertion index among the bay's existing books, dragged book excluded. */
+  insertIndex: number;
+  /** Carried from the resolved bay so callers don't re-scan `layout.bays`. */
+  shelfSlotId: number | null;
+  bookUuids: string[];
+}
+
+/**
+ * Map a live drag position to the bay it would land in and where among that
+ * bay's books it would be inserted. Inverts the exact formulas
+ * `layoutPhysicalSlots` uses to place bays/books, so a resolved target never
+ * drifts from what's rendered. Returns null when dropped off the wall
+ * entirely (including its empty ring) — `layout.bays` spans the full grid,
+ * so landing on a ring cell resolves to that (possibly new) bay rather than
+ * null, matching how the existing upload-into-the-ring flow works.
+ */
+export function resolveDropTarget(
+  worldX: number,
+  worldY: number,
+  layout: ShelfLayout,
+  draggedUuid: string,
+  bayInner: number = BAY_INNER,
+  rowHeight: number = ROW_HEIGHT
+): DropTarget | null {
+  const { totalRows, totalCols, bays, placements } = layout;
+  if (totalRows === 0 || totalCols === 0 || bays.length === 0) return null;
+  const pitch = bayInner + DIVIDER_T;
+
+  // Inverse of rowYCenters: centers[i] = ((totalRows-1)/2 - i) * rowHeight.
+  const visualRow = Math.round((totalRows - 1) / 2 - worldY / rowHeight);
+  if (visualRow < 0 || visualRow >= totalRows) return null;
+
+  // Inverse of the bay-center formula used for both placements and bays.
+  const visualCol = Math.round(worldX / pitch + totalCols / 2 - 0.5);
+  if (visualCol < 0 || visualCol >= totalCols) return null;
+
+  const bay = bays[visualRow * totalCols + visualCol];
+  if (!bay) return null;
+
+  // Public (seeded-collection) shelves reject drops entirely.
+  if (bay.isPublic) return null;
+
+  const placementByUuid = new Map(placements.map((p) => [p.uuid, p]));
+
+  // Capacity: the dragged book must physically fit. A same-bay reorder is
+  // always allowed (net width unchanged) — this only gates cross-bay drops,
+  // so an over-full bay can't be forced to spill into the divider.
+  if (!bay.bookUuids.includes(draggedUuid)) {
+    const dragged = placementByUuid.get(draggedUuid);
+    const draggedWidth = dragged?.width ?? spineWidth(undefined);
+    let usedWidth = 0;
+    let count = 0;
+    for (const uuid of bay.bookUuids) {
+      const p = placementByUuid.get(uuid);
+      if (!p) continue;
+      usedWidth += p.width;
+      count++;
+    }
+    usedWidth += Math.max(0, count - 1) * BOOK_GAP;
+    const needed = usedWidth + (count > 0 ? BOOK_GAP : 0) + draggedWidth;
+    if (needed > bayInner + 1e-6) return null;
+  }
+
+  let insertIndex = 0;
+  for (const uuid of bay.bookUuids) {
+    if (uuid === draggedUuid) continue;
+    const p = placementByUuid.get(uuid);
+    if (p !== undefined && p.x < worldX) insertIndex++;
+  }
+
+  return {
+    rowCoord: bay.rowCoord,
+    colCoord: bay.colCoord,
+    row: bay.row,
+    x: bay.x,
+    insertIndex,
+    shelfSlotId: bay.shelfSlotId,
+    bookUuids: bay.bookUuids,
+  };
 }

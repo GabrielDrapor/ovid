@@ -48,6 +48,12 @@ export interface ShelfUploadTarget {
   label?: string | null;
 }
 
+export interface ShelfMoveTarget {
+  slotId: number | null;
+  row: number;
+  col: number;
+}
+
 export interface ShelfSlot {
   id: number;
   shelf_id: string;
@@ -55,4 +61,5 @@ export interface ShelfSlot {
   col: number;
   sort_order: number;
   label?: string | null;
+  is_public?: number | null;
 }

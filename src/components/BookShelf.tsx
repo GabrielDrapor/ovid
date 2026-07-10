@@ -11,6 +11,7 @@ import { useUser } from '../contexts/UserContext';
 import { ApiError, fetchApi } from '../utils/api';
 import {
   Book,
+  ShelfMoveTarget,
   ShelfSlot,
   ShelfUploadTarget,
   UserBookProgress,
@@ -872,6 +873,92 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
     }
   };
 
+  const handleMoveBook = async (
+    bookUuid: string,
+    target: ShelfMoveTarget,
+    insertIndex: number
+  ) => {
+    const originalBook = books.find((b) => b.uuid === bookUuid);
+    if (!originalBook) return;
+
+    // Optimistic reorder: a temporary fractional shelf_position between the
+    // target bay's neighbors is enough for layoutBooks() to render the move
+    // instantly — fetchBooks() below reconciles with real integer positions.
+    setBooks((prev) => {
+      const movedIdx = prev.findIndex((b) => b.uuid === bookUuid);
+      if (movedIdx === -1) return prev;
+
+      const siblings = prev
+        .filter(
+          (b) =>
+            b.uuid !== bookUuid &&
+            b.shelf_row === target.row &&
+            b.shelf_col === target.col
+        )
+        .sort((a, b) => (a.shelf_position ?? 0) - (b.shelf_position ?? 0));
+      const before = siblings[insertIndex - 1];
+      const after = siblings[insertIndex];
+      const beforePos =
+        before?.shelf_position ?? (after ? (after.shelf_position ?? 0) - 2 : -1);
+      const afterPos = after?.shelf_position ?? beforePos + 2;
+
+      const next = prev.slice();
+      next[movedIdx] = {
+        ...next[movedIdx],
+        shelf_row: target.row,
+        shelf_col: target.col,
+        // May be null (brand-new bay) — carrying the old bay's slot id here
+        // would poison the layout's per-bay slotId for follow-up drags.
+        shelf_slot_id: target.slotId,
+        shelf_position: (beforePos + afterPos) / 2,
+      };
+      return next;
+    });
+
+    try {
+      const response = await fetch(`/api/book/${bookUuid}/position`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          targetSlotId: target.slotId,
+          targetRow: target.row,
+          targetCol: target.col,
+          insertIndex,
+        }),
+      });
+      if (!response.ok) {
+        const data = (await response.json()) as { error?: string };
+        throw new Error(data.error || 'Failed to move book');
+      }
+    } catch (err) {
+      // Revert only the moved book's placement — restoring a whole-array
+      // snapshot would clobber poll updates that landed while the PUT flew.
+      setBooks((prev) =>
+        prev.map((b) =>
+          b.uuid === bookUuid
+            ? {
+                ...b,
+                shelf_row: originalBook.shelf_row,
+                shelf_col: originalBook.shelf_col,
+                shelf_slot_id: originalBook.shelf_slot_id,
+                shelf_position: originalBook.shelf_position,
+              }
+            : b
+        )
+      );
+      alert(err instanceof Error ? err.message : 'Failed to move book');
+      return;
+    }
+
+    // The move is committed server-side; a failed refresh must not roll it
+    // back visually — the optimistic state is already correct enough.
+    try {
+      await fetchBooks();
+    } catch {
+      // Next poll/interaction will reconcile.
+    }
+  };
+
   if (error) {
     return (
       <div className="bookshelf-error">
@@ -1019,9 +1106,11 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                     showProgress={!!user}
                     progressMap={bookProgressMap}
                     translationProgress={translationProgress}
+                    currentUserId={user?.id}
                     onRead={onSelectBook}
                     onDelete={handleDeleteBook}
                     onUploadToSlot={user ? openUploadModal : undefined}
+                    onMoveBook={user ? handleMoveBook : undefined}
                   />
                 </Suspense>
               )}
