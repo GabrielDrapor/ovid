@@ -473,8 +473,26 @@ export default {
               targetCol?: number;
               insertIndex?: number;
             };
-            if (typeof body.insertIndex !== 'number' || body.insertIndex < 0) {
+            if (!Number.isInteger(body.insertIndex) || (body.insertIndex as number) < 0) {
               return new Response(JSON.stringify({ error: 'Invalid insertIndex' }), {
+                status: 400, headers: { 'Content-Type': 'application/json' },
+              });
+            }
+            // Same bounds the upload flow enforces (parseShelfCoord): an
+            // unbounded coordinate would mint a shelf_slots row light-years
+            // from the wall and blow up the layout grid for every visitor.
+            const validCoord = (v: unknown) =>
+              v === undefined || v === null ||
+              (Number.isInteger(v) && Math.abs(v as number) <= 50);
+            const validSlotId = (v: unknown) =>
+              v === undefined || v === null ||
+              (Number.isInteger(v) && (v as number) > 0);
+            if (
+              !validCoord(body.targetRow) ||
+              !validCoord(body.targetCol) ||
+              !validSlotId(body.targetSlotId)
+            ) {
+              return new Response(JSON.stringify({ error: 'Invalid target' }), {
                 status: 400, headers: { 'Content-Type': 'application/json' },
               });
             }

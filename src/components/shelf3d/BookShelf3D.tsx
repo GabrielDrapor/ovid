@@ -358,11 +358,16 @@ function BookMesh({
     moved: boolean;
   } | null>(null);
   const lastCandidate = useRef<DropTarget | null>(null);
+  const lastShiftKey = useRef<string | null>(null);
   const justDragged = useRef(false);
 
   const handlePointerDown = useCallback(
     (e: ThreeEvent<PointerEvent>) => {
       if (!draggable || processing) return;
+      // One drag pointer at a time: a second finger tapping another book
+      // mid-drag must not steal dragPointerId — CameraRig would resume
+      // panning for the finger still carrying the first book.
+      if (dragPointerId.current !== null) return;
       e.stopPropagation();
       (e.target as Element).setPointerCapture?.(e.pointerId);
       dragStart.current = {
@@ -413,22 +418,25 @@ function BookMesh({
 
       // Open a gap at the insertion point: everything at/after it slides
       // right by the dragged book's width so the landing spot reads clearly.
-      if (candidate) {
-        const bay = layout.bays.find(
-          (b) =>
-            b.rowCoord === candidate.rowCoord &&
-            b.colCoord === candidate.colCoord
-        );
-        const siblings = bay
-          ? bay.bookUuids.filter((uuid) => uuid !== book.uuid)
-          : [];
-        const toShift = siblings.slice(candidate.insertIndex);
-        dragShift.current =
-          toShift.length > 0
-            ? { uuids: new Set(toShift), amount: width + BOOK_GAP }
-            : null;
-      } else {
-        dragShift.current = null;
+      // Only rebuild the shift set when the candidate actually changes —
+      // pointermove fires dozens of times a second over the same spot.
+      const shiftKey = candidate
+        ? `${candidate.rowCoord}:${candidate.colCoord}:${candidate.insertIndex}`
+        : null;
+      if (shiftKey !== lastShiftKey.current) {
+        lastShiftKey.current = shiftKey;
+        if (candidate) {
+          const siblings = candidate.bookUuids.filter(
+            (uuid) => uuid !== book.uuid
+          );
+          const toShift = siblings.slice(candidate.insertIndex);
+          dragShift.current =
+            toShift.length > 0
+              ? { uuids: new Set(toShift), amount: width + BOOK_GAP }
+              : null;
+        } else {
+          dragShift.current = null;
+        }
       }
     },
     [
@@ -459,6 +467,7 @@ function BookMesh({
         justDragged.current = true;
         draggingUuid.current = null;
         dragShift.current = null;
+        lastShiftKey.current = null;
         onDragEnd(book.uuid, lastCandidate.current);
         lastCandidate.current = null;
       }
@@ -1355,20 +1364,17 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
   const handleDragEnd = useCallback(
     (bookUuid: string, candidate: DropTarget | null) => {
       if (!candidate || !onMoveBook) return;
-      const bay = layout.bays.find(
-        (b) => b.rowCoord === candidate.rowCoord && b.colCoord === candidate.colCoord
-      );
       onMoveBook(
         bookUuid,
         {
-          slotId: bay?.shelfSlotId ?? null,
+          slotId: candidate.shelfSlotId,
           row: candidate.rowCoord,
           col: candidate.colCoord,
         },
         candidate.insertIndex
       );
     },
-    [layout, onMoveBook]
+    [onMoveBook]
   );
 
   const selectedBook = selectedUuid

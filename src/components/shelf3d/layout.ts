@@ -590,6 +590,9 @@ export interface DropTarget {
   x: number;
   /** 0-based insertion index among the bay's existing books, dragged book excluded. */
   insertIndex: number;
+  /** Carried from the resolved bay so callers don't re-scan `layout.bays`. */
+  shelfSlotId: number | null;
+  bookUuids: string[];
 }
 
 /**
@@ -661,5 +664,7 @@ export function resolveDropTarget(
     row: bay.row,
     x: bay.x,
     insertIndex,
+    shelfSlotId: bay.shelfSlotId,
+    bookUuids: bay.bookUuids,
   };
 }

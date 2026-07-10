@@ -106,26 +106,32 @@ export async function handleBookUpload(
 
     const validateShelfTarget = async () => {
       if (!shelfTarget) return null;
-      let slot: { id: number; is_public: number } | null = null;
       if (shelfTarget.slotId) {
-        slot = await env.DB.prepare(
+        const slot = await env.DB.prepare(
           "SELECT id, is_public FROM shelf_slots WHERE id = ? AND shelf_id = 'main' LIMIT 1"
         )
           .bind(shelfTarget.slotId)
           .first<{ id: number; is_public: number }>();
         if (!slot) return invalidShelfSlotResponse();
-      } else if (
+        if (slot.is_public) {
+          return invalidShelfSlotResponse('Cannot upload to a public shelf');
+        }
+      }
+      // Check the coordinates too (not else-if): resolution prefers a
+      // (row, col) match when it disagrees with the given slotId, so a
+      // mismatched pair must not sneak past on the id check alone.
+      if (
         shelfTarget.row !== null && shelfTarget.row !== undefined &&
         shelfTarget.col !== null && shelfTarget.col !== undefined
       ) {
-        slot = await env.DB.prepare(
+        const slot = await env.DB.prepare(
           "SELECT id, is_public FROM shelf_slots WHERE shelf_id = 'main' AND row = ? AND col = ? LIMIT 1"
         )
           .bind(shelfTarget.row, shelfTarget.col)
           .first<{ id: number; is_public: number }>();
-      }
-      if (slot?.is_public) {
-        return invalidShelfSlotResponse('Cannot upload to a public shelf');
+        if (slot?.is_public) {
+          return invalidShelfSlotResponse('Cannot upload to a public shelf');
+        }
       }
       return null;
     };

@@ -108,6 +108,18 @@ describe('resolveOrCreateShelfSlot', () => {
     expect(await resolveOrCreateShelfSlot(db, { slotId: 42 })).toBeNull();
   });
 
+  it('throws instead of resolving coordinates onto a public slot', async () => {
+    // Covers the upload bypass: a validated non-public slotId paired with
+    // the coordinates of a public shelf must not resolve to the public slot.
+    const db = createMockDB({
+      slotByIdResult: { id: 42, row: 9, col: 9 },
+      findShelfSlotResults: [{ id: 8, is_public: 1 }],
+    });
+    await expect(
+      resolveOrCreateShelfSlot(db, { slotId: 42, row: 1, col: 2 })
+    ).rejects.toThrow('Forbidden: public shelf slot');
+  });
+
   it('returns null for a null target', async () => {
     const db = createMockDB();
     expect(await resolveOrCreateShelfSlot(db, null)).toBeNull();

@@ -87,13 +87,23 @@ export async function resolveOrCreateShelfSlot(
 
   const findShelfSlot = () =>
     db.prepare(
-      'SELECT id FROM shelf_slots WHERE shelf_id = ? AND row = ? AND col = ? LIMIT 1'
+      'SELECT id, is_public FROM shelf_slots WHERE shelf_id = ? AND row = ? AND col = ? LIMIT 1'
     )
       .bind(shelfId, target.row, target.col)
-      .first<{ id: number }>();
+      .first<{ id: number; is_public: number }>();
+
+  // A coordinate lookup must never silently hand back a locked public slot —
+  // an id-validated caller (upload's validateShelfTarget checks the id, not
+  // the coordinates) would otherwise be routed onto a public shelf unchecked.
+  const guardPublic = (slot: { id: number; is_public: number }) => {
+    if (slot.is_public) {
+      throw new Error('Forbidden: public shelf slot');
+    }
+    return slot.id;
+  };
 
   const existing = await findShelfSlot();
-  if (existing) return existing.id;
+  if (existing) return guardPublic(existing);
 
   for (let attempt = 0; attempt < 3; attempt++) {
     const orderRow = await db.prepare(
@@ -110,7 +120,7 @@ export async function resolveOrCreateShelfSlot(
       // Another request may have created this coordinate or sort_order.
     }
     const slot = await findShelfSlot();
-    if (slot) return slot.id;
+    if (slot) return guardPublic(slot);
   }
 
   throw new Error('Failed to create shelf slot');
