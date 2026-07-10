@@ -3,6 +3,7 @@ import {
   resolveOrCreateShelfSlot,
   moveBookToSlot,
   updateShelfSlotLabel,
+  getShelfSlots,
 } from '../../../src/worker/db';
 
 /**
@@ -20,6 +21,20 @@ function createMockDB(
     targetSlotPublicResult?: Record<string, unknown> | null;
     slotLabelLookupResult?: Record<string, unknown> | null;
     labelOccupancyResult?: Record<string, unknown> | null;
+    shelfSlotsResult?: Record<string, unknown>[];
+    // Underlying rows for a faithful getShelfSlots simulation: applies the
+    // same public/private CASE + JOIN-on-userId logic the real SQL does,
+    // rather than returning a canned result regardless of bound args.
+    shelfSlotsRaw?: Array<{
+      id: number;
+      shelf_id: string;
+      row: number;
+      col: number;
+      sort_order: number;
+      is_public: number;
+      global_label: string | null;
+      userLabels?: Record<number, string>;
+    }>;
   } = {}
 ) {
   const findShelfSlotQueue = [...(opts.findShelfSlotResults ?? [])];
@@ -62,7 +77,27 @@ function createMockDB(
           }
           return null;
         }),
-        all: vi.fn(async () => ({ results: opts.siblingsResult ?? [] })),
+        all: vi.fn(async () => {
+          if (sql.includes('LEFT JOIN user_shelf_slot_labels')) {
+            if (opts.shelfSlotsRaw) {
+              const [userId, shelfId] = stmt._args as [number, string];
+              const results = opts.shelfSlotsRaw
+                .filter((row) => row.shelf_id === shelfId)
+                .map((row) => ({
+                  id: row.id,
+                  shelf_id: row.shelf_id,
+                  row: row.row,
+                  col: row.col,
+                  sort_order: row.sort_order,
+                  label: row.is_public === 1 ? row.global_label : row.userLabels?.[userId] ?? null,
+                  is_public: row.is_public,
+                }));
+              return { results };
+            }
+            return { results: opts.shelfSlotsResult ?? [] };
+          }
+          return { results: opts.siblingsResult ?? [] };
+        }),
         run: vi.fn(async () => {
           runCalls++;
           return { success: true, meta: { changes: 1 } };
@@ -299,31 +334,33 @@ describe('moveBookToSlot', () => {
 });
 
 describe('updateShelfSlotLabel', () => {
-  it('updates the label on a slot holding the caller\'s books', async () => {
+  it('upserts into user_shelf_slot_labels on a slot holding the caller\'s books', async () => {
     const db = createMockDB({
       slotLabelLookupResult: { id: 7, is_public: 0 },
       labelOccupancyResult: { total: 3, mine: 3 },
     });
     await updateShelfSlotLabel(db, 7, 1, 'Sci-fi corner');
 
-    const update = db.prepare.mock.results
+    const upsert = db.prepare.mock.results
       .map((r: any) => r.value)
-      .find((s: any) => s._sql.startsWith('UPDATE shelf_slots SET label'));
-    expect(update).toBeTruthy();
-    expect(update._args).toEqual(['Sci-fi corner', 7]);
+      .find((s: any) => s._sql.includes('INSERT INTO user_shelf_slot_labels'));
+    expect(upsert).toBeTruthy();
+    expect(upsert._sql).toContain('ON CONFLICT(user_id, slot_id)');
+    expect(upsert._args).toEqual([1, 7, 'Sci-fi corner']);
   });
 
-  it('clears the label when passed null', async () => {
+  it('deletes the row from user_shelf_slot_labels when passed null', async () => {
     const db = createMockDB({
       slotLabelLookupResult: { id: 7, is_public: 0 },
       labelOccupancyResult: { total: 2, mine: 1 },
     });
     await updateShelfSlotLabel(db, 7, 1, null);
 
-    const update = db.prepare.mock.results
+    const del = db.prepare.mock.results
       .map((r: any) => r.value)
-      .find((s: any) => s._sql.startsWith('UPDATE shelf_slots SET label'));
-    expect(update._args).toEqual([null, 7]);
+      .find((s: any) => s._sql.includes('DELETE FROM user_shelf_slot_labels'));
+    expect(del).toBeTruthy();
+    expect(del._args).toEqual([1, 7]);
   });
 
   it('allows labeling an empty slot', async () => {
@@ -354,5 +391,81 @@ describe('updateShelfSlotLabel', () => {
     await expect(updateShelfSlotLabel(db, 7, 2, 'not yours')).rejects.toThrow(
       'Forbidden: you can only label shelves holding your own books'
     );
+  });
+});
+
+describe('getShelfSlots', () => {
+  it("overlays the requesting user's own label on private slots", async () => {
+    const db = createMockDB({
+      shelfSlotsResult: [
+        { id: 1, shelf_id: 'main', row: 0, col: 0, sort_order: 0, label: 'My reads', is_public: 0 },
+      ],
+    });
+    const slots = await getShelfSlots(db, 'main', 42);
+
+    const call = db.prepare.mock.results
+      .map((r: any) => r.value)
+      .find((s: any) => s._sql.includes('LEFT JOIN user_shelf_slot_labels'));
+    expect(call._args).toEqual([42, 'main']);
+    expect(slots).toEqual([
+      { id: 1, shelf_id: 'main', row: 0, col: 0, sort_order: 0, label: 'My reads', is_public: 0 },
+    ]);
+  });
+
+  it("binds -1 for an anonymous (no user) request instead of branching the SQL", async () => {
+    const db = createMockDB({ shelfSlotsResult: [] });
+    await getShelfSlots(db, 'main', null);
+
+    const call = db.prepare.mock.results
+      .map((r: any) => r.value)
+      .find((s: any) => s._sql.includes('LEFT JOIN user_shelf_slot_labels'));
+    expect(call._args).toEqual([-1, 'main']);
+  });
+
+  it('binds -1 when userId is omitted entirely', async () => {
+    const db = createMockDB({ shelfSlotsResult: [] });
+    await getShelfSlots(db, 'main');
+
+    const call = db.prepare.mock.results
+      .map((r: any) => r.value)
+      .find((s: any) => s._sql.includes('LEFT JOIN user_shelf_slot_labels'));
+    expect(call._args).toEqual([-1, 'main']);
+  });
+
+  it('serves the public slot label from the global column regardless of user, and hides one user\'s private label from another', async () => {
+    const raw = [
+      { id: 1, shelf_id: 'main', row: 0, col: 0, sort_order: 0, is_public: 1, global_label: 'Classics' },
+      {
+        id: 2,
+        shelf_id: 'main',
+        row: 0,
+        col: 1,
+        sort_order: 1,
+        is_public: 0,
+        global_label: null,
+        userLabels: { 42: 'My reads', 7: "Someone else's shelf" },
+      },
+    ];
+
+    const dbAsOwner = createMockDB({ shelfSlotsRaw: raw });
+    const asOwner = await getShelfSlots(dbAsOwner, 'main', 42);
+    expect(asOwner).toEqual([
+      { id: 1, shelf_id: 'main', row: 0, col: 0, sort_order: 0, label: 'Classics', is_public: 1 },
+      { id: 2, shelf_id: 'main', row: 0, col: 1, sort_order: 1, label: 'My reads', is_public: 0 },
+    ]);
+
+    const dbAsOther = createMockDB({ shelfSlotsRaw: raw });
+    const asOther = await getShelfSlots(dbAsOther, 'main', 99);
+    expect(asOther).toEqual([
+      { id: 1, shelf_id: 'main', row: 0, col: 0, sort_order: 0, label: 'Classics', is_public: 1 },
+      { id: 2, shelf_id: 'main', row: 0, col: 1, sort_order: 1, label: null, is_public: 0 },
+    ]);
+
+    const dbAsAnonymous = createMockDB({ shelfSlotsRaw: raw });
+    const asAnonymous = await getShelfSlots(dbAsAnonymous, 'main', null);
+    expect(asAnonymous).toEqual([
+      { id: 1, shelf_id: 'main', row: 0, col: 0, sort_order: 0, label: 'Classics', is_public: 1 },
+      { id: 2, shelf_id: 'main', row: 0, col: 1, sort_order: 1, label: null, is_public: 0 },
+    ]);
   });
 });

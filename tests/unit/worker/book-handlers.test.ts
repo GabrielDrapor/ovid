@@ -70,10 +70,27 @@ describe('Book Handlers', () => {
       const db = createMockDB([]);
       await getAllBooksV2(db, 2);
 
-      // Verify binding uses the correct userId
+      // Verify binding uses the correct userId (once for the per-user label
+      // join, once for the ownership filter)
       const query = db.prepare.mock.calls[0][0] as string;
       expect(query).toContain('b.user_id IS NULL OR b.user_id = ?');
-      expect(db._statement.bind).toHaveBeenCalledWith(2);
+      expect(db._statement.bind).toHaveBeenCalledWith(2, 2);
+    });
+
+    it("resolves private shelf labels through the requesting user's own labels", async () => {
+      const db = createMockDB([]);
+      await getAllBooksV2(db, 2);
+      const query = db.prepare.mock.calls[0][0] as string;
+      expect(query).toContain(
+        'CASE WHEN ss.is_public = 1 THEN ss.label ELSE ul.label END AS shelf_slot_label'
+      );
+      expect(query).toContain('LEFT JOIN user_shelf_slot_labels ul');
+    });
+
+    it('binds the -1 sentinel for anonymous label resolution', async () => {
+      const db = createMockDB([]);
+      await getAllBooksV2(db);
+      expect(db._statement.bind).toHaveBeenCalledWith(-1);
     });
   });
 
