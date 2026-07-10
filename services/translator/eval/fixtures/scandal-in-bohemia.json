@@ -1,0 +1,47 @@
+{
+  "title": "A Scandal in Bohemia",
+  "author": "Arthur Conan Doyle",
+  "source_language": "en",
+  "target_language": "zh",
+  "license": "Public domain (first published 1891). Excerpted for translation-quality evaluation.",
+  "note": "Chosen because proper nouns (Irene Adler, Godfrey Norton, Briony Lodge, the King of Bohemia) recur across chapters, a character (Norton) is introduced mid-story, and the photograph plot set up in ch.1 pays off in ch.3 — so it exercises glossary consistency, incremental glossary, and book-level understanding.",
+  "chapters": [
+    {
+      "title": "Chapter I. The King's Commission",
+      "paragraphs": [
+        "To Sherlock Holmes she is always THE woman. I have seldom heard him mention her under any other name. In his eyes she eclipses and predominates the whole of her sex.",
+        "I had seen little of Holmes lately. My marriage had drifted us away from each other. One night I passed his door in Baker Street, and the yellow glare of his window recalled the strange days of the past.",
+        "\"Wedlock suits you,\" he remarked. \"I think, Watson, that you have put on seven and a half pounds since I saw you.\"",
+        "He threw over a sheet of thick, pink-tinted note-paper. \"There is no date, nor either signature nor address,\" he said. \"This account of me will be my ruin. It was a present from the King of Bohemia. Read it.\"",
+        "\"This is indeed a mystery,\" I remarked. \"What do you imagine that it means?\" \"I have no data yet. It is a capital mistake to theorise before one has data.\"",
+        "A moment later a man entered, hardly less than six feet six inches in height, with the chest and limbs of a Hercules. \"You had my note?\" he asked in a deep harsh voice. \"I am the King of Bohemia. The matter is of such weight it may have an influence upon European history.\"",
+        "\"The circumstance is this. Five years ago I made the acquaintance of the well-known adventuress, Irene Adler. The name is no doubt familiar to you.\"",
+        "\"There is a photograph. We were both in the photograph. She threatens to send it to the people whom I am about to marry. She would do it. I know that she would.\""
+      ]
+    },
+    {
+      "title": "Chapter II. At Briony Lodge",
+      "paragraphs": [
+        "In the morning I walked down to Briony Lodge to see what I could learn of Irene Adler. It was a bijou villa, with a garden at the back, standing back from the road.",
+        "I had reached this point in my meditations when a smart landau drove up. Out of it a gentleman sprang, a remarkably handsome man, dark, aquiline, and moustached.",
+        "\"Is Mr. Godfrey Norton within?\" he asked the maid. So Godfrey Norton was evidently an important factor in the matter. He was a lawyer. That sounded ominous.",
+        "The lady Irene Adler herself came to the window. She was a lovely woman, with a face that a man might die for. Norton drove off with her toward the church of St. Monica.",
+        "\"Be at the corner of the Edgware Road,\" Holmes had told me. \"When I raise my hand, throw a smoke rocket into the room, and raise the cry of fire.\"",
+        "For Irene Adler, if she were alarmed by the cry of fire, would instinctively rush toward the thing she valued most. A married woman grabs at her baby; an unmarried one reaches for her jewel-box.",
+        "It was half-past six when I came out, and the drama was drawing to its climax. The plot to find the photograph was now fully laid."
+      ]
+    },
+    {
+      "title": "Chapter III. The Photograph",
+      "paragraphs": [
+        "The smoke rocket did its work. At the cry of fire, Irene Adler rushed to the recess where the photograph was hidden, half drew it out, and then, mastering herself, thrust it back.",
+        "\"You can tell the King I have the photograph now,\" said Holmes. But when we returned in the morning, Briony Lodge stood empty. Irene Adler had fled with Godfrey Norton by the night train.",
+        "In the recess was a photograph of Irene Adler herself in evening dress, and a letter addressed to Sherlock Holmes. He tore it open.",
+        "\"My dear Mr. Sherlock Holmes,\" the letter ran. \"You did it very well. I have been trained as an actress myself. I love and am loved by a better man than the King. He will not trouble us. I keep the photograph only to safeguard myself. I am yours faithfully, Irene Norton, née Adler.\"",
+        "\"She is a remarkable woman,\" said the King. \"Would she not have made an admirable queen? Is it not a pity that she was not on my level?\"",
+        "And that was how a great scandal threatened the kingdom of Bohemia, and how the best plans of Mr. Sherlock Holmes were beaten by a woman's wit. He used to make merry over the cleverness of women, but I have not heard him do it of late.",
+        "When he speaks of Irene Adler, or when he refers to her photograph, it is always under the honourable title of THE woman."
+      ]
+    }
+  ]
+}

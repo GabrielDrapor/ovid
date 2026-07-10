@@ -185,6 +185,10 @@ export default {
         FOREIGN KEY (slot_id) REFERENCES shelf_slots(id) ON DELETE CASCADE
       )`);
       await runMigration('book_shelf_slots_slot_position_index', 'CREATE INDEX IF NOT EXISTS idx_book_shelf_slots_slot_position ON book_shelf_slots(slot_id, position, book_id)');
+      // Quality pipeline (wenyi-derived): style guide + synopsis + chapter
+      // digests generated before translation, and per-chapter review stats.
+      await runMigration('translation_jobs_book_context', 'ALTER TABLE translation_jobs ADD COLUMN book_context_json TEXT');
+      await runMigration('translation_jobs_review_summary', 'ALTER TABLE translation_jobs ADD COLUMN review_summary_json TEXT');
       migrationsRan = true;
     }
 
