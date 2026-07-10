@@ -1640,13 +1640,17 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
 
       {editingLabel && (
         <div
-          className="closet3d-panel closet3d-label-editor"
+          className="closet3d-label-slip"
           role="dialog"
           aria-label="Edit shelf label"
         >
-          <h3>Shelf label</h3>
+          <div className="closet3d-label-form-no">
+            Form 3 <small>· Shelf Label</small>
+          </div>
+          <div className="closet3d-label-print">label</div>
           <input
             type="text"
+            className="closet3d-label-input"
             value={labelDraft}
             maxLength={40}
             placeholder="e.g. Sci-fi, To read…"
@@ -1658,9 +1662,13 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
               if (e.key === 'Escape') setEditingLabel(null);
             }}
           />
+          <div className="closet3d-label-gap" />
+          <div className="closet3d-label-print closet3d-label-hint">
+            this slip clips onto the shelf edge
+          </div>
           <div className="closet3d-label-editor-actions">
             <button
-              className="closet3d-read-btn"
+              className="closet3d-label-save-btn"
               onClick={handleSaveLabel}
               disabled={savingLabel}
             >
@@ -1674,6 +1682,7 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
               Cancel
             </button>
           </div>
+          <div className="closet3d-label-hole" />
         </div>
       )}
 

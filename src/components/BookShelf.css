@@ -214,19 +214,40 @@
   background: rgba(74, 222, 128, 0.1);
 }
 
-/* Upload Modal */
+/* Upload Modal — "library forms": the cream document itself IS the modal
+   (no dark chrome frame around it) for the acquisition/catalogue dialogs;
+   the credits-purchase modal below is the one exception and keeps the dark
+   chrome card, so the shared `--uf-*` custom properties live on the overlay
+   (their common ancestor) rather than on either child. */
 .upload-modal-overlay {
+  --uf-chrome-border: rgba(255, 235, 205, 0.15);
+  --uf-cream: #f6f4ed;
+  --uf-cream-shade: #eae4d3;
+  --uf-ink: #2b241a;
+  --uf-print: #625a41;
+  --uf-rule-blue: rgba(94, 118, 169, 0.28);
+  --uf-rule-red: rgba(196, 90, 66, 0.5);
+  --uf-brass: #d8b271;
+  --uf-stamp: #b4533c;
+  --uf-text-warm: #f4ead9;
+  --uf-text-dim: rgba(244, 234, 217, 0.62);
+  --uf-serif:
+    'Literata', 'Iowan Old Style', 'Palatino', Georgia, 'Songti SC', serif;
+  --uf-type: 'American Typewriter', 'Courier New', monospace;
+  --uf-line: 28px;
+
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.8);
+  background: rgba(10, 7, 5, 0.72);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 2000;
   animation: fadeIn 0.2s ease;
+  padding: 16px;
 }
 
 @keyframes fadeIn {
@@ -238,14 +259,19 @@
   }
 }
 
+/* Dark chrome card — only the credits-purchase modal uses this now. */
 .upload-modal-content {
-  background: #1a1a1a;
+  background: rgba(26, 20, 15, 0.92);
+  border: 1px solid var(--uf-chrome-border);
   border-radius: 16px;
-  padding: 40px;
-  max-width: 500px;
-  width: 90%;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  padding: 20px 22px 18px;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: 0 30px 60px rgba(0, 0, 0, 0.55);
+  width: min(420px, calc(100vw - 32px));
+  max-width: 420px;
   animation: slideUp 0.3s ease;
+  font-family: var(--uf-serif);
 }
 
 @keyframes slideUp {
@@ -267,117 +293,283 @@
   font-weight: 400;
 }
 
-.upload-target-note {
-  width: fit-content;
-  max-width: 100%;
-  margin: -18px auto 24px;
-  padding: 5px 10px;
-  border-radius: 999px;
-  background: rgba(216, 178, 113, 0.14);
-  border: 1px solid rgba(216, 178, 113, 0.24);
-  color: rgba(244, 234, 217, 0.86);
-  font-size: 0.78rem;
-  line-height: 1.25;
+.upload-modal-content button:focus-visible,
+.upload-modal-content select:focus-visible,
+.upload-modal-content input:focus-visible {
+  outline: 2px solid var(--uf-brass);
+  outline-offset: 2px;
+}
+
+/* Printed form-number line — occupies grid line 1 of the rule grid (not a
+   margin/padding offset above it), in the same faded print voice as the
+   pre-printed captions (just a touch larger). Brass would be illegible on
+   cream, so this is print-ink, not gold, now that the doc floats without a
+   dark frame behind it. margin-bottom is exactly one blank rule line, same
+   vocabulary as .uf-gap between zones. */
+.uf-form-no {
+  font-family: var(--uf-type);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  line-height: var(--uf-line);
+  /* A step darker than the regular print voice — it's the "headline" of the
+     paper and needs to hold up on its own above the rule grid. */
+  color: #4a4330;
   text-align: center;
-  overflow-wrap: anywhere;
+  margin: 0 0 var(--uf-line);
 }
 
-.upload-area {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
+.uf-form-no small {
+  font-size: inherit;
+  color: inherit;
+  letter-spacing: inherit;
+  font-style: normal;
 }
 
-.upload-label {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 15px;
-  padding: 50px 30px;
-  border: 2px dashed rgba(255, 255, 255, 0.3);
-  border-radius: 12px;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  color: rgba(255, 255, 255, 0.7);
+/* Document layer: cream paper on a 28px rule grid, red margin line, catalog
+   drawer "rod hole" — and now also the modal's own root element (sized,
+   shadowed, and animated in directly on the overlay scrim). Two voices only
+   — .uf-print (pre-printed captions) and .uf-entry (filled-in content).
+   Vertical rhythm: padding-top is exactly one blank line (28px, background
+   rule bands still start at the padding box's top edge, so the form-no
+   line lands on the *second* rule band rather than the first) and
+   padding-bottom is exactly two lines (56px) — one blank line, then the
+   final line the rod hole floats in. Horizontal padding is unconstrained
+   by the grid. */
+.uf-doc {
+  width: min(480px, calc(100vw - 32px));
+  max-width: 480px;
+  font-family: var(--uf-serif);
+  animation: slideUp 0.3s ease;
+  background:
+    repeating-linear-gradient(
+      transparent,
+      transparent calc(var(--uf-line) - 1px),
+      var(--uf-rule-blue) calc(var(--uf-line) - 1px),
+      var(--uf-rule-blue) var(--uf-line)
+    ),
+    linear-gradient(160deg, var(--uf-cream) 82%, var(--uf-cream-shade));
+  color: var(--uf-ink);
+  border-radius: 10px;
+  position: relative;
+  padding: var(--uf-line) 36px calc(var(--uf-line) * 2) 44px;
+  box-shadow:
+    0 1px 0 #cfc8b8 inset,
+    0 24px 60px rgba(0, 0, 0, 0.6),
+    0 4px 12px rgba(0, 0, 0, 0.4);
 }
 
-.upload-label:hover {
-  border-color: rgba(255, 255, 255, 0.6);
-  background: rgba(255, 255, 255, 0.05);
-  color: white;
+.uf-doc button:focus-visible,
+.uf-doc select:focus-visible,
+.uf-doc input:focus-visible {
+  outline: 2px solid var(--uf-stamp);
+  outline-offset: 2px;
 }
 
-.upload-label svg {
-  color: rgba(255, 255, 255, 0.5);
-  transition: color 0.3s ease;
+.uf-doc::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 22px;
+  border-left: 1.5px solid var(--uf-rule-red);
 }
 
-.upload-label:hover svg {
-  color: white;
-}
-
-.upload-label span {
-  font-size: 1rem;
-  font-weight: 500;
-}
-
-.upload-hint {
-  font-size: 0.85rem !important;
-  color: rgba(255, 255, 255, 0.5) !important;
-  font-weight: 400 !important;
-}
-
-.cancel-upload-btn {
-  padding: 12px 24px;
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 8px;
-  color: white;
-  cursor: pointer;
-  font-size: 1rem;
-  transition: all 0.2s ease;
-}
-
-.cancel-upload-btn:hover {
-  background: rgba(255, 255, 255, 0.15);
-  border-color: rgba(255, 255, 255, 0.3);
-}
-
-.upload-progress {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 20px;
-  padding: 40px 20px;
-}
-
-.upload-progress p {
-  color: rgba(255, 255, 255, 0.8);
-  font-size: 1rem;
-  text-align: center;
-}
-
-.upload-progress-inline {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 16px;
-  padding: 30px 20px;
-  margin-top: 16px;
-}
-
-.upload-progress-inline p {
-  color: rgba(255, 255, 255, 0.8);
-  font-size: 0.95rem;
-  text-align: center;
+.uf-doc p {
   margin: 0;
 }
 
-.spinner {
-  width: 40px;
-  height: 40px;
-  border: 3px solid rgba(255, 255, 255, 0.1);
-  border-top-color: white;
+.uf-hole {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  width: 13px;
+  height: 13px;
+  margin-left: -7px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, #23201a, #0d0b08);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.55);
+}
+
+/* Both voices set their own line-height directly (not just inherited from
+   .uf-row) so standalone usage — a bare <p> in the status/error docs, not
+   wrapped in a .uf-row — still sits exactly on one 28px grid line. */
+.uf-print {
+  font-family: var(--uf-type);
+  font-size: 10.5px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  line-height: var(--uf-line);
+  color: var(--uf-print);
+}
+
+.uf-entry {
+  font-family: var(--uf-serif);
+  font-size: 14px;
+  line-height: var(--uf-line);
+  color: var(--uf-ink);
+}
+
+.uf-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  line-height: var(--uf-line);
+  gap: 12px;
+}
+
+.uf-gap {
+  height: var(--uf-line);
+}
+
+.uf-num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Red is semantic — only for cost/error print-voice lines. Declared after
+   .uf-print/.uf-entry so it wins on equal specificity without !important. */
+.uf-stamp-text {
+  color: var(--uf-stamp);
+}
+
+/* Action-bar layer: flat letterpress-ink primary, quiet ink-outline
+   secondary. Now lives on the paper itself, near the bottom, above the
+   rod-hole — .uf-doc's own bottom padding provides the hole clearance.
+   margin-top is exactly one blank rule line, and both buttons are exactly
+   two lines tall (56px, via explicit height + flex centering rather than
+   padding) so their top AND bottom edges land on rule lines. Brass
+   (gradient/glow) read as a glossy candy pill on cream paper, so it's gone
+   from the paper entirely — brass stays only in the 3D scene's own
+   dark-chrome UI. */
+.uf-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: var(--uf-line);
+}
+
+.uf-btn-primary {
+  flex: 1.6;
+  height: calc(var(--uf-line) * 2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--uf-serif);
+  font-size: 15px;
+  font-weight: 600;
+  color: #f6f4ed;
+  background: #2b241a;
+  border: none;
+  border-radius: 6px;
+  padding: 0;
+  cursor: pointer;
+  transition:
+    background 0.2s,
+    transform 0.15s,
+    opacity 0.2s;
+}
+
+.uf-btn-primary:hover {
+  background: #3d3423;
+}
+
+.uf-btn-primary:active {
+  transform: translateY(1px);
+}
+
+.uf-btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.uf-btn-quiet {
+  flex: 1;
+  font-family: var(--uf-serif);
+  font-size: 14px;
+  color: var(--uf-text-dim);
+  background: none;
+  border: 1px solid rgba(244, 234, 217, 0.22);
+  border-radius: 10px;
+  padding: 12px 0;
+  cursor: pointer;
+  transition:
+    background 0.2s,
+    color 0.2s;
+}
+
+.uf-btn-quiet:hover {
+  background: rgba(244, 234, 217, 0.07);
+  color: var(--uf-text-warm);
+}
+
+.uf-btn-quiet:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Paper-context secondary button — .uf-btn-quiet's cream-on-dark treatment
+   would vanish on the paper doc, so the forms use this ink-toned variant
+   instead. Same radius/height as .uf-btn-quiet. */
+.uf-btn-quiet-paper {
+  flex: 1;
+  height: calc(var(--uf-line) * 2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--uf-serif);
+  font-size: 14px;
+  color: var(--uf-ink);
+  background: none;
+  border: 1.5px solid rgba(43, 36, 26, 0.5);
+  border-radius: 6px;
+  padding: 0;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.uf-btn-quiet-paper:hover {
+  background: rgba(43, 36, 26, 0.06);
+}
+
+.uf-btn-quiet-paper:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Status doc: estimating / uploading spinner phases share this look. Now
+   always an inner wrapper (never the doc root) so the form-number line
+   stays pinned at the top of the paper instead of being pulled into the
+   vertical centering. */
+/* Grid-exact slot (5 lines), stacked from the top — no justify-content
+   centering and no gap, since flex centering/gap let the children float
+   between rule lines rather than landing on them. Layout, top to bottom:
+   one blank line (the container's own top padding), the spinner's slot
+   (exactly 2 lines / 56px, spinner vertically centered inside via its own
+   margin), the status text as a normal 28px line-height row sitting on
+   its own rule band, then a trailing blank line (bottom padding). */
+.uf-doc-status {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: calc(var(--uf-line) * 5);
+  padding: var(--uf-line) 0;
+  box-sizing: border-box;
+  text-align: center;
+}
+
+/* The spinner is a decorative glyph (like the affix box's + icon) so its
+   own diameter isn't grid-audited, but the 56px slot it centers within is:
+   12px margin + 32px spinner + 12px margin = 56px, exactly two rule lines.
+   Margin (not padding) so border-radius: 50% keeps drawing a circle around
+   the 32x32 box rather than an ellipse around a taller padded one. */
+.uf-doc-status .uf-spinner {
+  margin: 12px 0;
+}
+
+.uf-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid rgba(43, 36, 26, 0.15);
+  border-top-color: rgba(43, 36, 26, 0.55);
   border-radius: 50%;
   animation: spin 1s linear infinite;
 }
@@ -385,6 +577,320 @@
 @keyframes spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+/* — Form 1: acquisition slip — */
+.uf-doc-affix {
+  display: block;
+  cursor: pointer;
+}
+
+.uf-affix-box {
+  width: 118px;
+  /* 168px = 6 rule lines exactly; margins snap to a full line too, so its
+     top and bottom edges land on rules. */
+  height: calc(var(--uf-line) * 6);
+  margin: var(--uf-line) auto;
+  border: 2px dashed rgba(43, 36, 26, 0.58);
+  border-radius: 5px 10px 10px 5px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition:
+    transform 0.3s cubic-bezier(0.2, 0.9, 0.3, 1.2),
+    border-color 0.25s;
+}
+
+/* Spine crease only runs alongside the + icon — stopping well short of the
+   caption below it so the dashed line never runs behind the text. */
+.uf-affix-box::before {
+  content: '';
+  position: absolute;
+  left: 9px;
+  top: 6px;
+  height: 64px;
+  border-left: 1px dashed rgba(43, 36, 26, 0.28);
+}
+
+.uf-plus {
+  width: 40px;
+  height: 40px;
+  border: 1.5px solid rgba(43, 36, 26, 0.7);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  font-weight: 300;
+  color: rgba(43, 36, 26, 0.7);
+  transition: all 0.25s;
+}
+
+.uf-affix-note {
+  font-family: var(--uf-type);
+  font-size: 9.5px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--uf-print);
+  text-align: center;
+  width: 100%;
+  padding: 0 10px;
+  box-sizing: border-box;
+}
+
+.uf-doc-affix:hover .uf-affix-box {
+  transform: translateY(-4px);
+  border-color: var(--uf-stamp);
+}
+
+.uf-doc-affix:hover .uf-plus {
+  border-color: var(--uf-stamp);
+  color: var(--uf-stamp);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .uf-doc-affix:hover .uf-affix-box {
+    transform: none;
+  }
+
+  .uf-stamp {
+    animation: none;
+  }
+}
+
+/* — Form 2: catalogue card — */
+.uf-card-title {
+  font-size: 16.5px;
+  font-weight: 600;
+  font-style: italic;
+  line-height: var(--uf-line);
+  margin: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.uf-card-author {
+  font-size: 13.5px;
+  line-height: var(--uf-line);
+  margin: 0;
+  color: var(--uf-ink);
+}
+
+.uf-card-author::before {
+  content: 'by ';
+  color: var(--uf-print);
+  font-style: italic;
+}
+
+.uf-mode-selector {
+  display: flex;
+  flex-direction: column;
+}
+
+.uf-mode-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  line-height: var(--uf-line);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+/* Visually hidden but still in the a11y tree / tab order — keeps the
+   radiogroup's keyboard and screen-reader semantics intact. */
+.uf-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.uf-box {
+  width: 13px;
+  height: 13px;
+  flex: none;
+  border: 1.5px solid var(--uf-ink);
+  border-radius: 2px;
+  /* position:relative anchors the ::after checkmark below, not a vertical
+     offset — the box is centered within its 28px line via flex alignment
+     instead of a hand-tuned top-offset nudge. */
+  position: relative;
+  align-self: center;
+}
+
+.uf-mode-row.checked .uf-box::after {
+  content: '✓';
+  position: absolute;
+  top: -6px;
+  left: 0;
+  font-size: 16px;
+  color: var(--uf-ink);
+}
+
+.uf-mode-note {
+  margin-left: auto;
+}
+
+.uf-mode-row.dim {
+  color: var(--uf-print);
+}
+
+.uf-mode-row.dim .uf-box {
+  border-color: #9a917a;
+}
+
+/* Overrides .uf-row's baseline alignment — flex-end pins the select's
+   underline to this row's bottom edge, which coincides with the rule line
+   the row sits on. */
+.uf-lang-line {
+  align-items: flex-end;
+}
+
+.uf-lang-line select {
+  font-family: var(--uf-serif);
+  font-size: 14px;
+  border: none;
+  border-bottom: 1px solid #b9b19d;
+  background: transparent;
+  color: var(--uf-ink);
+  padding: 1px 2px 0;
+  line-height: 1.1;
+  cursor: pointer;
+}
+
+.uf-lang-line select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* flex-end (not baseline) so the selects' border-bottom lands exactly on
+   the row's bottom edge — which is the rule line this row sits on. The
+   underline becomes the rule. */
+.uf-lang-fields {
+  display: inline-flex;
+  align-items: flex-end;
+}
+
+.uf-arrow {
+  margin: 0 6px;
+  /* The arrow floats mid-line rather than pinning to the underline. */
+  align-self: center;
+}
+
+.uf-lang-warning {
+  text-align: center;
+  line-height: var(--uf-line);
+  margin: 0;
+}
+
+/* The stamp is exempt from the grid (a rubber stamp lands over the ruled
+   paper, not on a line — a bit of overlap is authentic) but it must not
+   stretch this zone's own height off-grid, so it's taken out of flow
+   entirely (absolute) and .uf-fee-lines — 2 rows normally, 3 with the
+   "need more" line — is the only thing that determines this zone's height,
+   still an exact multiple of 28. The preceding .uf-gap in the markup
+   already provides the blank line above, so no margin-top here. */
+.uf-fee-zone {
+  position: relative;
+}
+
+.uf-fee-lines {
+  min-width: 0;
+  padding-right: 92px;
+  box-sizing: border-box;
+}
+
+.uf-fee-lines .uf-row {
+  max-width: 190px;
+}
+
+.uf-fee-lines .uf-entry {
+  font-size: 13.5px;
+}
+
+.uf-need-more {
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  line-height: var(--uf-line);
+  margin: 0;
+}
+
+.uf-stamp {
+  position: absolute;
+  top: 0;
+  right: 0;
+  font-family: var(--uf-type);
+  color: var(--uf-stamp);
+  border: 2.5px double var(--uf-stamp);
+  border-radius: 6px;
+  padding: 7px 13px 6px;
+  text-align: center;
+  transform: rotate(-5deg);
+  opacity: 0.88;
+  mix-blend-mode: multiply;
+  animation: uf-stamp-in 0.4s cubic-bezier(0.3, 1.6, 0.5, 1) both;
+  animation-delay: 0.35s;
+}
+
+@keyframes uf-stamp-in {
+  from {
+    transform: rotate(-5deg) scale(1.7);
+    opacity: 0;
+  }
+  to {
+    transform: rotate(-5deg) scale(1);
+    opacity: 0.88;
+  }
+}
+
+.uf-stamp-num {
+  font-size: 19px;
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+}
+
+.uf-stamp-unit {
+  font-size: 9.5px;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+}
+
+@media (max-width: 480px) {
+  .upload-modal-content {
+    padding: 16px 16px 14px;
+  }
+
+  /* The overlay is a flex container centering its child — without this,
+     its own 16px padding caps .uf-doc's rendered width at (100vw - 32px)
+     via flex-shrink regardless of .uf-doc's own width formula below. 12px
+     lets the wider mobile paper actually reach (100vw - 24px). The
+     credits modal (.upload-modal-content) is unaffected: its own width
+     formula already fits within the old 16px gutter, so it simply
+     stretches a little less rather than growing. */
+  .upload-modal-overlay {
+    padding: 12px;
+  }
+
+  /* Horizontal-only tweak for narrow screens — vertical rhythm (one blank
+     line top, two lines/56px bottom) stays the same at every width. Paper
+     widens slightly further than the desktop min() formula (100vw - 24px
+     instead of 100vw - 32px) to claw back a little of the room the wider
+     gutter takes on small screens. */
+  .uf-doc {
+    width: calc(100vw - 24px);
+    max-width: calc(100vw - 24px);
+    padding: var(--uf-line) 24px calc(var(--uf-line) * 2) 32px;
   }
 }
 
@@ -1380,94 +1886,9 @@
   }
 }
 
-/* Upload Error State */
-.upload-error {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 20px;
-  padding: 20px;
-  text-align: center;
-}
-
-.upload-error .error-message {
-  color: #ff6b6b;
-  font-size: 1rem;
-  margin: 0;
-  max-width: 100%;
-}
-
-.credit-details {
-  background: rgba(255, 255, 255, 0.05);
-  border-radius: 8px;
-  padding: 15px 20px;
-  width: 100%;
-  max-width: 280px;
-}
-
-.credit-row {
-  display: flex;
-  justify-content: space-between;
-  padding: 8px 0;
-  font-size: 14px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.credit-row:last-child {
-  border-bottom: none;
-}
-
-.credit-row span:first-child {
-  color: #888;
-}
-
-.credit-row .required {
-  color: #ff6b6b;
-}
-
-.credit-row .available {
-  color: #4ade80;
-}
-
-.credit-row .needed {
-  color: #fbbf24;
-  font-weight: 600;
-}
-
-.error-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  width: 100%;
-  max-width: 280px;
-}
-
-.buy-credits-btn-primary {
-  padding: 14px 24px;
-  background: #4ade80;
-  border: none;
-  border-radius: 8px;
-  color: #000;
-  cursor: pointer;
-  font-size: 1rem;
-  font-weight: 600;
-  transition: all 0.2s ease;
-}
-
-.buy-credits-btn-primary:hover {
-  background: #22c55e;
-  transform: translateY(-2px);
-}
-
-.current-credits {
-  color: rgba(255, 255, 255, 0.7);
-  font-size: 14px;
-  margin-bottom: 15px;
-}
-
-.current-credits strong {
-  color: #4ade80;
-}
+/* Upload Error State — now rendered inside .uf-doc using the shared
+   .uf-print / .uf-entry / .uf-row / .uf-stamp-text vocabulary above; see the
+   error branch in BookShelf.tsx for markup. */
 
 /* Credits Modal */
 .credits-modal {
@@ -1537,238 +1958,10 @@
   margin: 0 0 20px 0;
 }
 
-/* Estimate Confirmation */
-.estimate-confirmation {
-  display: flex;
-  flex-direction: column;
-  gap: 25px;
-}
-
-.estimate-confirmation .book-info {
-  text-align: center;
-  padding-bottom: 20px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.estimate-confirmation .book-info h3 {
-  color: white;
-  font-size: 1.4rem;
-  margin: 0 0 8px 0;
-  font-weight: 500;
-}
-
-.estimate-confirmation .book-info .author {
-  color: #888;
-  font-size: 0.95rem;
-  margin: 0;
-}
-
-.estimate-language-pickers {
-  display: flex;
-  gap: 12px;
-}
-
-.estimate-language-field {
-  flex: 1 1 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 0;
-}
-
-.estimate-language-field label {
-  color: #888;
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-}
-
-.estimate-language-field select {
-  width: 100%;
-  appearance: none;
-  -webkit-appearance: none;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
-  padding: 10px 32px 10px 12px;
-  color: white;
-  font-size: 14px;
-  background-image:
-    linear-gradient(45deg, transparent 50%, #888 50%),
-    linear-gradient(135deg, #888 50%, transparent 50%);
-  background-position:
-    calc(100% - 16px) 50%,
-    calc(100% - 11px) 50%;
-  background-size:
-    5px 5px,
-    5px 5px;
-  background-repeat: no-repeat;
-  cursor: pointer;
-}
-
-.estimate-language-field select:focus {
-  outline: none;
-  border-color: rgba(74, 222, 128, 0.6);
-}
-
-.estimate-language-field select:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.estimate-language-hint {
-  color: #666;
-  font-size: 11px;
-  line-height: 1.3;
-}
-
-.estimate-language-warning {
-  background: rgba(251, 191, 36, 0.1);
-  border: 1px solid rgba(251, 191, 36, 0.35);
-  color: #fbbf24;
-  border-radius: 8px;
-  padding: 10px 12px;
-  font-size: 13px;
-  text-align: center;
-}
-
-.estimate-mode-selector {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.estimate-mode-option {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 12px 14px;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.025);
-  cursor: pointer;
-  user-select: none;
-  transition:
-    border-color 0.15s ease,
-    background 0.15s ease;
-}
-
-.estimate-mode-option:hover {
-  border-color: rgba(255, 255, 255, 0.18);
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.estimate-mode-option.selected {
-  border-color: rgba(251, 191, 36, 0.6);
-  background: rgba(251, 191, 36, 0.08);
-}
-
-.estimate-mode-option input[type='radio'] {
-  margin-top: 2px;
-  width: 16px;
-  height: 16px;
-  cursor: pointer;
-  accent-color: #fbbf24;
-  flex-shrink: 0;
-}
-
-.estimate-mode-option input[type='radio']:disabled {
-  cursor: default;
-}
-
-.estimate-mode-text {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.estimate-mode-text strong {
-  font-size: 14px;
-  font-weight: 600;
-  color: #eee;
-}
-
-.estimate-mode-text span {
-  font-size: 12px;
-  color: #888;
-  line-height: 1.4;
-}
-
-.estimate-mode-option.selected .estimate-mode-text strong {
-  color: #fff;
-}
-
-.estimate-details {
-  background: rgba(255, 255, 255, 0.03);
-  border-radius: 10px;
-  padding: 20px;
-}
-
-.estimate-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 10px 0;
-  font-size: 14px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-}
-
-.estimate-row:last-child {
-  border-bottom: none;
-}
-
-.estimate-row span:first-child {
-  color: #888;
-}
-
-.estimate-row span:last-child {
-  color: white;
-}
-
-.estimate-row.cost span:last-child {
-  font-size: 1.1rem;
-  font-weight: 600;
-}
-
-.estimate-row.cost .affordable {
-  color: #4ade80;
-}
-
-.estimate-row.cost .not-affordable {
-  color: #ff6b6b;
-}
-
-.estimate-row.balance span:last-child {
-  color: #4ade80;
-}
-
-.estimate-row.needed .not-affordable {
-  color: #fbbf24;
-  font-weight: 600;
-}
-
-.estimate-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.confirm-upload-btn {
-  padding: 14px 24px;
-  background: #4ade80;
-  border: none;
-  border-radius: 8px;
-  color: #000;
-  cursor: pointer;
-  font-size: 1rem;
-  font-weight: 600;
-  transition: all 0.2s ease;
-}
-
-.confirm-upload-btn:hover {
-  background: #22c55e;
-  transform: translateY(-2px);
-}
+/* Estimate Confirmation (Form 2 · Catalogue) — now rendered inside .uf-doc
+   using .uf-card-title/.uf-card-author, .uf-mode-row, .uf-lang-line,
+   .uf-fee-zone/.uf-stamp and the shared .uf-actions bar above; see the
+   estimate branch in BookShelf.tsx for markup. */
 
 /* Progress bar styling */
 .progress-section {
