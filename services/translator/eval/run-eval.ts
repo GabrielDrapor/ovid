@@ -361,7 +361,12 @@ async function main() {
 
   const outDir = join(__dirname, 'results');
   mkdirSync(outDir, { recursive: true });
-  const outPath = join(outDir, `eval-${variants.join('_')}.json`);
+  // EVAL_TAG keeps per-run reports distinct (e.g. one file per translator model).
+  const tag = (process.env.EVAL_TAG || '').replace(/[^a-zA-Z0-9._-]/g, '-');
+  const outPath = join(
+    outDir,
+    `eval-${variants.join('_')}${tag ? `-${tag}` : ''}.json`
+  );
   writeFileSync(outPath, JSON.stringify(report, null, 2));
   console.log(
     `\nFull report (with per-passage verdicts) written to ${outPath}`
