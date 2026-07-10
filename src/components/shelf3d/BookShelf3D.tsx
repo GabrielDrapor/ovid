@@ -10,6 +10,7 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 import { Canvas, useFrame, useThree, ThreeEvent } from '@react-three/fiber';
 import {
   Book,
+  ShelfMoveTarget,
   ShelfSlot,
   ShelfUploadTarget,
   UserBookProgress,
@@ -18,13 +19,17 @@ import {
 import {
   BAY_PITCH,
   BOOK_DEPTH,
+  BOOK_GAP,
   BOOK_HEIGHT,
   DEFAULT_SPINE_RATIO,
   DIVIDER_T,
+  DropTarget,
   PlacedShelfLabel,
   ROW_HEIGHT,
+  ShelfLayout,
   clampSpineRatio,
   layoutBooks,
+  resolveDropTarget,
   rowYCenters,
 } from './layout';
 import {
@@ -51,10 +56,19 @@ interface BookShelf3DProps {
   showProgress: boolean;
   progressMap: Map<string, UserBookProgress>;
   translationProgress: Map<string, TranslationProgress>;
+  currentUserId?: number | null;
   onRead: (bookUuid: string) => void;
   onDelete: (bookUuid: string) => void;
   onUploadToSlot?: (target: ShelfUploadTarget) => void;
+  onMoveBook?: (
+    bookUuid: string,
+    target: ShelfMoveTarget,
+    insertIndex: number
+  ) => void;
 }
+
+const DRAG_START_PX_MOUSE = 6;
+const DRAG_START_PX_TOUCH = 10;
 
 // Only an in-flight import gates interaction; a 'ready' book missing
 // cover/spine art (e.g. generation failed server-side) renders with fallback
@@ -264,6 +278,18 @@ interface BookMeshProps {
   processingProgress: number;
   /** Accumulated touch-drag distance; large values suppress the tap-click. */
   dragDist: React.MutableRefObject<number>;
+  /** Owned books off public shelves can be dragged; everything else can't. */
+  draggable: boolean;
+  layout: ShelfLayout;
+  draggingUuid: React.MutableRefObject<string | null>;
+  dragPointerId: React.MutableRefObject<number | null>;
+  dragWorldPos: React.MutableRefObject<THREE.Vector3>;
+  /** Books that slide right to open a gap at the live insertion point. */
+  dragShift: React.MutableRefObject<{
+    uuids: Set<string>;
+    amount: number;
+  } | null>;
+  onDragEnd: (bookUuid: string, candidate: DropTarget | null) => void;
 }
 
 function BookMesh({
@@ -277,7 +303,15 @@ function BookMesh({
   onArtReady,
   processingProgress,
   dragDist,
+  draggable,
+  layout,
+  draggingUuid,
+  dragPointerId,
+  dragWorldPos,
+  dragShift,
+  onDragEnd,
 }: BookMeshProps) {
+  const { camera, gl } = useThree();
   const group = useRef<THREE.Group>(null);
   const mesh = useRef<THREE.Mesh>(null);
   const [hovered, setHovered] = useState(false);
@@ -304,6 +338,133 @@ function BookMesh({
   const processing = isBookImportPending(book);
   const [spineLoaded, setSpineLoaded] = useState(false);
   const [coverLoaded, setCoverLoaded] = useState(false);
+
+  // Real pointer drag: pick up an owned book and move it to a new bay.
+  // Pointer capture (set on pointerdown) keeps move/up events targeting this
+  // mesh even once the pointer strays off its (shrinking/relocating) geometry.
+  const dragPlane = useMemo(
+    () => new THREE.Plane(new THREE.Vector3(0, 0, 1), 0),
+    []
+  );
+  const raycaster = useMemo(() => new THREE.Raycaster(), []);
+  // Scratch objects reused across pointermove events — a drag can dispatch
+  // dozens per frame and fresh allocations each time are pure GC churn.
+  const ndcScratch = useMemo(() => new THREE.Vector2(), []);
+  const hitScratch = useMemo(() => new THREE.Vector3(), []);
+  const dragStart = useRef<{
+    x: number;
+    y: number;
+    pointerId: number;
+    moved: boolean;
+  } | null>(null);
+  const lastCandidate = useRef<DropTarget | null>(null);
+  const justDragged = useRef(false);
+
+  const handlePointerDown = useCallback(
+    (e: ThreeEvent<PointerEvent>) => {
+      if (!draggable || processing) return;
+      e.stopPropagation();
+      (e.target as Element).setPointerCapture?.(e.pointerId);
+      dragStart.current = {
+        x: e.clientX,
+        y: e.clientY,
+        pointerId: e.pointerId,
+        moved: false,
+      };
+      dragPointerId.current = e.pointerId;
+    },
+    [draggable, processing, dragPointerId]
+  );
+
+  const handlePointerMove = useCallback(
+    (e: ThreeEvent<PointerEvent>) => {
+      const start = dragStart.current;
+      if (!start || start.pointerId !== e.pointerId) return;
+      const dist = Math.hypot(e.clientX - start.x, e.clientY - start.y);
+      const threshold =
+        e.pointerType === 'touch' ? DRAG_START_PX_TOUCH : DRAG_START_PX_MOUSE;
+      if (!start.moved && dist > threshold) {
+        start.moved = true;
+        draggingUuid.current = book.uuid;
+      }
+      if (!start.moved) return;
+      e.stopPropagation();
+
+      const rect = gl.domElement.getBoundingClientRect();
+      ndcScratch.set(
+        ((e.clientX - rect.left) / rect.width) * 2 - 1,
+        -((e.clientY - rect.top) / rect.height) * 2 + 1
+      );
+      raycaster.setFromCamera(ndcScratch, camera);
+      if (!raycaster.ray.intersectPlane(dragPlane, hitScratch)) return;
+      dragWorldPos.current.set(
+        hitScratch.x,
+        hitScratch.y,
+        BOOK_DEPTH / 2 + 0.4
+      );
+
+      const candidate = resolveDropTarget(
+        hitScratch.x,
+        hitScratch.y,
+        layout,
+        book.uuid
+      );
+      lastCandidate.current = candidate;
+
+      // Open a gap at the insertion point: everything at/after it slides
+      // right by the dragged book's width so the landing spot reads clearly.
+      if (candidate) {
+        const bay = layout.bays.find(
+          (b) =>
+            b.rowCoord === candidate.rowCoord &&
+            b.colCoord === candidate.colCoord
+        );
+        const siblings = bay
+          ? bay.bookUuids.filter((uuid) => uuid !== book.uuid)
+          : [];
+        const toShift = siblings.slice(candidate.insertIndex);
+        dragShift.current =
+          toShift.length > 0
+            ? { uuids: new Set(toShift), amount: width + BOOK_GAP }
+            : null;
+      } else {
+        dragShift.current = null;
+      }
+    },
+    [
+      gl,
+      camera,
+      raycaster,
+      dragPlane,
+      ndcScratch,
+      hitScratch,
+      draggingUuid,
+      dragWorldPos,
+      dragShift,
+      layout,
+      book.uuid,
+      width,
+    ]
+  );
+
+  const finishDrag = useCallback(
+    (e: ThreeEvent<PointerEvent>) => {
+      const start = dragStart.current;
+      if (!start || start.pointerId !== e.pointerId) return;
+      dragStart.current = null;
+      (e.target as Element).releasePointerCapture?.(e.pointerId);
+      if (dragPointerId.current === e.pointerId) dragPointerId.current = null;
+
+      if (start.moved) {
+        justDragged.current = true;
+        draggingUuid.current = null;
+        dragShift.current = null;
+        onDragEnd(book.uuid, lastCandidate.current);
+        lastCandidate.current = null;
+      }
+    },
+    [dragPointerId, draggingUuid, dragShift, onDragEnd, book.uuid]
+  );
   const displayTitle = book.original_title || book.title;
   const processingClarity = Math.max(
     0,
@@ -405,7 +566,9 @@ function BookMesh({
   useFrame((state, delta) => {
     const g = group.current;
     if (!g) return;
-    const k = 1 - Math.exp(-delta * 7);
+    const isDragging = draggingUuid.current === book.uuid;
+    // Snappier follow while the pointer is actively carrying the book.
+    const k = 1 - Math.exp(-delta * (isDragging ? 20 : 7));
 
     let tx = position[0];
     let ty = shelfY;
@@ -414,7 +577,14 @@ function BookMesh({
     let rz = jitter.lean;
     let ts = 1;
 
-    if (selected) {
+    if (isDragging) {
+      tx = dragWorldPos.current.x;
+      ty = dragWorldPos.current.y;
+      tz = dragWorldPos.current.z;
+      ry = 0;
+      rz = 0;
+      ts = 1.06;
+    } else if (selected) {
       // Float in front of the camera, cover turned toward the viewer.
       // On wide screens sit left of center (info panel is on the right).
       const cam = state.camera;
@@ -448,6 +618,10 @@ function BookMesh({
       tz = cam.position.z - 2.15;
       ry = -Math.PI / 2;
       rz = 0;
+    } else if (dragShift.current?.uuids.has(book.uuid)) {
+      // Another book is being carried over this bay: slide right to open a
+      // gap at the insertion point. The lerp below animates the shuffle.
+      tx = position[0] + dragShift.current.amount;
     } else if (hovered && !anySelected && !processing) {
       // Tip the book out of the row and yaw it so the cover peeks out.
       tz = position[2] + 0.42;
@@ -471,7 +645,7 @@ function BookMesh({
     const m = mesh.current;
     if (m && Array.isArray(m.material)) {
       let target = 1;
-      if (anySelected && !selected) target = 0.35;
+      if (anySelected && !selected && !isDragging) target = 0.35;
       else if (processing) {
         const shimmer =
           Math.sin(state.clock.elapsedTime * 2.5) *
@@ -501,6 +675,12 @@ function BookMesh({
       e.stopPropagation();
       // A touch pan that ends on a book must not count as a tap.
       if (dragDist.current > 12) return;
+      // A completed pointer-drag fires a click right after pointerup — don't
+      // let it also open the info panel.
+      if (justDragged.current) {
+        justDragged.current = false;
+        return;
+      }
       onSelect(book.uuid);
     },
     [book.uuid, onSelect, dragDist]
@@ -521,6 +701,10 @@ function BookMesh({
         castShadow
         receiveShadow
         onClick={handleClick}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={finishDrag}
+        onPointerCancel={finishDrag}
         onPointerOver={(e) => {
           e.stopPropagation();
           setHovered(true);
@@ -867,6 +1051,7 @@ function CameraRig({
   caseTop,
   caseBottom,
   dragDist,
+  dragPointerId,
 }: {
   focused: boolean;
   contentW: number;
@@ -875,6 +1060,8 @@ function CameraRig({
   caseTop: number;
   caseBottom: number;
   dragDist: React.MutableRefObject<number>;
+  /** Pointer id currently picking up a book — excluded from pan/pinch. */
+  dragPointerId: React.MutableRefObject<number | null>;
 }) {
   const { camera, gl, size } = useThree();
   const zoom = useRef<number | null>(null);
@@ -937,6 +1124,8 @@ function CameraRig({
     const el = gl.domElement;
     const onPointerDown = (e: PointerEvent) => {
       if (e.pointerType !== 'touch') return;
+      // This finger is picking up a book — it must not also pan/pinch.
+      if (e.pointerId === dragPointerId.current) return;
       touchMode.current = true;
       dragDist.current = 0;
       pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -947,6 +1136,13 @@ function CameraRig({
     };
     const onPointerMove = (e: PointerEvent) => {
       if (e.pointerType !== 'touch') return;
+      if (e.pointerId === dragPointerId.current) {
+        // Evict a stale entry seeded by the pointerdown tick above, so a
+        // second unrelated finger's pinch math never mixes in this one's
+        // now-frozen coordinate.
+        pointers.current.delete(e.pointerId);
+        return;
+      }
       const prev = pointers.current.get(e.pointerId);
       if (!prev) return;
       const dx = e.clientX - prev.x;
@@ -990,7 +1186,7 @@ function CameraRig({
       el.removeEventListener('pointerup', onPointerUp);
       el.removeEventListener('pointercancel', onPointerUp);
     };
-  }, [gl, camera, size, dragDist]);
+  }, [gl, camera, size, dragDist, dragPointerId]);
 
   useFrame((state, delta) => {
     const k = 1 - Math.exp(-delta * 4);
@@ -1054,9 +1250,11 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
   showProgress,
   progressMap,
   translationProgress,
+  currentUserId,
   onRead,
   onDelete,
   onUploadToSlot,
+  onMoveBook,
 }) => {
   const [spineRatios, setSpineRatios] = useState<Map<string, number>>(
     new Map()
@@ -1110,6 +1308,10 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
     });
   }, []);
 
+  const layout = useMemo(
+    () => layoutBooks(books, spineRatios, undefined, undefined, shelfSlots),
+    [books, spineRatios, shelfSlots]
+  );
   const {
     placements,
     slotLabels,
@@ -1119,10 +1321,7 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
     totalRows,
     totalCols,
     wallWidth,
-  } = useMemo(
-    () => layoutBooks(books, spineRatios, undefined, undefined, shelfSlots),
-    [books, spineRatios, shelfSlots]
-  );
+  } = layout;
   const rowCenters = useMemo(() => rowYCenters(totalRows), [totalRows]);
   const caseTop =
     totalRows > 0 ? rowCenters[0] + BOOK_HEIGHT / 2 + 0.18 + 0.09 : 3;
@@ -1130,9 +1329,46 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
     totalRows > 0 ? rowCenters[totalRows - 1] - BOOK_HEIGHT / 2 - 0.09 : -3;
   // Books ignore taps that were actually the tail end of a touch pan.
   const dragDist = useRef(0);
+  // Real pointer drag-to-move state, shared across every BookMesh + CameraRig.
+  const draggingUuid = useRef<string | null>(null);
+  const dragPointerId = useRef<number | null>(null);
+  const dragWorldPos = useRef(new THREE.Vector3());
+  const dragShift = useRef<{ uuids: Set<string>; amount: number } | null>(
+    null
+  );
   const bookByUuid = useMemo(
     () => new Map(books.map((b) => [b.uuid, b])),
     [books]
+  );
+  // Books sitting on a public (seeded-collection) shelf are locked in place,
+  // even when the viewer happens to own them.
+  const publicShelfUuids = useMemo(
+    () =>
+      new Set(
+        layout.bays
+          .filter((bay) => bay.isPublic)
+          .flatMap((bay) => bay.bookUuids)
+      ),
+    [layout]
+  );
+
+  const handleDragEnd = useCallback(
+    (bookUuid: string, candidate: DropTarget | null) => {
+      if (!candidate || !onMoveBook) return;
+      const bay = layout.bays.find(
+        (b) => b.rowCoord === candidate.rowCoord && b.colCoord === candidate.colCoord
+      );
+      onMoveBook(
+        bookUuid,
+        {
+          slotId: bay?.shelfSlotId ?? null,
+          row: candidate.rowCoord,
+          col: candidate.colCoord,
+        },
+        candidate.insertIndex
+      );
+    },
+    [layout, onMoveBook]
   );
 
   const selectedBook = selectedUuid
@@ -1229,6 +1465,17 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
               onArtReady={handleArtReady}
               processingProgress={processingProgress}
               dragDist={dragDist}
+              draggable={
+                currentUserId != null &&
+                book.user_id === currentUserId &&
+                !publicShelfUuids.has(book.uuid)
+              }
+              layout={layout}
+              draggingUuid={draggingUuid}
+              dragPointerId={dragPointerId}
+              dragWorldPos={dragWorldPos}
+              dragShift={dragShift}
+              onDragEnd={handleDragEnd}
             />
           );
         })}
@@ -1256,6 +1503,7 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
           caseTop={caseTop}
           caseBottom={caseBottom}
           dragDist={dragDist}
+          dragPointerId={dragPointerId}
         />
       </Canvas>
 

@@ -3,7 +3,10 @@ import {
   BAY_INNER,
   DEFAULT_SPINE_RATIO,
   DIVIDER_T,
+  ROW_HEIGHT,
   layoutBooks,
+  resolveDropTarget,
+  rowYCenters,
 } from '../../src/components/shelf3d/layout';
 
 const ratios = new Map<string, number>();
@@ -313,5 +316,176 @@ describe('layoutBooks', () => {
         }),
       ])
     );
+  });
+});
+
+describe('resolveDropTarget', () => {
+  function crowdedBayLayout() {
+    const books = [
+      { uuid: 'b0', user_id: 1, shelf_id: 'main', shelf_row: 0, shelf_col: 0, shelf_position: 0 },
+      { uuid: 'b1', user_id: 1, shelf_id: 'main', shelf_row: 0, shelf_col: 0, shelf_position: 1 },
+      { uuid: 'b2', user_id: 1, shelf_id: 'main', shelf_row: 0, shelf_col: 0, shelf_position: 2 },
+      { uuid: 'other-row', user_id: 1, shelf_id: 'main', shelf_row: 1, shelf_col: 0, shelf_position: 0 },
+    ];
+    return layoutBooks(books, ratios);
+  }
+
+  function yFor(layout: ReturnType<typeof layoutBooks>, row: number) {
+    return rowYCenters(layout.totalRows)[row + 1];
+  }
+
+  it('resolves insertIndex before, between, and after existing books', () => {
+    const layout = crowdedBayLayout();
+    const byUuid = new Map(layout.placements.map((p) => [p.uuid, p]));
+    const [b0, b1, b2] = ['b0', 'b1', 'b2'].map((u) => byUuid.get(u)!);
+    const y = yFor(layout, 0);
+
+    const before = resolveDropTarget(b0.x - 1, y, layout, 'dragged');
+    expect(before?.insertIndex).toBe(0);
+
+    const between = resolveDropTarget((b0.x + b1.x) / 2, y, layout, 'dragged');
+    expect(between?.insertIndex).toBe(1);
+
+    const after = resolveDropTarget(b2.x + 1, y, layout, 'dragged');
+    expect(after?.insertIndex).toBe(3);
+  });
+
+  it('excludes the dragged book itself from insertIndex counting', () => {
+    const layout = crowdedBayLayout();
+    const byUuid = new Map(layout.placements.map((p) => [p.uuid, p]));
+    const y = yFor(layout, 0);
+
+    // Dropped near b2's own position while dragging b0: only b1 and b2
+    // remain as siblings, both left of the drop point.
+    const result = resolveDropTarget(byUuid.get('b2')!.x + 1, y, layout, 'b0');
+    expect(result?.insertIndex).toBe(2);
+  });
+
+  it('resolves insertIndex 0 in an empty bay', () => {
+    const layout = layoutBooks([], ratios, BAY_INNER, 4, [
+      { id: 1, shelf_id: 'main', row: 0, col: 5, sort_order: 0, label: null },
+    ]);
+    const result = resolveDropTarget(0, yFor(layout, 0), layout, 'dragged');
+    expect(result).toEqual(
+      expect.objectContaining({ rowCoord: 0, colCoord: 5, insertIndex: 0 })
+    );
+  });
+
+  it('returns null when dropped off the wall entirely', () => {
+    const layout = crowdedBayLayout();
+    const farY = yFor(layout, 0) + layout.totalRows * ROW_HEIGHT * 5;
+    expect(resolveDropTarget(0, farY, layout, 'dragged')).toBeNull();
+
+    const pitch = BAY_INNER + DIVIDER_T;
+    const farX = layout.totalCols * pitch * 5;
+    expect(resolveDropTarget(farX, yFor(layout, 0), layout, 'dragged')).toBeNull();
+  });
+
+  it('resolves a point in the divider gap to a real, non-null bay', () => {
+    const layout = crowdedBayLayout();
+    const pitch = BAY_INNER + DIVIDER_T;
+    // Halfway between col=0's bay center and its neighboring bay center —
+    // squarely in the divider strip between them, not any book's own x.
+    const result = resolveDropTarget(pitch / 2, yFor(layout, 0), layout, 'dragged');
+    expect(result).not.toBeNull();
+  });
+
+  it('resolves a different row when dropped there', () => {
+    const layout = crowdedBayLayout();
+    const result = resolveDropTarget(0, yFor(layout, 1), layout, 'dragged');
+    expect(result?.rowCoord).toBe(1);
+  });
+
+  it('round-trips every placed book back to its own bay', () => {
+    const layout = crowdedBayLayout();
+    for (const placement of layout.placements) {
+      const bay = layout.bays.find((b) => b.bookUuids.includes(placement.uuid));
+      expect(bay).toBeTruthy();
+      const y = rowYCenters(layout.totalRows)[placement.row + 1];
+      // 'other-row' is a real placed book (row 1), so capacity math treats
+      // this as a cross-bay probe with a known dragged width.
+      const result = resolveDropTarget(placement.x, y, layout, 'other-row');
+      expect(result?.rowCoord).toBe(bay!.rowCoord);
+      expect(result?.colCoord).toBe(bay!.colCoord);
+    }
+  });
+
+  it('rejects a cross-bay drop into a bay with no room left', () => {
+    // 30 default-width spines overflow a single bay well past BAY_INNER.
+    const books = Array.from({ length: 30 }, (_, i) => ({
+      uuid: `full-${i}`,
+      user_id: 1,
+      shelf_id: 'main',
+      shelf_row: 0,
+      shelf_col: 0,
+      shelf_position: i,
+    }));
+    books.push({
+      uuid: 'outsider',
+      user_id: 1,
+      shelf_id: 'main',
+      shelf_row: 1,
+      shelf_col: 0,
+      shelf_position: 0,
+    });
+    const layout = layoutBooks(books, ratios);
+    const fullBay = layout.bays.find(
+      (b) => b.rowCoord === 0 && b.colCoord === 0
+    )!;
+    const y = rowYCenters(layout.totalRows)[fullBay.row + 1];
+    expect(resolveDropTarget(fullBay.x, y, layout, 'outsider')).toBeNull();
+  });
+
+  it('still allows reordering within an over-full bay', () => {
+    const books = Array.from({ length: 30 }, (_, i) => ({
+      uuid: `full-${i}`,
+      user_id: 1,
+      shelf_id: 'main',
+      shelf_row: 0,
+      shelf_col: 0,
+      shelf_position: i,
+    }));
+    const layout = layoutBooks(books, ratios);
+    const bay = layout.bays.find((b) => b.rowCoord === 0 && b.colCoord === 0)!;
+    const y = rowYCenters(layout.totalRows)[bay.row + 1];
+    const result = resolveDropTarget(bay.x, y, layout, 'full-5');
+    expect(result).not.toBeNull();
+  });
+
+  it('rejects drops onto a public shelf slot', () => {
+    const books = [
+      {
+        uuid: 'mine',
+        user_id: 1,
+        shelf_id: 'main',
+        shelf_row: 1,
+        shelf_col: 0,
+        shelf_position: 0,
+      },
+    ];
+    const layout = layoutBooks(books, ratios, BAY_INNER, 4, [
+      { id: 1, shelf_id: 'main', row: 0, col: 0, sort_order: 0, label: 'Gutenberg books', is_public: 1 },
+      { id: 2, shelf_id: 'main', row: 1, col: 0, sort_order: 1, label: null, is_public: 0 },
+    ]);
+    const publicBay = layout.bays.find(
+      (b) => b.rowCoord === 0 && b.colCoord === 0
+    )!;
+    expect(publicBay.isPublic).toBe(true);
+    const y = rowYCenters(layout.totalRows)[publicBay.row + 1];
+    expect(resolveDropTarget(publicBay.x, y, layout, 'mine')).toBeNull();
+
+    // Public shelves also get no upload placeholder.
+    expect(
+      layout.uploadTargets.find((t) => t.rowCoord === 0 && t.colCoord === 0)
+    ).toBeUndefined();
+    expect(
+      layout.uploadTargets.find((t) => t.rowCoord === 1 && t.colCoord === 0)
+    ).toBeDefined();
+
+    const ownBay = layout.bays.find(
+      (b) => b.rowCoord === 1 && b.colCoord === 0
+    )!;
+    const ownY = rowYCenters(layout.totalRows)[ownBay.row + 1];
+    expect(resolveDropTarget(ownBay.x, ownY, layout, 'mine')).not.toBeNull();
   });
 });

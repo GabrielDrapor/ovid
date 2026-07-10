@@ -16,6 +16,7 @@ import {
   insertTranslationRow,
   updateChapterTitle,
   clearTextNodesJson,
+  resolveOrCreateShelfSlot,
 } from './db';
 import { Translator, SimpleKVStore } from '../utils/translator';
 
@@ -97,61 +98,36 @@ export async function handleBookUpload(
       return { row, col };
     };
 
-    const invalidShelfSlotResponse = () =>
-      new Response(JSON.stringify({ error: 'Invalid shelf slot' }), {
+    const invalidShelfSlotResponse = (message = 'Invalid shelf slot') =>
+      new Response(JSON.stringify({ error: message }), {
         status: 400,
         headers: { 'Content-Type': 'application/json' },
       });
 
     const validateShelfTarget = async () => {
-      if (!shelfTarget?.slotId) return null;
-      const slot = await env.DB.prepare(
-        "SELECT id FROM shelf_slots WHERE id = ? AND shelf_id = 'main' LIMIT 1"
-      )
-        .bind(shelfTarget.slotId)
-        .first<{ id: number }>();
-      if (!slot) return invalidShelfSlotResponse();
-      return null;
-    };
-
-    const findShelfSlot = async (row: number, col: number) =>
-      env.DB.prepare(
-        "SELECT id FROM shelf_slots WHERE shelf_id = 'main' AND row = ? AND col = ? LIMIT 1"
-      )
-        .bind(row, col)
-        .first<{ id: number }>();
-
-    const resolveShelfSlotId = async (): Promise<number | null> => {
       if (!shelfTarget) return null;
-      if (shelfTarget.slotId) return shelfTarget.slotId;
-      if (shelfTarget.row === null || shelfTarget.row === undefined)
-        return null;
-      if (shelfTarget.col === null || shelfTarget.col === undefined)
-        return null;
-
-      const existing = await findShelfSlot(shelfTarget.row, shelfTarget.col);
-      if (existing) return existing.id;
-
-      for (let attempt = 0; attempt < 3; attempt++) {
-        const orderRow = await env.DB.prepare(
-          "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_order FROM shelf_slots WHERE shelf_id = 'main'"
-        ).first<{ next_order: number }>();
-        try {
-          await env.DB.prepare(
-            `INSERT INTO shelf_slots (shelf_id, row, col, sort_order, label)
-             VALUES ('main', ?, ?, ?, NULL)`
-          )
-            .bind(shelfTarget.row, shelfTarget.col, orderRow?.next_order ?? 0)
-            .run();
-        } catch {
-          // Another request may have created this coordinate or sort_order.
-        }
-
-        const slot = await findShelfSlot(shelfTarget.row, shelfTarget.col);
-        if (slot) return slot.id;
+      let slot: { id: number; is_public: number } | null = null;
+      if (shelfTarget.slotId) {
+        slot = await env.DB.prepare(
+          "SELECT id, is_public FROM shelf_slots WHERE id = ? AND shelf_id = 'main' LIMIT 1"
+        )
+          .bind(shelfTarget.slotId)
+          .first<{ id: number; is_public: number }>();
+        if (!slot) return invalidShelfSlotResponse();
+      } else if (
+        shelfTarget.row !== null && shelfTarget.row !== undefined &&
+        shelfTarget.col !== null && shelfTarget.col !== undefined
+      ) {
+        slot = await env.DB.prepare(
+          "SELECT id, is_public FROM shelf_slots WHERE shelf_id = 'main' AND row = ? AND col = ? LIMIT 1"
+        )
+          .bind(shelfTarget.row, shelfTarget.col)
+          .first<{ id: number; is_public: number }>();
       }
-
-      throw new Error('Failed to create shelf slot');
+      if (slot?.is_public) {
+        return invalidShelfSlotResponse('Cannot upload to a public shelf');
+      }
+      return null;
     };
 
     if (contentType.includes('application/json')) {
@@ -281,7 +257,7 @@ export async function handleBookUpload(
       )
       .run();
 
-    const shelfSlotId = await resolveShelfSlotId();
+    const shelfSlotId = await resolveOrCreateShelfSlot(env.DB, shelfTarget);
     if (shelfSlotId !== null) {
       const bookRow = await env.DB.prepare(
         'SELECT id FROM books_v2 WHERE uuid = ? LIMIT 1'
