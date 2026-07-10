@@ -3,6 +3,8 @@
  */
 
 export async function getAllBooksV2(db: D1Database, userId?: number) {
+  // shelf_slot_label mirrors getShelfSlots' resolution: global label on
+  // public slots, the requesting user's own label on private slots.
   let query = `SELECT b.id, b.uuid, b.title, b.original_title, b.author, b.language_pair,
               b.book_cover_img_url, b.book_spine_img_url, b.user_id,
               b.status, b.display_order, b.created_at, b.updated_at,
@@ -12,18 +14,19 @@ export async function getAllBooksV2(db: D1Database, userId?: number) {
               ss.row AS shelf_row,
               ss.col AS shelf_col,
               ss.sort_order AS shelf_slot_order,
-              ss.label AS shelf_slot_label
+              CASE WHEN ss.is_public = 1 THEN ss.label ELSE ul.label END AS shelf_slot_label
        FROM books_v2 b
        LEFT JOIN book_shelf_slots bss ON bss.book_id = b.id
        LEFT JOIN shelf_slots ss ON ss.id = bss.slot_id
+       LEFT JOIN user_shelf_slot_labels ul ON ul.slot_id = ss.id AND ul.user_id = ?
        LEFT JOIN book_shelves bs ON bs.book_id = b.id`;
-  
+
   if (userId) {
     query += ` WHERE b.user_id IS NULL OR b.user_id = ?`;
   } else {
     query += ` WHERE b.user_id IS NULL`;
   }
-  
+
   query += ` ORDER BY
     CASE WHEN ss.id IS NOT NULL THEN 0 WHEN bs.shelf_id IS NOT NULL THEN 1 ELSE 2 END ASC,
     COALESCE(ss.shelf_id, bs.shelf_id, CASE WHEN b.user_id IS NULL THEN '00-public' ELSE '90-user' END) ASC,
@@ -31,20 +34,25 @@ export async function getAllBooksV2(db: D1Database, userId?: number) {
     COALESCE(bss.position, bs.position, b.display_order, 0) ASC,
     b.display_order ASC,
     b.created_at ASC`;
-  
+
   const stmt = db.prepare(query);
-  const books = userId ? await stmt.bind(userId).all() : await stmt.all();
+  const books = userId
+    ? await stmt.bind(userId, userId).all()
+    : await stmt.bind(-1).all();
 
   return books.results;
 }
 
-export async function getShelfSlots(db: D1Database, shelfId = 'main') {
+export async function getShelfSlots(db: D1Database, shelfId = 'main', userId?: number | null) {
   const slots = await db.prepare(
-    `SELECT id, shelf_id, row, col, sort_order, label, is_public
-       FROM shelf_slots
-       WHERE shelf_id = ?
-       ORDER BY sort_order ASC, row ASC, col ASC`
-  ).bind(shelfId).all();
+    `SELECT ss.id, ss.shelf_id, ss.row, ss.col, ss.sort_order,
+            CASE WHEN ss.is_public = 1 THEN ss.label ELSE ul.label END AS label,
+            ss.is_public
+       FROM shelf_slots ss
+       LEFT JOIN user_shelf_slot_labels ul ON ul.slot_id = ss.id AND ul.user_id = ?
+      WHERE ss.shelf_id = ?
+      ORDER BY ss.sort_order ASC, ss.row ASC, ss.col ASC`
+  ).bind(userId ?? -1, shelfId).all();
 
   return slots.results;
 }
@@ -250,10 +258,20 @@ export async function updateShelfSlotLabel(
     throw new Error("Forbidden: you can only label shelves holding your own books");
   }
 
+  if (label === null) {
+    await db.prepare(
+      'DELETE FROM user_shelf_slot_labels WHERE user_id = ? AND slot_id = ?'
+    )
+      .bind(userId, slotId)
+      .run();
+    return;
+  }
+
   await db.prepare(
-    'UPDATE shelf_slots SET label = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
+    `INSERT INTO user_shelf_slot_labels (user_id, slot_id, label) VALUES (?, ?, ?)
+     ON CONFLICT(user_id, slot_id) DO UPDATE SET label = excluded.label, updated_at = CURRENT_TIMESTAMP`
   )
-    .bind(label, slotId)
+    .bind(userId, slotId, label)
     .run();
 }
 

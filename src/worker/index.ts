@@ -195,6 +195,30 @@ export default {
         JOIN books_v2 b ON b.id = bss.book_id
         WHERE b.user_id IS NULL
       )`);
+      // Shelf labels on private (non-public) slots become per-user: each
+      // owner sees and edits only their own label, so a signed-out visitor
+      // or another user no longer sees someone else's private shelf labels.
+      await runMigration('create_user_shelf_slot_labels', `CREATE TABLE IF NOT EXISTS user_shelf_slot_labels (
+        user_id INTEGER NOT NULL,
+        slot_id INTEGER NOT NULL,
+        label TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (user_id, slot_id),
+        FOREIGN KEY (slot_id) REFERENCES shelf_slots(id) ON DELETE CASCADE
+      )`);
+      await runMigration('migrate_private_labels_to_users', `INSERT OR IGNORE INTO user_shelf_slot_labels (user_id, slot_id, label)
+        SELECT DISTINCT b.user_id, ss.id, ss.label
+        FROM shelf_slots ss
+        JOIN book_shelf_slots bss ON bss.slot_id = ss.id
+        JOIN books_v2 b ON b.id = bss.book_id
+        WHERE ss.is_public = 0 AND ss.label IS NOT NULL AND ss.label != '' AND b.user_id IS NOT NULL`);
+      // Only clear labels that provably made it into the per-user table: if
+      // the backfill above silently failed (runMigration swallows errors) or
+      // a labeled slot had no owning books to migrate to, the global label
+      // survives untouched instead of being destroyed.
+      await runMigration('clear_private_global_labels', `UPDATE shelf_slots SET label = NULL
+        WHERE is_public = 0 AND id IN (SELECT slot_id FROM user_shelf_slot_labels)`);
       migrationsRan = true;
     }
 
@@ -383,7 +407,8 @@ export default {
         }
 
         if (url.pathname === '/api/shelf-slots' && request.method === 'GET') {
-          const slots = await getShelfSlots(env.DB);
+          const shelfSlotsUser = await getCurrentUser(env.DB, request);
+          const slots = await getShelfSlots(env.DB, 'main', shelfSlotsUser?.id ?? null);
           return new Response(JSON.stringify(slots), {
             headers: { 'Content-Type': 'application/json' },
           });
