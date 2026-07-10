@@ -104,13 +104,21 @@ describe('layoutBooks', () => {
     expect(
       byUuid.get('sherlock')!.x - byUuid.get('sherlock')!.width / 2
     ).toBeCloseTo(sherlockBayCenter - BAY_INNER / 2, 4);
-    expect(layout.slotLabels).toEqual([
-      expect.objectContaining({
-        key: '-1:0:Gutenberg books',
-        text: 'Gutenberg books',
-        row: 0,
-      }),
-    ]);
+    // The labeled bay keeps its text; the other two occupied slotted bays
+    // get empty-text entries (the click-to-add-label affordance).
+    expect(layout.slotLabels).toHaveLength(3);
+    expect(layout.slotLabels).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: '-1:0:Gutenberg books',
+          text: 'Gutenberg books',
+          row: 0,
+          slotId: 3,
+        }),
+        expect.objectContaining({ text: '', slotId: 1 }),
+        expect.objectContaining({ text: '', slotId: 2 }),
+      ])
+    );
     expect(layout.uploadTargets).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -140,6 +148,41 @@ describe('layoutBooks', () => {
     expect(layout.placements[0].width).toBeCloseTo(DEFAULT_SPINE_RATIO, 4);
     expect(left).toBeCloseTo(-BAY_INNER / 2, 4);
     expect(right - left).toBeGreaterThan(BAY_INNER);
+  });
+
+  it('emits label entries only for labeled or occupied slotted bays', () => {
+    const books = [
+      {
+        uuid: 'slotted',
+        user_id: 1,
+        shelf_slot_id: 2,
+        shelf_row: 0,
+        shelf_col: 1,
+        shelf_position: 0,
+      },
+      // No slot of its own — packed into the legacy block, no label entry.
+      { uuid: 'unplaced', user_id: 1, display_order: 0 },
+    ];
+    const layout = layoutBooks(books, ratios, BAY_INNER, 4, [
+      { id: 1, shelf_id: 'main', row: 0, col: 0, sort_order: 0, label: 'Named, empty', is_public: 1 },
+      { id: 2, shelf_id: 'main', row: 0, col: 1, sort_order: 1, label: null, is_public: 0 },
+      { id: 3, shelf_id: 'main', row: 0, col: 2, sort_order: 2, label: null, is_public: 0 },
+    ]);
+
+    // Labeled-but-empty slot keeps its label (public flag carried through);
+    // occupied unlabeled slot gets an empty entry; empty unlabeled slot and
+    // the slotless legacy bay get nothing.
+    expect(layout.slotLabels).toHaveLength(2);
+    expect(layout.slotLabels).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          text: 'Named, empty',
+          slotId: 1,
+          isPublic: true,
+        }),
+        expect.objectContaining({ text: '', slotId: 2, isPublic: false }),
+      ])
+    );
   });
 
   it('creates upload targets for empty physical slots', () => {

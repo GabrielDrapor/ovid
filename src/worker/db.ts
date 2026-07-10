@@ -212,6 +212,51 @@ export async function moveBookToSlot(
   return { shelfSlotId: targetSlotId, position: newPosition };
 }
 
+/**
+ * Set (or clear, with null) a shelf slot's label. Public shelves keep their
+ * curated labels, and an occupied slot can only be relabeled by someone who
+ * owns at least one book on it — anyone signed-in may label an empty slot,
+ * mirroring who may upload into one.
+ */
+export async function updateShelfSlotLabel(
+  db: D1Database,
+  slotId: number,
+  userId: number,
+  label: string | null
+): Promise<void> {
+  const slot = await db.prepare(
+    'SELECT id, is_public FROM shelf_slots WHERE id = ?'
+  )
+    .bind(slotId)
+    .first<{ id: number; is_public: number }>();
+
+  if (!slot) {
+    throw new Error('Slot not found');
+  }
+  if (slot.is_public) {
+    throw new Error('Forbidden: public shelf labels cannot be edited');
+  }
+
+  const occupancy = await db.prepare(
+    `SELECT COUNT(*) AS total,
+            SUM(CASE WHEN b.user_id = ? THEN 1 ELSE 0 END) AS mine
+       FROM book_shelf_slots bss
+       JOIN books_v2 b ON b.id = bss.book_id
+      WHERE bss.slot_id = ?`
+  )
+    .bind(userId, slotId)
+    .first<{ total: number; mine: number | null }>();
+  if ((occupancy?.total ?? 0) > 0 && !occupancy?.mine) {
+    throw new Error("Forbidden: you can only label shelves holding your own books");
+  }
+
+  await db.prepare(
+    'UPDATE shelf_slots SET label = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
+  )
+    .bind(label, slotId)
+    .run();
+}
+
 export async function getBookStatus(db: D1Database, bookUuid: string): Promise<string | null> {
   const book = await db.prepare('SELECT status FROM books_v2 WHERE uuid = ?')
     .bind(bookUuid)
