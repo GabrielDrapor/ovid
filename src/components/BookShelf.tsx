@@ -873,6 +873,35 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
     }
   };
 
+  const handleSaveSlotLabel = async (
+    slotId: number,
+    label: string
+  ): Promise<boolean> => {
+    try {
+      const response = await fetch(`/api/shelf-slot/${slotId}/label`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ label }),
+      });
+      if (!response.ok) {
+        const data = (await response.json()) as { error?: string };
+        throw new Error(data.error || 'Failed to save label');
+      }
+      // Optimistic: the slots list drives label rendering; books also carry a
+      // stale shelf_slot_label, so refetch to keep a cleared label cleared.
+      setShelfSlots((prev) =>
+        prev.map((s) =>
+          s.id === slotId ? { ...s, label: label.trim() || null } : s
+        )
+      );
+      await fetchBooks();
+      return true;
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to save label');
+      return false;
+    }
+  };
+
   const handleMoveBook = async (
     bookUuid: string,
     target: ShelfMoveTarget,
@@ -1111,6 +1140,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                     onDelete={handleDeleteBook}
                     onUploadToSlot={user ? openUploadModal : undefined}
                     onMoveBook={user ? handleMoveBook : undefined}
+                    onSaveSlotLabel={user ? handleSaveSlotLabel : undefined}
                   />
                 </Suspense>
               )}

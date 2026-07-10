@@ -65,6 +65,8 @@ interface BookShelf3DProps {
     target: ShelfMoveTarget,
     insertIndex: number
   ) => void;
+  /** Persist a slot label edit; resolve true on success. */
+  onSaveSlotLabel?: (slotId: number, label: string) => Promise<boolean>;
 }
 
 const DRAG_START_PX_MOUSE = 6;
@@ -230,16 +232,30 @@ function useArtTexture(
 }
 
 function ShelfLabel({
-  text,
-  left,
+  label,
   y,
+  editable,
+  hidden,
+  onEdit,
+  dragDist,
 }: {
-  text: string;
-  left: number;
+  label: PlacedShelfLabel;
   y: number;
+  /** Signed-in user, non-public slot: click to edit / add. */
+  editable: boolean;
+  /** A book is presented — labels stay visible but stop taking clicks. */
+  hidden: boolean;
+  onEdit?: (label: PlacedShelfLabel) => void;
+  dragDist: React.MutableRefObject<number>;
 }) {
-  const label = useMemo(() => {
-    const canvas = makeShelfLabelCanvas(text);
+  const [hovered, setHovered] = useState(false);
+  const materialRef = useRef<THREE.MeshBasicMaterial>(null);
+  const isGhost = !label.text;
+
+  // An unlabeled bay renders as a blank label holder — visibly present (so
+  // the affordance is discoverable) but clearly empty, waiting to be filled.
+  const art = useMemo(() => {
+    const canvas = makeShelfLabelCanvas(label.text);
     const t = new THREE.CanvasTexture(canvas);
     t.colorSpace = THREE.SRGBColorSpace;
     t.anisotropy = 8;
@@ -247,22 +263,83 @@ function ShelfLabel({
       texture: t,
       width: SHELF_LABEL_HEIGHT * (canvas.width / canvas.height),
     };
-  }, [text]);
-  useEffect(() => () => label.texture.dispose(), [label]);
+  }, [label.text]);
+  useEffect(() => () => art.texture.dispose(), [art]);
+
+  useEffect(() => {
+    if (hidden) setHovered(false);
+  }, [hidden]);
+
+  useEffect(() => {
+    if (!editable || hidden) return;
+    document.body.style.cursor = hovered ? 'pointer' : '';
+    return () => {
+      document.body.style.cursor = '';
+    };
+  }, [hovered, editable, hidden]);
+
+  // Blank holders sit at half strength and wake up on hover; filled labels
+  // dim slightly on hover when editable, so the click affordance reads
+  // without extra chrome.
+  useFrame((_, delta) => {
+    const m = materialRef.current;
+    if (!m) return;
+    const target = isGhost ? (hovered ? 1 : 0.5) : hovered && editable ? 0.82 : 1;
+    m.opacity += (target - m.opacity) * (1 - Math.exp(-delta * 10));
+  });
+
+  const handleClick = useCallback(
+    (e: ThreeEvent<MouseEvent>) => {
+      if (!editable || !onEdit) return;
+      e.stopPropagation();
+      // The tail of a touch pan must not open the editor.
+      if (dragDist.current > 12) return;
+      onEdit(label);
+    },
+    [editable, onEdit, label, dragDist]
+  );
 
   return (
-    <mesh
-      position={[left + label.width / 2, y, BOOK_DEPTH / 2 + 0.15]}
-      renderOrder={5}
-    >
-      <planeGeometry args={[label.width, SHELF_LABEL_HEIGHT]} />
-      <meshBasicMaterial
-        map={label.texture}
-        transparent
-        depthWrite={false}
-        toneMapped={false}
-      />
-    </mesh>
+    <group>
+      <mesh
+        position={[label.left + art.width / 2, y, BOOK_DEPTH / 2 + 0.15]}
+        renderOrder={5}
+      >
+        <meshBasicMaterial
+          ref={materialRef}
+          map={art.texture}
+          transparent
+          opacity={isGhost ? 0 : 1}
+          depthWrite={false}
+          toneMapped={false}
+        />
+        <planeGeometry args={[art.width, SHELF_LABEL_HEIGHT]} />
+      </mesh>
+      {/* The hit mesh is removed entirely while a book is presented so a
+          click near a label falls through to onPointerMissed and closes the
+          panel instead of opening the editor. */}
+      {editable && !hidden && (
+        <mesh
+          position={[
+            label.left + art.width / 2,
+            // Extra hit height extends DOWN into the shelf board only —
+            // growing upward would sit in front of the row above's books
+            // and steal clicks off their bottom edges.
+            y - SHELF_LABEL_HEIGHT / 2,
+            BOOK_DEPTH / 2 + 0.16,
+          ]}
+          onClick={handleClick}
+          onPointerOver={(e) => {
+            e.stopPropagation();
+            setHovered(true);
+          }}
+          onPointerOut={() => setHovered(false)}
+        >
+          <planeGeometry args={[art.width * 1.15, SHELF_LABEL_HEIGHT * 2]} />
+          <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+        </mesh>
+      )}
+    </group>
   );
 }
 
@@ -903,10 +980,16 @@ function Bookcase({
   totalRows,
   totalCols,
   slotLabels,
+  onEditLabel,
+  labelsHidden,
+  dragDist,
 }: {
   totalRows: number;
   totalCols: number;
   slotLabels: PlacedShelfLabel[];
+  onEditLabel?: (label: PlacedShelfLabel) => void;
+  labelsHidden: boolean;
+  dragDist: React.MutableRefObject<number>;
 }) {
   const rows = rowYCenters(totalRows);
   const width = totalCols * BAY_PITCH + DIVIDER_T;
@@ -1019,14 +1102,24 @@ function Bookcase({
           <meshStandardMaterial map={boardTex} roughness={0.8} />
         </mesh>
       ))}
-      {slotLabels.map((label) => (
-        <ShelfLabel
-          key={label.key}
-          text={label.text}
-          left={label.left}
-          y={rows[label.row + 1] - BOOK_HEIGHT / 2 - SHELF_LABEL_HEIGHT / 2}
-        />
-      ))}
+      {slotLabels.map((label) => {
+        const editable =
+          !!onEditLabel && !label.isPublic && label.slotId !== null;
+        // Blank holders exist purely as an edit affordance — don't even
+        // mount them (or their canvas textures) for read-only viewers.
+        if (!label.text && !editable) return null;
+        return (
+          <ShelfLabel
+            key={label.key}
+            label={label}
+            y={rows[label.row + 1] - BOOK_HEIGHT / 2 - SHELF_LABEL_HEIGHT / 2}
+            editable={editable}
+            hidden={labelsHidden}
+            onEdit={onEditLabel}
+            dragDist={dragDist}
+          />
+        );
+      })}
       {/* cheap ambient occlusion inside every cavity */}
       {rows.map((y, i) => {
         const ceiling = i === 0 ? topY : rows[i - 1] - BOOK_HEIGHT / 2 - boardT;
@@ -1264,11 +1357,33 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
   onDelete,
   onUploadToSlot,
   onMoveBook,
+  onSaveSlotLabel,
 }) => {
   const [spineRatios, setSpineRatios] = useState<Map<string, number>>(
     new Map()
   );
   const [selectedUuid, setSelectedUuid] = useState<string | null>(null);
+  // Shelf-label editing (click a label / empty label strip to open).
+  const [editingLabel, setEditingLabel] = useState<PlacedShelfLabel | null>(
+    null
+  );
+  const [labelDraft, setLabelDraft] = useState('');
+  const [savingLabel, setSavingLabel] = useState(false);
+
+  const handleEditLabel = useCallback((label: PlacedShelfLabel) => {
+    setLabelDraft(label.text);
+    setEditingLabel(label);
+  }, []);
+
+  const handleSaveLabel = useCallback(async () => {
+    // Explicit null check — the click affordance gates on `slotId !== null`,
+    // and a falsy check here would silently no-op a legitimate id of 0.
+    if (editingLabel?.slotId == null || !onSaveSlotLabel || savingLabel) return;
+    setSavingLabel(true);
+    const ok = await onSaveSlotLabel(editingLabel.slotId, labelDraft.trim());
+    setSavingLabel(false);
+    if (ok) setEditingLabel(null);
+  }, [editingLabel, onSaveSlotLabel, labelDraft, savingLabel]);
 
   // Track how many books with image URLs have finished loading.
   const booksWithUrls = useMemo(
@@ -1390,7 +1505,10 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setSelectedUuid(null);
+      if (e.key === 'Escape') {
+        setSelectedUuid(null);
+        setEditingLabel(null);
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -1446,6 +1564,13 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
             totalRows={totalRows}
             totalCols={totalCols}
             slotLabels={slotLabels}
+            onEditLabel={
+              onSaveSlotLabel && currentUserId != null
+                ? handleEditLabel
+                : undefined
+            }
+            labelsHidden={selectedUuid !== null}
+            dragDist={dragDist}
           />
         )}
 
@@ -1512,6 +1637,45 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
           dragPointerId={dragPointerId}
         />
       </Canvas>
+
+      {editingLabel && (
+        <div
+          className="closet3d-panel closet3d-label-editor"
+          role="dialog"
+          aria-label="Edit shelf label"
+        >
+          <h3>Shelf label</h3>
+          <input
+            type="text"
+            value={labelDraft}
+            maxLength={40}
+            placeholder="e.g. Sci-fi, To read…"
+            autoFocus
+            onChange={(e) => setLabelDraft(e.target.value)}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === 'Enter') handleSaveLabel();
+              if (e.key === 'Escape') setEditingLabel(null);
+            }}
+          />
+          <div className="closet3d-label-editor-actions">
+            <button
+              className="closet3d-read-btn"
+              onClick={handleSaveLabel}
+              disabled={savingLabel}
+            >
+              {savingLabel ? 'Saving…' : 'Save'}
+            </button>
+            <button
+              className="closet3d-label-cancel-btn"
+              onClick={() => setEditingLabel(null)}
+              disabled={savingLabel}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       {!loading && (
         <div

@@ -1,5 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
-import { resolveOrCreateShelfSlot, moveBookToSlot } from '../../../src/worker/db';
+import {
+  resolveOrCreateShelfSlot,
+  moveBookToSlot,
+  updateShelfSlotLabel,
+} from '../../../src/worker/db';
 
 /**
  * A more capable D1 mock than book-handlers.test.ts's shared-statement one:
@@ -14,6 +18,8 @@ function createMockDB(
     siblingsResult?: Record<string, unknown>[];
     sourceSlotResult?: Record<string, unknown> | null;
     targetSlotPublicResult?: Record<string, unknown> | null;
+    slotLabelLookupResult?: Record<string, unknown> | null;
+    labelOccupancyResult?: Record<string, unknown> | null;
   } = {}
 ) {
   const findShelfSlotQueue = [...(opts.findShelfSlotResults ?? [])];
@@ -32,6 +38,12 @@ function createMockDB(
         first: vi.fn(async () => {
           if (sql.includes('FROM shelf_slots WHERE id = ? AND shelf_id = ?')) {
             return opts.slotByIdResult ?? null;
+          }
+          if (sql.includes('SELECT id, is_public FROM shelf_slots WHERE id = ?')) {
+            return opts.slotLabelLookupResult ?? null;
+          }
+          if (sql.includes('COUNT(*) AS total')) {
+            return opts.labelOccupancyResult ?? { total: 0, mine: 0 };
           }
           if (sql.includes('JOIN shelf_slots')) {
             return opts.sourceSlotResult ?? null;
@@ -283,5 +295,64 @@ describe('moveBookToSlot', () => {
       'Forbidden: books cannot be moved onto a public shelf'
     );
     expect(db.batch).not.toHaveBeenCalled();
+  });
+});
+
+describe('updateShelfSlotLabel', () => {
+  it('updates the label on a slot holding the caller\'s books', async () => {
+    const db = createMockDB({
+      slotLabelLookupResult: { id: 7, is_public: 0 },
+      labelOccupancyResult: { total: 3, mine: 3 },
+    });
+    await updateShelfSlotLabel(db, 7, 1, 'Sci-fi corner');
+
+    const update = db.prepare.mock.results
+      .map((r: any) => r.value)
+      .find((s: any) => s._sql.startsWith('UPDATE shelf_slots SET label'));
+    expect(update).toBeTruthy();
+    expect(update._args).toEqual(['Sci-fi corner', 7]);
+  });
+
+  it('clears the label when passed null', async () => {
+    const db = createMockDB({
+      slotLabelLookupResult: { id: 7, is_public: 0 },
+      labelOccupancyResult: { total: 2, mine: 1 },
+    });
+    await updateShelfSlotLabel(db, 7, 1, null);
+
+    const update = db.prepare.mock.results
+      .map((r: any) => r.value)
+      .find((s: any) => s._sql.startsWith('UPDATE shelf_slots SET label'));
+    expect(update._args).toEqual([null, 7]);
+  });
+
+  it('allows labeling an empty slot', async () => {
+    const db = createMockDB({
+      slotLabelLookupResult: { id: 7, is_public: 0 },
+      labelOccupancyResult: { total: 0, mine: 0 },
+    });
+    await expect(updateShelfSlotLabel(db, 7, 1, 'Future reads')).resolves.toBeUndefined();
+  });
+
+  it('throws for a missing slot', async () => {
+    const db = createMockDB({ slotLabelLookupResult: null });
+    await expect(updateShelfSlotLabel(db, 99, 1, 'x')).rejects.toThrow('Slot not found');
+  });
+
+  it('rejects editing a public shelf label', async () => {
+    const db = createMockDB({
+      slotLabelLookupResult: { id: 1, is_public: 1 },
+    });
+    await expect(updateShelfSlotLabel(db, 1, 1, 'mine now')).rejects.toThrow('Forbidden');
+  });
+
+  it("rejects relabeling a slot holding only other users' books", async () => {
+    const db = createMockDB({
+      slotLabelLookupResult: { id: 7, is_public: 0 },
+      labelOccupancyResult: { total: 4, mine: 0 },
+    });
+    await expect(updateShelfSlotLabel(db, 7, 2, 'not yours')).rejects.toThrow(
+      'Forbidden: you can only label shelves holding your own books'
+    );
   });
 });

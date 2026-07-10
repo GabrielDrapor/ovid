@@ -23,6 +23,7 @@ import {
 import {
   getAllBooksV2,
   getShelfSlots,
+  updateShelfSlotLabel,
   getBookChaptersV2,
   getChapterContentV2,
   deleteBookV2,
@@ -386,6 +387,53 @@ export default {
           return new Response(JSON.stringify(slots), {
             headers: { 'Content-Type': 'application/json' },
           });
+        }
+
+        // Edit a shelf slot's label (any signed-in user; public shelves locked)
+        const slotLabelMatch = url.pathname.match(/^\/api\/shelf-slot\/(\d+)\/label$/);
+        if (slotLabelMatch && request.method === 'PUT') {
+          const user = await getCurrentUser(env.DB, request);
+          if (!user) {
+            return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+              status: 401, headers: { 'Content-Type': 'application/json' },
+            });
+          }
+          try {
+            const body = await request.json() as { label?: unknown };
+            if (typeof body.label !== 'string') {
+              return new Response(JSON.stringify({ error: 'Invalid label' }), {
+                status: 400, headers: { 'Content-Type': 'application/json' },
+              });
+            }
+            const trimmed = body.label.trim();
+            if (trimmed.length > 60) {
+              return new Response(JSON.stringify({ error: 'Invalid label' }), {
+                status: 400, headers: { 'Content-Type': 'application/json' },
+              });
+            }
+            await updateShelfSlotLabel(
+              env.DB,
+              Number(slotLabelMatch[1]),
+              user.id,
+              trimmed === '' ? null : trimmed
+            );
+            return new Response(
+              JSON.stringify({ success: true, label: trimmed || null }),
+              { headers: { 'Content-Type': 'application/json' } }
+            );
+          } catch (e: any) {
+            if (e.message?.includes('Forbidden')) {
+              return new Response(JSON.stringify({ error: 'Forbidden' }), {
+                status: 403, headers: { 'Content-Type': 'application/json' },
+              });
+            }
+            if (e.message === 'Slot not found') {
+              return new Response(JSON.stringify({ error: 'Slot not found' }), {
+                status: 404, headers: { 'Content-Type': 'application/json' },
+              });
+            }
+            throw e;
+          }
         }
 
         // Translate next chunk (frontend-driven chunked translation)

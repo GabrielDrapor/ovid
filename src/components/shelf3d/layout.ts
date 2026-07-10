@@ -48,11 +48,16 @@ export interface PlacedBook {
 
 export interface PlacedShelfLabel {
   key: string;
+  /** Empty string = unlabeled bay; renders as an edit affordance only. */
   text: string;
   /** Left edge of the label plane in wall coordinates. */
   left: number;
   /** Content row index, 0 = top content row (the empty ring is excluded). */
   row: number;
+  /** Slot the label writes to; null for bays with no persisted slot row. */
+  slotId: number | null;
+  /** Public shelves keep their labels; they just can't be edited. */
+  isPublic: boolean;
 }
 
 export interface PlacedUploadTarget {
@@ -424,13 +429,20 @@ function layoutPhysicalSlots(
       run.books
         .map((book) => book.shelf_slot_label?.trim())
         .find((label): label is string => !!label);
+    const runSlotId = Number.isFinite(run.slotId) ? Number(run.slotId) : null;
 
-    if (labelText) {
+    // Labeled bays always show their label. Unlabeled-but-occupied bays with
+    // a persisted slot get an empty entry too — it renders as the click-to-
+    // add-label affordance. Slotless (legacy-packed) bays get nothing: there
+    // is no shelf_slots row for a label to live on.
+    if (labelText || (runSlotId !== null && run.books.length > 0)) {
       slotLabels.push({
-        key: `${run.rowCoord}:${run.colCoord}:${labelText}`,
-        text: labelText,
+        key: `${run.rowCoord}:${run.colCoord}:${labelText ?? ''}`,
+        text: labelText ?? '',
         left: bayLeft + 0.08,
         row,
+        slotId: runSlotId,
+        isPublic: !!run.isPublic,
       });
     }
 
