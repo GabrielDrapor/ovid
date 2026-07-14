@@ -8,6 +8,7 @@ import React, {
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { Canvas, useFrame, useThree, ThreeEvent } from '@react-three/fiber';
+import { useI18n } from '../../i18n';
 import {
   Book,
   ShelfMoveTarget,
@@ -81,15 +82,6 @@ function isBookImportPending(book: Book): boolean {
 
 const ROOM = '#171210';
 const CLOTH_FALLBACK = '#3a3026';
-
-// Shown under the loading spinner — the shelf-keeper tidying up before
-// opening the doors. One is picked at random per visit.
-const LOADING_QUIPS = [
-  'Sweeping the dust off the shelves…',
-  'Straightening the spines…',
-  'Lighting the reading lamp…',
-  'Waking the librarian…',
-];
 
 const MIN_ZOOM = 2.5;
 const SHELF_LABEL_HEIGHT = 0.084;
@@ -284,7 +276,13 @@ function ShelfLabel({
   useFrame((_, delta) => {
     const m = materialRef.current;
     if (!m) return;
-    const target = isGhost ? (hovered ? 1 : 0.5) : hovered && editable ? 0.82 : 1;
+    const target = isGhost
+      ? hovered
+        ? 1
+        : 0.5
+      : hovered && editable
+        ? 0.82
+        : 1;
     m.opacity += (target - m.opacity) * (1 - Math.exp(-delta * 10));
   });
 
@@ -1359,6 +1357,7 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
   onMoveBook,
   onSaveSlotLabel,
 }) => {
+  const { t } = useI18n();
   const [spineRatios, setSpineRatios] = useState<Map<string, number>>(
     new Map()
   );
@@ -1407,9 +1406,10 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
   const [revealed, setRevealed] = useState(false);
   // One quip per visit, shared by the fetch screen and the art veil so the
   // two loading phases read as a single moment.
+  const quips = t.closet.loadingQuips;
   const quip = useMemo(
-    () => LOADING_QUIPS[Math.floor(Math.random() * LOADING_QUIPS.length)],
-    []
+    () => quips[Math.floor(Math.random() * quips.length)],
+    [quips]
   );
   useEffect(() => {
     if (revealed || loading) return;
@@ -1457,9 +1457,7 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
   const draggingUuid = useRef<string | null>(null);
   const dragPointerId = useRef<number | null>(null);
   const dragWorldPos = useRef(new THREE.Vector3());
-  const dragShift = useRef<{ uuids: Set<string>; amount: number } | null>(
-    null
-  );
+  const dragShift = useRef<{ uuids: Set<string>; amount: number } | null>(null);
   const bookByUuid = useMemo(
     () => new Map(books.map((b) => [b.uuid, b])),
     [books]
@@ -1646,18 +1644,18 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
         <div
           className="closet3d-label-slip"
           role="dialog"
-          aria-label="Edit shelf label"
+          aria-label={t.closet.editShelfLabel}
         >
           <div className="closet3d-label-form-no">
-            Form 3 <small>· Shelf Label</small>
+            {t.closet.formLabelNo} <small>· {t.closet.formLabelKind}</small>
           </div>
-          <div className="closet3d-label-print">label</div>
+          <div className="closet3d-label-print">{t.closet.labelField}</div>
           <input
             type="text"
             className="closet3d-label-input"
             value={labelDraft}
             maxLength={40}
-            placeholder="e.g. Sci-fi, To read…"
+            placeholder={t.closet.labelPlaceholder}
             autoFocus
             onChange={(e) => setLabelDraft(e.target.value)}
             onKeyDown={(e) => {
@@ -1668,7 +1666,7 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
           />
           <div className="closet3d-label-gap" />
           <div className="closet3d-label-print closet3d-label-hint">
-            this slip clips onto the shelf edge
+            {t.closet.labelHint}
           </div>
           <div className="closet3d-label-editor-actions">
             <button
@@ -1676,14 +1674,14 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
               onClick={handleSaveLabel}
               disabled={savingLabel}
             >
-              {savingLabel ? 'Saving…' : 'Save'}
+              {savingLabel ? t.common.saving : t.common.save}
             </button>
             <button
               className="closet3d-label-cancel-btn"
               onClick={() => setEditingLabel(null)}
               disabled={savingLabel}
             >
-              Cancel
+              {t.common.cancel}
             </button>
           </div>
           <div className="closet3d-label-hole" />
@@ -1714,20 +1712,20 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
         >
           <button
             className="closet3d-panel-close"
-            aria-label="Close"
+            aria-label={t.common.close}
             onClick={() => setSelectedUuid(null)}
           >
             ×
           </button>
-          <div className="closet3d-panel-heading">Book Info</div>
-          <div className="closet3d-panel-print">title</div>
+          <div className="closet3d-panel-heading">{t.closet.bookInfo}</div>
+          <div className="closet3d-panel-print">{t.closet.titleField}</div>
           <h2>{selectedBook.original_title || selectedBook.title}</h2>
           {selectedBook.original_title &&
             selectedBook.title !== selectedBook.original_title && (
               <h3>{selectedBook.title}</h3>
             )}
           <div className="closet3d-panel-row">
-            <span className="closet3d-panel-print">author</span>
+            <span className="closet3d-panel-print">{t.closet.authorField}</span>
             <span className="closet3d-panel-entry">{selectedBook.author}</span>
           </div>
           <div className="closet3d-panel-line-gap" />
@@ -1743,9 +1741,14 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
                   return (
                     <>
                       <div className="closet3d-panel-row">
-                        <span className="closet3d-panel-print">status</span>
+                        <span className="closet3d-panel-print">
+                          {t.closet.statusField}
+                        </span>
                         <span className="closet3d-panel-entry closet3d-panel-num">
-                          Translating… {tp.chaptersCompleted}/{tp.chaptersTotal}
+                          {t.closet.translatingCount(
+                            tp.chaptersCompleted,
+                            tp.chaptersTotal
+                          )}
                         </span>
                       </div>
                       <div className="closet3d-progress-bar">
@@ -1756,14 +1759,16 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
                 }
                 return (
                   <div className="closet3d-panel-row">
-                    <span className="closet3d-panel-print">status</span>
+                    <span className="closet3d-panel-print">
+                      {t.closet.statusField}
+                    </span>
                     <span className="closet3d-panel-entry">
                       {tp?.phase === 'glossary'
-                        ? 'Extracting glossary…'
+                        ? t.closet.extractingGlossary
                         : selectedBook.status === 'processing' &&
                             !selectedBook.language_pair?.endsWith('-none')
-                          ? 'Translating…'
-                          : 'Preparing cover and spine…'}
+                          ? t.closet.translating
+                          : t.closet.preparingArtwork}
                     </span>
                   </div>
                 );
@@ -1771,9 +1776,11 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
             </div>
           ) : selectedFailed ? (
             <div className="closet3d-panel-row">
-              <span className="closet3d-panel-print">status</span>
+              <span className="closet3d-panel-print">
+                {t.closet.statusField}
+              </span>
               <span className="closet3d-panel-entry closet3d-panel-red">
-                Translation failed
+                {t.shelf.translationFailed}
               </span>
             </div>
           ) : (
@@ -1786,12 +1793,18 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
               return (
                 <div className="closet3d-progress">
                   <div className="closet3d-panel-row">
-                    <span className="closet3d-panel-print">progress</span>
+                    <span className="closet3d-panel-print">
+                      {t.closet.progressField}
+                    </span>
                     {progress?.is_completed ? (
-                      <span className="closet3d-stamp-done">Completed</span>
+                      <span className="closet3d-stamp-done">
+                        {t.closet.completedStamp}
+                      </span>
                     ) : (
                       <span className="closet3d-panel-entry closet3d-panel-num">
-                        {pct > 0 ? `${pct}% read` : 'Not started'}
+                        {pct > 0
+                          ? t.shelf.percentRead(pct)
+                          : t.shelf.notStarted}
                       </span>
                     )}
                   </div>
@@ -1810,7 +1823,7 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
                   className="closet3d-read-btn"
                   onClick={() => onRead(selectedBook.uuid)}
                 >
-                  Read
+                  {t.common.read}
                 </button>
               )}
               {selectedBook.user_id && (
@@ -1818,7 +1831,7 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
                   className="closet3d-remove-btn"
                   onClick={() => onDelete(selectedBook.uuid)}
                 >
-                  Remove
+                  {t.common.remove}
                 </button>
               )}
             </div>

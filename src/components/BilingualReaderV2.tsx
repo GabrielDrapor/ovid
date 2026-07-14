@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { getMessages, useI18n } from '../i18n';
 import './BilingualReader.css';
 
 interface Chapter {
@@ -38,8 +39,8 @@ interface BilingualReaderV2Props {
   onShare?: () => Promise<void>;
   onRevokeShare?: () => Promise<void>;
   // Granular progress tracking
-  initialXpath?: string;  // XPath to scroll to on initial load
-  onProgressChange?: (xpath: string, chapterFraction: number) => void;  // Called when visible element changes; chapterFraction is 0–1
+  initialXpath?: string; // XPath to scroll to on initial load
+  onProgressChange?: (xpath: string, chapterFraction: number) => void; // Called when visible element changes; chapterFraction is 0–1
   // Show translation / show original toggle persistence
   initialShowOriginal?: boolean;
   onShowOriginalChange?: (showOriginal: boolean) => void;
@@ -55,27 +56,24 @@ interface BilingualReaderV2Props {
  * single titlepage rule would otherwise center every paragraph in the book.
  */
 function scopeEpubStyles(css: string): string {
-  return css.replace(
-    /([^{}@]+)\{/g,
-    (match, selectors: string) => {
-      // Don't scope @-rules (media queries, keyframes, etc.)
-      if (selectors.trim().startsWith('@')) return match;
-      const scoped = selectors
-        .split(',')
-        .map((s: string) => {
-          s = s.trim();
-          if (!s) return null;
-          if (/^(body|html)$/i.test(s)) return null;
-          return `.epub-content ${s}`;
-        })
-        .filter((s): s is string => s !== null)
-        .join(', ');
-      // If every selector was dropped, neutralize the rule with a no-match
-      // selector so the declaration block is still syntactically valid.
-      if (!scoped) return '.epub-content :not(*) {';
-      return `${scoped} {`;
-    }
-  );
+  return css.replace(/([^{}@]+)\{/g, (match, selectors: string) => {
+    // Don't scope @-rules (media queries, keyframes, etc.)
+    if (selectors.trim().startsWith('@')) return match;
+    const scoped = selectors
+      .split(',')
+      .map((s: string) => {
+        s = s.trim();
+        if (!s) return null;
+        if (/^(body|html)$/i.test(s)) return null;
+        return `.epub-content ${s}`;
+      })
+      .filter((s): s is string => s !== null)
+      .join(', ');
+    // If every selector was dropped, neutralize the rule with a no-match
+    // selector so the declaration block is still syntactically valid.
+    if (!scoped) return '.epub-content :not(*) {';
+    return `${scoped} {`;
+  });
 }
 
 export const TYPOGRAPHY_KEY = 'ovid_typography';
@@ -118,35 +116,75 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
   initialShowOriginal,
   onShowOriginalChange,
 }) => {
+  const { t, locale } = useI18n();
   const contentRef = useRef<HTMLDivElement>(null);
   const [showOriginal, setShowOriginal] = useState(initialShowOriginal ?? true);
   const showOriginalRef = useRef(showOriginal);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isChaptersOpen, setIsChaptersOpen] = useState(false);
   const [typographyDefaults] = useState(loadTypographyDefaults);
-  const [paragraphSpacing, setParagraphSpacing] = useState(typographyDefaults.paragraphSpacing ?? 0);
-  const [lineHeight, setLineHeight] = useState(typographyDefaults.lineHeight ?? 1.6);
-  const [letterSpacing, setLetterSpacing] = useState(typographyDefaults.letterSpacing ?? -0.03);
-  const [wordSpacing, setWordSpacing] = useState(typographyDefaults.wordSpacing ?? 0);
-  const [fontWeight, setFontWeight] = useState(typographyDefaults.fontWeight ?? 450);
+  const [paragraphSpacing, setParagraphSpacing] = useState(
+    typographyDefaults.paragraphSpacing ?? 0
+  );
+  const [lineHeight, setLineHeight] = useState(
+    typographyDefaults.lineHeight ?? 1.6
+  );
+  const [letterSpacing, setLetterSpacing] = useState(
+    typographyDefaults.letterSpacing ?? -0.03
+  );
+  const [wordSpacing, setWordSpacing] = useState(
+    typographyDefaults.wordSpacing ?? 0
+  );
+  const [fontWeight, setFontWeight] = useState(
+    typographyDefaults.fontWeight ?? 450
+  );
   const [fontSize, setFontSize] = useState(typographyDefaults.fontSize ?? 19);
   const [isMarkingComplete, setIsMarkingComplete] = useState(false);
-  const [markCompleteError, setMarkCompleteError] = useState<string | null>(null);
+  const [markCompleteError, setMarkCompleteError] = useState<string | null>(
+    null
+  );
   const [isTypographyOpen, setIsTypographyOpen] = useState(false);
   const [isSharing, setIsSharing] = useState(false);
 
   useEffect(() => {
     try {
-      localStorage.setItem(TYPOGRAPHY_KEY, JSON.stringify({ paragraphSpacing, lineHeight, letterSpacing, wordSpacing, fontWeight, fontSize }));
+      localStorage.setItem(
+        TYPOGRAPHY_KEY,
+        JSON.stringify({
+          paragraphSpacing,
+          lineHeight,
+          letterSpacing,
+          wordSpacing,
+          fontWeight,
+          fontSize,
+        })
+      );
     } catch {}
-  }, [paragraphSpacing, lineHeight, letterSpacing, wordSpacing, fontWeight, fontSize]);
+  }, [
+    paragraphSpacing,
+    lineHeight,
+    letterSpacing,
+    wordSpacing,
+    fontWeight,
+    fontSize,
+  ]);
   const [shareCopied, setShareCopied] = useState(false);
   const [showOnboardingTooltip, setShowOnboardingTooltip] = useState(false);
 
   // Store element references for toggling
   // originalHtml preserves formatting (innerHTML), translated is plain text
   // showingOriginal tracks the current state to avoid innerHTML comparison issues
-  const elementsRef = useRef<Map<string, { element: HTMLElement; originalHtml: string; translated: string; showingOriginal: boolean }>>(new Map());
+  const elementsRef = useRef<
+    Map<
+      string,
+      {
+        element: HTMLElement;
+        originalHtml: string;
+        translated: string;
+        showingOriginal: boolean;
+      }
+    >
+  >(new Map());
 
   // Track the topmost visible element for progress saving
   const visibleXpathRef = useRef<string | undefined>(undefined);
@@ -179,13 +217,32 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
 
     // Block-level elements we're tracking
     const blockTags = new Set([
-      'p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
-      'li', 'blockquote', 'pre', 'td', 'th', 'dt', 'dd',
-      'figcaption', 'article', 'section', 'aside', 'header', 'footer'
+      'p',
+      'div',
+      'h1',
+      'h2',
+      'h3',
+      'h4',
+      'h5',
+      'h6',
+      'li',
+      'blockquote',
+      'pre',
+      'td',
+      'th',
+      'dt',
+      'dd',
+      'figcaption',
+      'article',
+      'section',
+      'aside',
+      'header',
+      'footer',
     ]);
 
     // First, try to match by data-xpath attribute (for fallback reconstructed HTML)
-    const elementsWithXpath = contentRef.current.querySelectorAll('[data-xpath]');
+    const elementsWithXpath =
+      contentRef.current.querySelectorAll('[data-xpath]');
     if (elementsWithXpath.length > 0) {
       elementsWithXpath.forEach((el) => {
         const xpath = el.getAttribute('data-xpath');
@@ -370,9 +427,27 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
     elementsRef.current.clear();
 
     const blockTags = new Set([
-      'p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
-      'li', 'blockquote', 'pre', 'td', 'th', 'dt', 'dd',
-      'figcaption', 'article', 'section', 'aside', 'header', 'footer'
+      'p',
+      'div',
+      'h1',
+      'h2',
+      'h3',
+      'h4',
+      'h5',
+      'h6',
+      'li',
+      'blockquote',
+      'pre',
+      'td',
+      'th',
+      'dt',
+      'dd',
+      'figcaption',
+      'article',
+      'section',
+      'aside',
+      'header',
+      'footer',
     ]);
 
     const hasBlockDescendant = (el: Element): boolean => {
@@ -519,10 +594,11 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
 
           // Compute chapter fraction: position of this element among all tracked elements
           const totalElements = elementsRef.current.size;
-          const elementIndex = Array.from(elementsRef.current.keys()).indexOf(topmostXpath);
-          const chapterFraction = totalElements > 1
-            ? elementIndex / (totalElements - 1)
-            : 0;
+          const elementIndex = Array.from(elementsRef.current.keys()).indexOf(
+            topmostXpath
+          );
+          const chapterFraction =
+            totalElements > 1 ? elementIndex / (totalElements - 1) : 0;
 
           // Debounced callback - wait 1s of stability before reporting
           if (progressTimerRef.current) {
@@ -531,7 +607,10 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
           const capturedFraction = chapterFraction;
           progressTimerRef.current = setTimeout(() => {
             if (progressCallbackRef.current && visibleXpathRef.current) {
-              progressCallbackRef.current(visibleXpathRef.current, capturedFraction);
+              progressCallbackRef.current(
+                visibleXpathRef.current,
+                capturedFraction
+              );
             }
           }, 1000);
         }
@@ -557,7 +636,10 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
   }, [translationsReady]);
 
   // Show onboarding tooltip for first-time users, positioned near first paragraph
-  const [tooltipPos, setTooltipPos] = useState<{ top: number; right: number } | null>(null);
+  const [tooltipPos, setTooltipPos] = useState<{
+    top: number;
+    right: number;
+  } | null>(null);
   useEffect(() => {
     if (!translationsReady || elementsRef.current.size === 0) return;
     const seen = localStorage.getItem('ovid_onboarding_seen');
@@ -589,7 +671,10 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
     if (!showOnboardingTooltip) return;
     const handler = () => dismissOnboarding();
     // Delay attaching so the current click doesn't immediately dismiss
-    const timer = setTimeout(() => document.addEventListener('click', handler), 100);
+    const timer = setTimeout(
+      () => document.addEventListener('click', handler),
+      100
+    );
     return () => {
       clearTimeout(timer);
       document.removeEventListener('click', handler);
@@ -598,7 +683,8 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
 
   // Scroll to initial xpath after translations are applied
   useEffect(() => {
-    if (!translationsReady || !initialXpath || elementsRef.current.size === 0) return;
+    if (!translationsReady || !initialXpath || elementsRef.current.size === 0)
+      return;
 
     const data = elementsRef.current.get(initialXpath);
     if (!data?.element) return;
@@ -617,7 +703,10 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
         doScroll();
       }
     }, 1000);
-    return () => { clearTimeout(t1); clearTimeout(t2); };
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
   }, [translationsReady, initialXpath]);
 
   const toggleMenu = () => setIsMenuOpen(!isMenuOpen);
@@ -661,9 +750,13 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
     (chapterNumber: number) => {
       const run = () => onLoadChapter(chapterNumber);
       const doc = document as Document & {
-        startViewTransition?: (cb: () => void | Promise<void>) => { finished: Promise<void> };
+        startViewTransition?: (cb: () => void | Promise<void>) => {
+          finished: Promise<void>;
+        };
       };
-      const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const reduced = window.matchMedia(
+        '(prefers-reduced-motion: reduce)'
+      ).matches;
       if (typeof doc.startViewTransition !== 'function' || reduced) {
         run();
         return;
@@ -716,7 +809,13 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [goToPreviousChapter, goToNextChapter, isMenuOpen, isChaptersOpen, isTypographyOpen]);
+  }, [
+    goToPreviousChapter,
+    goToNextChapter,
+    isMenuOpen,
+    isChaptersOpen,
+    isTypographyOpen,
+  ]);
 
   // iOS Safari standalone PWA: position:fixed anchors to the layout viewport, so when the
   // visual viewport shifts during scroll (toolbar show/hide, rubber-band overscroll) the FAB
@@ -726,7 +825,10 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
     if (!vv) return;
     const update = () => {
       const offset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
-      document.documentElement.style.setProperty('--fab-vv-offset', `${offset}px`);
+      document.documentElement.style.setProperty(
+        '--fab-vv-offset',
+        `${offset}px`
+      );
     };
     update();
     vv.addEventListener('resize', update);
@@ -740,10 +842,14 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
   return (
     <div className="bilingual-reader">
       {/* Inject EPUB CSS styles — scoped to .epub-content to prevent leaking */}
-      {styles && <style dangerouslySetInnerHTML={{ __html: scopeEpubStyles(styles) }} />}
+      {styles && (
+        <style dangerouslySetInnerHTML={{ __html: scopeEpubStyles(styles) }} />
+      )}
 
       {/* Custom styles for V2 reader */}
-      <style dangerouslySetInnerHTML={{ __html: `
+      <style
+        dangerouslySetInnerHTML={{
+          __html: `
         .reader-content-v2,
         .reader-content-v2 * {
           font-family: "LXGW Neo ZhiSong Screen", "Literata", "New York", ui-serif, "Times New Roman", Times, serif !important;
@@ -825,7 +931,9 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
             animation-delay: 0s;
           }
         }
-      `}} />
+      `,
+        }}
+      />
 
       <main
         className="reader-content reader-content-v2"
@@ -839,7 +947,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
       >
         {isLoading && (
           <div style={{ textAlign: 'center', padding: '20px', color: '#666' }}>
-            Loading chapter...
+            {t.reader.loadingChapter}
           </div>
         )}
 
@@ -849,7 +957,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
             <button
               className="nav-button prev-button"
               onClick={goToPreviousChapter}
-              title="Previous Chapter"
+              title={t.reader.prevChapter}
             >
               ↶
             </button>
@@ -870,17 +978,23 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
           <div
             className="onboarding-tooltip"
             onClick={dismissOnboarding}
-            style={tooltipPos ? {
-              position: 'absolute',
-              top: tooltipPos.top,
-              right: tooltipPos.right,
-              left: 'auto',
-              transform: 'translateY(-50%)',
-            } : undefined}
+            style={
+              tooltipPos
+                ? {
+                    position: 'absolute',
+                    top: tooltipPos.top,
+                    right: tooltipPos.right,
+                    left: 'auto',
+                    transform: 'translateY(-50%)',
+                  }
+                : undefined
+            }
           >
             <div className="onboarding-tooltip-arrow" />
-            <span>点击段落切换翻译</span>
-            <span className="onboarding-tooltip-en">Tap to toggle translation</span>
+            <span>{t.reader.tapToToggle}</span>
+            <span className="onboarding-tooltip-en">
+              {getMessages(locale === 'zh' ? 'en' : 'zh').reader.tapToToggle}
+            </span>
           </div>
         )}
 
@@ -890,7 +1004,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
             <button
               className="nav-button next-button"
               onClick={goToNextChapter}
-              title="Next Chapter"
+              title={t.reader.nextChapter}
             >
               ↷
             </button>
@@ -901,9 +1015,15 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
       <div className="fab-container">
         {/* Backdrop for mobile bottom sheet */}
         {isMenuOpen && (
-          <div className="fab-backdrop" onClick={() => { setIsMenuOpen(false); setIsTypographyOpen(false); }} />
+          <div
+            className="fab-backdrop"
+            onClick={() => {
+              setIsMenuOpen(false);
+              setIsTypographyOpen(false);
+            }}
+          />
         )}
-        <button className="fab" onClick={toggleMenu} aria-label="Menu">
+        <button className="fab" onClick={toggleMenu} aria-label={t.reader.menu}>
           <span className="fab-dots"></span>
         </button>
         {isMenuOpen && (
@@ -911,7 +1031,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
             {/* Primary actions */}
             {onBackToShelf && (
               <button className="fab-menu-item" onClick={onBackToShelf}>
-                Back to Shelf
+                {t.reader.backToShelf}
               </button>
             )}
             {translations.length > 0 && (
@@ -924,11 +1044,19 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
                   onShowOriginalChange?.(next);
                 }}
               >
-                {showOriginal ? 'Show Translation' : 'Show Original'}
+                {showOriginal
+                  ? t.reader.showTranslation
+                  : t.reader.showOriginal}
               </button>
             )}
-            <button className="fab-menu-item" onClick={() => { setIsChaptersOpen(true); setIsMenuOpen(false); }}>
-              Chapters
+            <button
+              className="fab-menu-item"
+              onClick={() => {
+                setIsChaptersOpen(true);
+                setIsMenuOpen(false);
+              }}
+            >
+              {t.reader.chapters}
             </button>
             {onMarkComplete && (
               <button
@@ -939,7 +1067,8 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
                   try {
                     await onMarkComplete(!isCompleted);
                   } catch (err) {
-                    const errorMsg = err instanceof Error ? err.message : String(err);
+                    const errorMsg =
+                      err instanceof Error ? err.message : String(err);
                     setMarkCompleteError(errorMsg);
                   } finally {
                     setIsMarkingComplete(false);
@@ -947,7 +1076,11 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
                 }}
                 disabled={isMarkingComplete}
               >
-                {isMarkingComplete ? '...' : (isCompleted ? '✓ Read' : 'Mark as Read')}
+                {isMarkingComplete
+                  ? '...'
+                  : isCompleted
+                    ? t.reader.markedRead
+                    : t.reader.markAsRead}
               </button>
             )}
             {markCompleteError && (
@@ -968,7 +1101,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
                 }}
                 disabled={isSharing}
               >
-                {isSharing ? '...' : 'Share'}
+                {isSharing ? '...' : t.reader.share}
               </button>
             )}
             {isOwner && shareToken && (
@@ -976,12 +1109,14 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
                 <button
                   className="fab-menu-item"
                   onClick={() => {
-                    navigator.clipboard.writeText(`${window.location.origin}/shared/${shareToken}`);
+                    navigator.clipboard.writeText(
+                      `${window.location.origin}/shared/${shareToken}`
+                    );
                     setShareCopied(true);
                     setTimeout(() => setShareCopied(false), 2000);
                   }}
                 >
-                  {shareCopied ? '✓ Copied!' : 'Copy Share Link'}
+                  {shareCopied ? t.reader.copied : t.reader.copyShareLink}
                 </button>
                 <button
                   className="fab-menu-item"
@@ -997,7 +1132,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
                   }}
                   disabled={isSharing}
                 >
-                  {isSharing ? '...' : 'Revoke Share'}
+                  {isSharing ? '...' : t.reader.revokeShare}
                 </button>
               </>
             )}
@@ -1010,65 +1145,134 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
               className="fab-menu-item fab-section-toggle"
               onClick={() => setIsTypographyOpen(!isTypographyOpen)}
             >
-              <span>Typography</span>
-              <span className={`fab-chevron ${isTypographyOpen ? 'open' : ''}`}>›</span>
+              <span>{t.reader.typography}</span>
+              <span className={`fab-chevron ${isTypographyOpen ? 'open' : ''}`}>
+                ›
+              </span>
             </button>
 
             {isTypographyOpen && (
               <div className="fab-typography-panel">
                 <div className="fab-typo-row">
-                  <span className="fab-typo-label">Font Size</span>
+                  <span className="fab-typo-label">{t.reader.fontSize}</span>
                   <div className="fab-menu-controls">
-                    <button className="fab-control-btn" onClick={() => adjustFontSize(-1)}>-</button>
+                    <button
+                      className="fab-control-btn"
+                      onClick={() => adjustFontSize(-1)}
+                    >
+                      -
+                    </button>
                     <span className="fab-typo-value">{fontSize}</span>
-                    <button className="fab-control-btn" onClick={() => adjustFontSize(1)}>+</button>
+                    <button
+                      className="fab-control-btn"
+                      onClick={() => adjustFontSize(1)}
+                    >
+                      +
+                    </button>
                   </div>
                 </div>
                 <div className="fab-typo-row">
-                  <span className="fab-typo-label">Paragraph Gap</span>
+                  <span className="fab-typo-label">
+                    {t.reader.paragraphGap}
+                  </span>
                   <div className="fab-menu-controls">
-                    <button className="fab-control-btn" onClick={() => adjustParagraphSpacing(-5)}>-</button>
+                    <button
+                      className="fab-control-btn"
+                      onClick={() => adjustParagraphSpacing(-5)}
+                    >
+                      -
+                    </button>
                     <span className="fab-typo-value">{paragraphSpacing}</span>
-                    <button className="fab-control-btn" onClick={() => adjustParagraphSpacing(5)}>+</button>
+                    <button
+                      className="fab-control-btn"
+                      onClick={() => adjustParagraphSpacing(5)}
+                    >
+                      +
+                    </button>
                   </div>
                 </div>
                 <div className="fab-typo-row">
-                  <span className="fab-typo-label">Line Height</span>
+                  <span className="fab-typo-label">{t.reader.lineHeight}</span>
                   <div className="fab-menu-controls">
-                    <button className="fab-control-btn" onClick={() => adjustLineHeight(-0.1)}>-</button>
-                    <span className="fab-typo-value">{lineHeight.toFixed(1)}</span>
-                    <button className="fab-control-btn" onClick={() => adjustLineHeight(0.1)}>+</button>
+                    <button
+                      className="fab-control-btn"
+                      onClick={() => adjustLineHeight(-0.1)}
+                    >
+                      -
+                    </button>
+                    <span className="fab-typo-value">
+                      {lineHeight.toFixed(1)}
+                    </span>
+                    <button
+                      className="fab-control-btn"
+                      onClick={() => adjustLineHeight(0.1)}
+                    >
+                      +
+                    </button>
                   </div>
                 </div>
                 <div className="fab-typo-row">
-                  <span className="fab-typo-label">Letter Spacing</span>
+                  <span className="fab-typo-label">
+                    {t.reader.letterSpacing}
+                  </span>
                   <div className="fab-menu-controls">
-                    <button className="fab-control-btn" onClick={() => adjustLetterSpacing(-0.01)}>-</button>
-                    <span className="fab-typo-value">{letterSpacing.toFixed(2)}</span>
-                    <button className="fab-control-btn" onClick={() => adjustLetterSpacing(0.01)}>+</button>
+                    <button
+                      className="fab-control-btn"
+                      onClick={() => adjustLetterSpacing(-0.01)}
+                    >
+                      -
+                    </button>
+                    <span className="fab-typo-value">
+                      {letterSpacing.toFixed(2)}
+                    </span>
+                    <button
+                      className="fab-control-btn"
+                      onClick={() => adjustLetterSpacing(0.01)}
+                    >
+                      +
+                    </button>
                   </div>
                 </div>
                 <div className="fab-typo-row">
-                  <span className="fab-typo-label">Word Spacing</span>
+                  <span className="fab-typo-label">{t.reader.wordSpacing}</span>
                   <div className="fab-menu-controls">
-                    <button className="fab-control-btn" onClick={() => adjustWordSpacing(-0.01)}>-</button>
-                    <span className="fab-typo-value">{wordSpacing.toFixed(2)}</span>
-                    <button className="fab-control-btn" onClick={() => adjustWordSpacing(0.01)}>+</button>
+                    <button
+                      className="fab-control-btn"
+                      onClick={() => adjustWordSpacing(-0.01)}
+                    >
+                      -
+                    </button>
+                    <span className="fab-typo-value">
+                      {wordSpacing.toFixed(2)}
+                    </span>
+                    <button
+                      className="fab-control-btn"
+                      onClick={() => adjustWordSpacing(0.01)}
+                    >
+                      +
+                    </button>
                   </div>
                 </div>
                 <div className="fab-typo-row">
-                  <span className="fab-typo-label">Font Weight</span>
+                  <span className="fab-typo-label">{t.reader.fontWeight}</span>
                   <div className="fab-menu-controls">
-                    <button className="fab-control-btn" onClick={() => adjustFontWeight(-10)}>-</button>
+                    <button
+                      className="fab-control-btn"
+                      onClick={() => adjustFontWeight(-10)}
+                    >
+                      -
+                    </button>
                     <span className="fab-typo-value">{fontWeight}</span>
-                    <button className="fab-control-btn" onClick={() => adjustFontWeight(10)}>+</button>
+                    <button
+                      className="fab-control-btn"
+                      onClick={() => adjustFontWeight(10)}
+                    >
+                      +
+                    </button>
                   </div>
                 </div>
-                <button
-                  className="fab-reset-btn"
-                  onClick={resetTypography}
-                >
-                  Reset to Default
+                <button className="fab-reset-btn" onClick={resetTypography}>
+                  {t.reader.resetToDefault}
                 </button>
               </div>
             )}
@@ -1080,7 +1284,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
           <div className="chapters-modal">
             <div className="chapters-content">
               <div className="chapters-header">
-                <h3>Contents</h3>
+                <h3>{t.reader.contents}</h3>
                 <button
                   className="chapters-close"
                   onClick={() => setIsChaptersOpen(false)}

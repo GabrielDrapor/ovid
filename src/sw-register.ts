@@ -7,10 +7,13 @@
  * takes control. Registered in production builds only.
  */
 
+import { detectLocale, getMessages } from './i18n';
+
 const ACCENT = '#4ade80'; // app's green accent (see BookShelf.css)
 
 function showUpdateToast(onRefresh: () => void): void {
   if (document.getElementById('sw-update-toast')) return;
+  const t = getMessages(detectLocale());
 
   const toast = document.createElement('div');
   toast.id = 'sw-update-toast';
@@ -37,13 +40,13 @@ function showUpdateToast(onRefresh: () => void): void {
   ].join(';');
 
   const label = document.createElement('span');
-  label.textContent = 'A new version is available';
+  label.textContent = t.pwa.newVersion;
   label.style.cssText =
     'white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
 
   const btn = document.createElement('button');
   btn.type = 'button';
-  btn.textContent = 'Refresh';
+  btn.textContent = t.pwa.refresh;
   btn.style.cssText = [
     'flex:0 0 auto',
     'border:0',
@@ -56,7 +59,7 @@ function showUpdateToast(onRefresh: () => void): void {
   ].join(';');
   btn.addEventListener('click', () => {
     btn.disabled = true;
-    btn.textContent = 'Updating…';
+    btn.textContent = t.pwa.updating;
     onRefresh();
   });
 

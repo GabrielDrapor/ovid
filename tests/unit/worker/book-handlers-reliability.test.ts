@@ -14,8 +14,14 @@ import * as path from 'path';
 // Resolve paths from project root
 const projectRoot = path.resolve(__dirname, '../../..');
 const bookHandlersPath = path.join(projectRoot, 'src/worker/book-handlers.ts');
-const translatorIndexPath = path.join(projectRoot, 'services/translator/src/index.ts');
-const translateWorkerPath = path.join(projectRoot, 'services/translator/src/translate-worker.ts');
+const translatorIndexPath = path.join(
+  projectRoot,
+  'services/translator/src/index.ts'
+);
+const translateWorkerPath = path.join(
+  projectRoot,
+  'services/translator/src/translate-worker.ts'
+);
 
 describe('Book Handlers Reliability', () => {
   beforeEach(() => {
@@ -62,7 +68,9 @@ describe('Book Handlers Reliability', () => {
       // Verify recovery mechanism exists
       expect(indexCode).toContain('recoverStalledJobs');
       expect(indexCode).toContain('startJobScanner');
-      expect(indexCode).toContain("status IN ('pending', 'translating', 'extracting_glossary')");
+      expect(indexCode).toContain(
+        "status IN ('pending', 'translating', 'extracting_glossary')"
+      );
     });
   });
 
@@ -104,7 +112,13 @@ describe('Book Handlers Reliability', () => {
       );
 
       expect(shelfCode).toContain('safe-to-close-hint');
-      expect(shelfCode).toContain('safely close this page');
+      // The copy itself lives in the i18n dictionary now.
+      expect(shelfCode).toContain('t.shelf.safeToClose');
+      const enMessages = fs.readFileSync(
+        path.join(projectRoot, 'src/i18n/en.ts'),
+        'utf-8'
+      );
+      expect(enMessages).toContain('safely close this page');
     });
 
     it('BookShelf shows upload success callout pinned to the new book', () => {
@@ -115,7 +129,13 @@ describe('Book Handlers Reliability', () => {
 
       expect(shelfCode).toContain('uploadedBookUuid');
       expect(shelfCode).toContain('upload-callout');
-      expect(shelfCode).toContain('Translation is in progress');
+      // The copy itself lives in the i18n dictionary now.
+      expect(shelfCode).toContain('t.shelf.uploadedTranslating');
+      const enMessages = fs.readFileSync(
+        path.join(projectRoot, 'src/i18n/en.ts'),
+        'utf-8'
+      );
+      expect(enMessages).toContain('Translation is in progress');
     });
 
     it('CSS includes callout and hint styles', () => {
