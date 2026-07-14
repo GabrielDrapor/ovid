@@ -432,17 +432,31 @@ function extractTextNodes(body: any): ContentItemV2[] {
   return textNodes;
 }
 
-function extractChapterTitle(doc: any, body: any, chapterNumber: number) {
-  let chapterTitle = '';
+function extractHeadingTitle(doc: any): string {
   const h1 = doc.getElementsByTagName('h1')[0];
   const h2 = doc.getElementsByTagName('h2')[0];
   const h3 = doc.getElementsByTagName('h3')[0];
-  if (h1?.textContent?.trim()) chapterTitle = h1.textContent.trim();
-  else if (h2?.textContent?.trim()) chapterTitle = h2.textContent.trim();
-  else if (h3?.textContent?.trim()) chapterTitle = h3.textContent.trim();
-  if (chapterTitle) return chapterTitle;
+  if (h1?.textContent?.trim()) return h1.textContent.trim();
+  if (h2?.textContent?.trim()) return h2.textContent.trim();
+  if (h3?.textContent?.trim()) return h3.textContent.trim();
+  return '';
+}
 
-  // Derive title from short blocks if no heading
+/**
+ * A short block is only usable as a derived title if it doesn't read like
+ * running prose: dialogue openers (quotes) and sentence punctuation are
+ * disqualifying \u2014 CJK novels open chapters with short dialogue lines that
+ * used to get glued together into nonsense titles.
+ */
+function isHeadingLikeText(text: string): boolean {
+  if (/^[\u201c\u201d"'\u2018\u300c\u300e\u3008\u300a\uff08(]/.test(text))
+    return false;
+  if (/[\u3002\uff1f\uff01?!]/.test(text)) return false;
+  return true;
+}
+
+/** Derive a title from leading short blocks; '' when nothing heading-like. */
+function deriveTitleFromShortBlocks(body: any): string {
   const headingParts: string[] = [];
   let stopScanning = false;
   const scanForHeadings = (parent: any) => {
@@ -460,8 +474,13 @@ function extractChapterTitle(doc: any, body: any, chapterNumber: number) {
           continue;
         }
         const text = (child.textContent || '').replace(/\s+/g, ' ').trim();
-        if (text.length >= 1 && text.length <= 50) headingParts.push(text);
-        else if (text.length > 50) {
+        if (text.length >= 1 && text.length <= 50) {
+          if (!isHeadingLikeText(text)) {
+            stopScanning = true;
+            return;
+          }
+          headingParts.push(text);
+        } else if (text.length > 50) {
           stopScanning = true;
           return;
         }
@@ -471,7 +490,71 @@ function extractChapterTitle(doc: any, body: any, chapterNumber: number) {
     }
   };
   scanForHeadings(body);
-  return headingParts.join(' \u2013 ') || `Chapter ${chapterNumber}`;
+  return headingParts.join(' \u2013 ');
+}
+
+function extractChapterTitle(doc: any, body: any, chapterNumber: number) {
+  return (
+    extractHeadingTitle(doc) ||
+    deriveTitleFromShortBlocks(body) ||
+    `Chapter ${chapterNumber}`
+  );
+}
+
+// ---- Front/back-matter classification ----
+
+/** OPF <guide> reference types \u2192 display names. */
+const GUIDE_ROLE_NAMES: Record<string, string> = {
+  cover: 'Cover',
+  'title-page': 'Title Page',
+  titlepage: 'Title Page',
+  'copyright-page': 'Copyright',
+  copyright: 'Copyright',
+  dedication: 'Dedication',
+  acknowledgements: 'Acknowledgments',
+  acknowledgments: 'Acknowledgments',
+  epigraph: 'Epigraph',
+  foreword: 'Foreword',
+  preface: 'Preface',
+  prologue: 'Prologue',
+  epilogue: 'Epilogue',
+  afterword: 'Afterword',
+  glossary: 'Glossary',
+  bibliography: 'Bibliography',
+  index: 'Index',
+  colophon: 'Colophon',
+  toc: 'Contents',
+};
+
+/** Filename-based fallback for common front/back-matter files. */
+const MATTER_FILENAME_PATTERNS: [RegExp, string][] = [
+  [/cover/i, 'Cover'],
+  [/half[-_]?title/i, 'Title Page'],
+  [/title[-_]?page|^title\b/i, 'Title Page'],
+  [/copyright|colophon|imprint/i, 'Copyright'],
+  [/dedicat/i, 'Dedication'],
+  [/acknowledg/i, 'Acknowledgments'],
+  [/epigraph/i, 'Epigraph'],
+  [/foreword/i, 'Foreword'],
+  [/preface/i, 'Preface'],
+  [/prologue/i, 'Prologue'],
+  [/epilogue/i, 'Epilogue'],
+  [/afterword/i, 'Afterword'],
+  [/appendix/i, 'Appendix'],
+  [/glossary/i, 'Glossary'],
+  [/biblio/i, 'Bibliography'],
+  [/about[-_]?(the[-_]?)?author/i, 'About the Author'],
+  [/front[-_]?matter/i, 'Front Matter'],
+  [/back[-_]?matter/i, 'Back Matter'],
+  [/\btoc\b|contents/i, 'Contents'],
+];
+
+function matterRoleFromFilename(normPath: string): string {
+  const base = (normPath.split('/').pop() || '').replace(/\.[^.]+$/, '');
+  for (const [re, name] of MATTER_FILENAME_PATTERNS) {
+    if (re.test(base)) return name;
+  }
+  return '';
 }
 
 function serializeBodyHtml(body: any): string {
@@ -907,19 +990,29 @@ function parseNavXhtml(navContent: string): TocEntry[] {
 }
 
 /**
- * Build a map from spine file path (without fragment) to TOC entry title.
- * If multiple TOC entries point to the same file, use the first one.
+ * Build a map from NORMALIZED spine file path (without fragment) to TOC
+ * entry title. Srcs are resolved relative to the TOC document's own
+ * directory (per spec — not the OPF's), URL-decoded, and ./ ../ collapsed,
+ * so entries like "../Text/ch%201.xhtml#part2" still land on the right
+ * spine file. If multiple TOC entries point to the same file, the first
+ * one wins.
  */
 function buildTocTitleMap(
   tocEntries: TocEntry[],
-  basePath: string
+  tocDir: string
 ): Map<string, string> {
   const map = new Map<string, string>();
   for (const entry of tocEntries) {
-    const fullPath = entry.src.startsWith('/')
-      ? entry.src.substring(1)
-      : basePath + entry.src;
-    if (!map.has(fullPath)) {
+    let src = entry.src;
+    try {
+      src = decodeURIComponent(src);
+    } catch {
+      /* keep raw */
+    }
+    const fullPath = normalizeZipPath(
+      src.startsWith('/') ? src.substring(1) : tocDir + src
+    );
+    if (fullPath && !map.has(fullPath)) {
       map.set(fullPath, entry.title);
     }
   }
@@ -947,6 +1040,7 @@ export async function parseEPUB(
   let globalStyles = '';
   let imageManifestEntries: { href: string; mediaType: string }[] = [];
   let tocTitleMap = new Map<string, string>();
+  const guideRoleByPath = new Map<string, string>();
   let coverHref: string | null = null;
 
   if (opfFile) {
@@ -1041,8 +1135,10 @@ export async function parseEPUB(
       if (guess) coverHref = guess.href;
     }
 
-    // Parse TOC: prefer nav.xhtml, fall back to NCX
+    // Parse TOC: prefer nav.xhtml, fall back to NCX. Srcs inside the TOC
+    // document are relative to ITS directory, so remember it.
     let tocEntries: TocEntry[] = [];
+    let tocDir = basePath;
     if (navHref) {
       const navPath = navHref.startsWith('/')
         ? navHref.substring(1)
@@ -1052,6 +1148,9 @@ export async function parseEPUB(
         try {
           const navContent = await navFile.async('text');
           tocEntries = parseNavXhtml(navContent);
+          tocDir = navPath.includes('/')
+            ? navPath.slice(0, navPath.lastIndexOf('/') + 1)
+            : '';
         } catch {
           /* skip */
         }
@@ -1066,18 +1165,45 @@ export async function parseEPUB(
         try {
           const ncxContent = await ncxFile.async('text');
           tocEntries = parseNCX(ncxContent);
+          tocDir = ncxPath.includes('/')
+            ? ncxPath.slice(0, ncxPath.lastIndexOf('/') + 1)
+            : '';
         } catch {
           /* skip */
         }
       }
     }
     if (tocEntries.length > 0) {
-      tocTitleMap = buildTocTitleMap(tocEntries, basePath);
+      tocTitleMap = buildTocTitleMap(tocEntries, tocDir);
     }
 
-    // Spine order
+    // OPF <guide>: role names for front/back-matter files (EPUB2, still
+    // widely present in EPUB3 output from Calibre etc.)
+    const guideRefs = doc.getElementsByTagName('reference');
+    for (let i = 0; i < guideRefs.length; i++) {
+      const type = (guideRefs[i].getAttribute('type') || '').toLowerCase();
+      const href = guideRefs[i].getAttribute('href');
+      const roleName = GUIDE_ROLE_NAMES[type];
+      if (!href || !roleName) continue;
+      let src = href.split('#')[0];
+      try {
+        src = decodeURIComponent(src);
+      } catch {
+        /* keep raw */
+      }
+      const fullPath = normalizeZipPath(
+        src.startsWith('/') ? src.substring(1) : basePath + src
+      );
+      if (fullPath && !guideRoleByPath.has(fullPath)) {
+        guideRoleByPath.set(fullPath, roleName);
+      }
+    }
+
+    // Spine order. linear="no" items are auxiliary content by spec (not part
+    // of the default reading order) — don't turn them into chapters.
     const spineItems = doc.getElementsByTagName('itemref');
     for (let i = 0; i < spineItems.length; i++) {
+      if (spineItems[i].getAttribute('linear') === 'no') continue;
       const idref = spineItems[i].getAttribute('idref');
       if (idref && manifestMap.has(idref)) {
         const href = manifestMap.get(idref)!;
@@ -1090,8 +1216,9 @@ export async function parseEPUB(
   }
 
   // Parse chapters in two phases so internal links can resolve across files:
-  // phase 1 parses every spine file and indexes its anchors; phase 2 rewrites
-  // links against the global anchor map, then extracts text and serializes.
+  // phase 1 parses every spine file and indexes its anchors; titles and
+  // junk-page skips are then assigned TOC-first, and phase 2 rewrites links
+  // against the global anchor map, extracts text and serializes.
   interface PreparedFile {
     zipPath: string;
     normPath: string;
@@ -1101,10 +1228,11 @@ export async function parseEPUB(
     title: string;
     index: AnchorIndex;
     isNotesPage: boolean;
+    textLength: number;
+    hasImages: boolean;
   }
 
   const prepared: PreparedFile[] = [];
-  let chapterNumber = 1;
 
   for (const htmlPath of htmlFiles) {
     const file = zipContent.files[htmlPath];
@@ -1132,28 +1260,95 @@ export async function parseEPUB(
     // (image-only pages etc.) don't become chapters.
     if (!index.firstBlockXpath) continue;
 
-    const title =
-      tocTitleMap.get(htmlPath) ||
-      extractChapterTitle(doc, body, chapterNumber);
+    let textLength = 0;
+    index.blockTexts.forEach((t) => {
+      textLength += t.length;
+    });
+    const hasImages =
+      body.getElementsByTagName('img').length > 0 ||
+      body.getElementsByTagName('image').length > 0;
 
     prepared.push({
       zipPath: htmlPath,
       normPath: normalizeZipPath(htmlPath),
       doc,
       body,
-      chapterNumber,
-      title,
+      chapterNumber: 0, // assigned after title/skip resolution
+      title: '',
       index,
-      isNotesPage: detectNotesPage(body, htmlPath, title),
+      isNotesPage: false,
+      textLength,
+      hasImages,
     });
-    chapterNumber++;
   }
 
+  // ---- Title assignment & junk-page skips (TOC-first) ----
+  //
+  // When the EPUB has a usable TOC we follow it: files it references get
+  // its titles; substantial files between two referenced ones are treated
+  // as split-chapter continuations and inherit the preceding entry's title;
+  // tiny text-only pages OUTSIDE the TOC's range (publisher ads, blank
+  // filler around the actual book) are dropped. Everything else falls back
+  // through guide/filename roles, headings, then a derived title — and
+  // "Chapter N" only as the true last resort.
+  const tocIdx = prepared.map((p, i) => (tocTitleMap.has(p.normPath) ? i : -1));
+  const coveredIdx = tocIdx.filter((i) => i >= 0);
+  const tocUsable = coveredIdx.length >= 2;
+  const firstCovered = coveredIdx[0] ?? -1;
+  const lastCovered = coveredIdx[coveredIdx.length - 1] ?? -1;
+
+  const skipped = new Set<number>();
+  let lastTocTitle = '';
+  prepared.forEach((p, i) => {
+    const tocTitle = tocTitleMap.get(p.normPath);
+    if (tocTitle) {
+      p.title = tocTitle;
+      lastTocTitle = tocTitle;
+      return;
+    }
+
+    // After the first TOC entry, a substantial untitled file is a
+    // split-chapter continuation of the preceding entry — including the
+    // trailing parts of the final chapter after the last entry.
+    if (tocUsable && i > firstCovered && p.textLength >= 1500 && lastTocTitle) {
+      p.title = lastTocTitle;
+      return;
+    }
+    // Outside the TOC's range: tiny text-only pages are publisher filler
+    // (ads, blank filler around the actual book), not chapters. Pages
+    // with images (covers, title art) are kept.
+    if (
+      tocUsable &&
+      (i < firstCovered || i > lastCovered) &&
+      p.textLength < 300 &&
+      !p.hasImages
+    ) {
+      skipped.add(i);
+      return;
+    }
+
+    p.title =
+      extractHeadingTitle(p.doc) ||
+      guideRoleByPath.get(p.normPath) ||
+      matterRoleFromFilename(p.normPath) ||
+      deriveTitleFromShortBlocks(p.body) ||
+      '';
+  });
+
+  const kept = prepared.filter((_, i) => !skipped.has(i));
+  kept.forEach((p, i) => {
+    p.chapterNumber = i + 1;
+    if (!p.title) p.title = `Chapter ${p.chapterNumber}`;
+    p.isNotesPage = detectNotesPage(p.body, p.normPath, p.title);
+  });
+
   // Global anchor map: file → chapter start, file#fragment → exact block.
+  // Built from kept files only — links into skipped filler pages stay
+  // unresolved and get unwrapped by the serializer.
   const anchorMap = new Map<string, AnchorTarget>();
   const notesFiles = new Set<string>();
   const blockTextByKey = new Map<string, string>();
-  for (const p of prepared) {
+  for (const p of kept) {
     anchorMap.set(p.normPath, {
       chapter: p.chapterNumber,
       xpath: p.index.firstBlockXpath!,
@@ -1171,7 +1366,7 @@ export async function parseEPUB(
   }
 
   const chapters: ChapterV2[] = [];
-  for (const p of prepared) {
+  for (const p of kept) {
     rewriteInternalLinks({
       body: p.body,
       filePath: p.normPath,

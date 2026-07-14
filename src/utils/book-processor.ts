@@ -287,20 +287,29 @@ function extractTextNodes(body: any): ContentItemV2[] {
   return textNodes;
 }
 
-function extractChapterTitle(
-  doc: any,
-  body: any,
-  chapterNumber: number
-): string {
-  let chapterTitle = '';
+function extractHeadingTitle(doc: any): string {
   const h1 = doc.getElementsByTagName('h1')[0];
   const h2 = doc.getElementsByTagName('h2')[0];
   const h3 = doc.getElementsByTagName('h3')[0];
-  if (h1?.textContent?.trim()) chapterTitle = h1.textContent.trim();
-  else if (h2?.textContent?.trim()) chapterTitle = h2.textContent.trim();
-  else if (h3?.textContent?.trim()) chapterTitle = h3.textContent.trim();
-  if (chapterTitle) return chapterTitle;
+  if (h1?.textContent?.trim()) return h1.textContent.trim();
+  if (h2?.textContent?.trim()) return h2.textContent.trim();
+  if (h3?.textContent?.trim()) return h3.textContent.trim();
+  return '';
+}
 
+/**
+ * A short block is only usable as a derived title if it doesn't read like
+ * running prose: dialogue openers (quotes) and sentence punctuation are
+ * disqualifying (kept in sync with book-parser.ts).
+ */
+function isHeadingLikeText(text: string): boolean {
+  if (/^[“”"'‘「『〈《（(]/.test(text)) return false;
+  if (/[。？！?!]/.test(text)) return false;
+  return true;
+}
+
+/** Derive a title from leading short blocks; '' when nothing heading-like. */
+function deriveTitleFromShortBlocks(body: any): string {
   const headingParts: string[] = [];
   let stopScanning = false;
   const scanForHeadings = (parent: any) => {
@@ -318,8 +327,13 @@ function extractChapterTitle(
           continue;
         }
         const text = (child.textContent || '').replace(/\s+/g, ' ').trim();
-        if (text.length >= 1 && text.length <= 50) headingParts.push(text);
-        else if (text.length > 50) {
+        if (text.length >= 1 && text.length <= 50) {
+          if (!isHeadingLikeText(text)) {
+            stopScanning = true;
+            return;
+          }
+          headingParts.push(text);
+        } else if (text.length > 50) {
           stopScanning = true;
           return;
         }
@@ -329,7 +343,162 @@ function extractChapterTitle(
     }
   };
   scanForHeadings(body);
-  return headingParts.join(' – ') || `Chapter ${chapterNumber}`;
+  return headingParts.join(' – ');
+}
+
+function extractChapterTitle(
+  doc: any,
+  body: any,
+  chapterNumber: number
+): string {
+  return (
+    extractHeadingTitle(doc) ||
+    deriveTitleFromShortBlocks(body) ||
+    `Chapter ${chapterNumber}`
+  );
+}
+
+// ---- Front/back-matter classification (kept in sync with book-parser.ts) ----
+
+const GUIDE_ROLE_NAMES: Record<string, string> = {
+  cover: 'Cover',
+  'title-page': 'Title Page',
+  titlepage: 'Title Page',
+  'copyright-page': 'Copyright',
+  copyright: 'Copyright',
+  dedication: 'Dedication',
+  acknowledgements: 'Acknowledgments',
+  acknowledgments: 'Acknowledgments',
+  epigraph: 'Epigraph',
+  foreword: 'Foreword',
+  preface: 'Preface',
+  prologue: 'Prologue',
+  epilogue: 'Epilogue',
+  afterword: 'Afterword',
+  glossary: 'Glossary',
+  bibliography: 'Bibliography',
+  index: 'Index',
+  colophon: 'Colophon',
+  toc: 'Contents',
+};
+
+const MATTER_FILENAME_PATTERNS: [RegExp, string][] = [
+  [/cover/i, 'Cover'],
+  [/half[-_]?title/i, 'Title Page'],
+  [/title[-_]?page|^title\b/i, 'Title Page'],
+  [/copyright|colophon|imprint/i, 'Copyright'],
+  [/dedicat/i, 'Dedication'],
+  [/acknowledg/i, 'Acknowledgments'],
+  [/epigraph/i, 'Epigraph'],
+  [/foreword/i, 'Foreword'],
+  [/preface/i, 'Preface'],
+  [/prologue/i, 'Prologue'],
+  [/epilogue/i, 'Epilogue'],
+  [/afterword/i, 'Afterword'],
+  [/appendix/i, 'Appendix'],
+  [/glossary/i, 'Glossary'],
+  [/biblio/i, 'Bibliography'],
+  [/about[-_]?(the[-_]?)?author/i, 'About the Author'],
+  [/front[-_]?matter/i, 'Front Matter'],
+  [/back[-_]?matter/i, 'Back Matter'],
+  [/\btoc\b|contents/i, 'Contents'],
+];
+
+function matterRoleFromFilename(normPath: string): string {
+  const base = (normPath.split('/').pop() || '').replace(/\.[^.]+$/, '');
+  for (const [re, name] of MATTER_FILENAME_PATTERNS) {
+    if (re.test(base)) return name;
+  }
+  return '';
+}
+
+// ---- TOC parsing (kept in sync with book-parser.ts) ----
+
+interface TocEntry {
+  title: string;
+  src: string;
+  fragment: string | null;
+}
+
+function parseNCX(ncxContent: string): TocEntry[] {
+  const doc = new DOMParser().parseFromString(ncxContent, 'text/xml');
+  const entries: TocEntry[] = [];
+  const navPoints = doc.getElementsByTagName('navPoint');
+  for (let i = 0; i < navPoints.length; i++) {
+    const navPoint = navPoints[i];
+    const navLabels = navPoint.getElementsByTagName('navLabel');
+    if (!navLabels.length) continue;
+    const textEl = navLabels[0].getElementsByTagName('text')[0];
+    if (!textEl?.textContent?.trim()) continue;
+    const title = textEl.textContent.trim();
+    const contentEl = navPoint.getElementsByTagName('content')[0];
+    if (!contentEl) continue;
+    const srcAttr = contentEl.getAttribute('src');
+    if (!srcAttr) continue;
+    const [src, fragment] = srcAttr.split('#', 2);
+    entries.push({ title, src, fragment: fragment || null });
+  }
+  return entries;
+}
+
+function parseNavXhtml(navContent: string): TocEntry[] {
+  const doc = new DOMParser().parseFromString(
+    navContent,
+    'application/xhtml+xml'
+  );
+  const entries: TocEntry[] = [];
+  const navElements = doc.getElementsByTagName('nav');
+  let tocNav: any = null;
+  for (let i = 0; i < navElements.length; i++) {
+    const nav = navElements[i];
+    const epubType =
+      nav.getAttribute('epub:type') ||
+      nav.getAttributeNS('http://www.idpf.org/2007/ops', 'type');
+    if (epubType === 'toc') {
+      tocNav = nav;
+      break;
+    }
+  }
+  if (!tocNav) {
+    if (navElements.length > 0) tocNav = navElements[0];
+    else return entries;
+  }
+  const links = tocNav.getElementsByTagName('a');
+  for (let i = 0; i < links.length; i++) {
+    const a = links[i];
+    const href = a.getAttribute('href');
+    const title = getFullTextContent(a).replace(/\s+/g, ' ').trim();
+    if (!href || !title) continue;
+    const [src, fragment] = href.split('#', 2);
+    entries.push({ title, src, fragment: fragment || null });
+  }
+  return entries;
+}
+
+/**
+ * Map NORMALIZED spine paths to TOC titles; srcs resolved relative to the
+ * TOC document's own directory, URL-decoded, first entry per file wins.
+ */
+function buildTocTitleMap(
+  tocEntries: TocEntry[],
+  tocDir: string
+): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const entry of tocEntries) {
+    let src = entry.src;
+    try {
+      src = decodeURIComponent(src);
+    } catch {
+      /* keep raw */
+    }
+    const fullPath = normalizeZipPath(
+      src.startsWith('/') ? src.substring(1) : tocDir + src
+    );
+    if (fullPath && !map.has(fullPath)) {
+      map.set(fullPath, entry.title);
+    }
+  }
+  return map;
 }
 
 function serializeBodyHtml(body: any): string {
@@ -631,6 +800,8 @@ export class BookProcessor {
     let htmlFiles: string[] = [];
     let globalStyles = '';
     let imageManifestEntries: { href: string; mediaType: string }[] = [];
+    let tocTitleMap = new Map<string, string>();
+    const guideRoleByPath = new Map<string, string>();
 
     if (opfFile) {
       const opfContent = await zipContent.files[opfFile].async('text');
@@ -672,33 +843,102 @@ export class BookProcessor {
       // Build manifest map and get spine order; also collect image entries
       const manifestMap = new Map<string, string>();
       imageManifestEntries = [];
+      let ncxHref: string | null = null;
+      let navHref: string | null = null;
       for (let i = 0; i < manifestElements.length; i++) {
         const item = manifestElements[i];
         const id = item.getAttribute('id');
         const href = item.getAttribute('href');
         const mediaType = item.getAttribute('media-type');
+        const properties = item.getAttribute('properties');
 
         if (id && href && mediaType === 'application/xhtml+xml') {
           manifestMap.set(id, href);
         }
+        if (mediaType === 'application/x-dtbncx+xml' && href) ncxHref = href;
+        if (properties && properties.split(/\s+/).includes('nav') && href)
+          navHref = href;
         // Collect image entries
         if (href && mediaType && mediaType.startsWith('image/')) {
           imageManifestEntries.push({ href, mediaType });
         }
       }
 
-      // Get spine order
+      const opfBasePath = opfFile.substring(0, opfFile.lastIndexOf('/') + 1);
+
+      // Parse TOC: prefer nav.xhtml, fall back to NCX. Srcs inside the TOC
+      // document are relative to ITS directory.
+      let tocEntries: TocEntry[] = [];
+      let tocDir = opfBasePath;
+      if (navHref) {
+        const navPath = navHref.startsWith('/')
+          ? navHref.substring(1)
+          : opfBasePath + navHref;
+        const navFile = zipContent.files[navPath];
+        if (navFile) {
+          try {
+            tocEntries = parseNavXhtml(await navFile.async('text'));
+            tocDir = navPath.includes('/')
+              ? navPath.slice(0, navPath.lastIndexOf('/') + 1)
+              : '';
+          } catch {
+            /* skip */
+          }
+        }
+      }
+      if (tocEntries.length === 0 && ncxHref) {
+        const ncxPath = ncxHref.startsWith('/')
+          ? ncxHref.substring(1)
+          : opfBasePath + ncxHref;
+        const ncxFile = zipContent.files[ncxPath];
+        if (ncxFile) {
+          try {
+            tocEntries = parseNCX(await ncxFile.async('text'));
+            tocDir = ncxPath.includes('/')
+              ? ncxPath.slice(0, ncxPath.lastIndexOf('/') + 1)
+              : '';
+          } catch {
+            /* skip */
+          }
+        }
+      }
+      if (tocEntries.length > 0) {
+        tocTitleMap = buildTocTitleMap(tocEntries, tocDir);
+      }
+
+      // OPF <guide>: role names for front/back-matter files
+      const guideRefs = doc.getElementsByTagName('reference');
+      for (let i = 0; i < guideRefs.length; i++) {
+        const type = (guideRefs[i].getAttribute('type') || '').toLowerCase();
+        const href = guideRefs[i].getAttribute('href');
+        const roleName = GUIDE_ROLE_NAMES[type];
+        if (!href || !roleName) continue;
+        let src = href.split('#')[0];
+        try {
+          src = decodeURIComponent(src);
+        } catch {
+          /* keep raw */
+        }
+        const fullPath = normalizeZipPath(
+          src.startsWith('/') ? src.substring(1) : opfBasePath + src
+        );
+        if (fullPath && !guideRoleByPath.has(fullPath)) {
+          guideRoleByPath.set(fullPath, roleName);
+        }
+      }
+
+      // Get spine order. linear="no" items are auxiliary content by spec.
       const spineItems = doc.getElementsByTagName('itemref');
       for (let i = 0; i < spineItems.length; i++) {
         const itemref = spineItems[i];
+        if (itemref.getAttribute('linear') === 'no') continue;
         const idref = itemref.getAttribute('idref');
 
         if (idref && manifestMap.has(idref)) {
           const href = manifestMap.get(idref)!;
-          const basePath = opfFile.substring(0, opfFile.lastIndexOf('/') + 1);
           const fullPath = href.startsWith('/')
             ? href.substring(1)
-            : basePath + href;
+            : opfBasePath + href;
           htmlFiles.push(fullPath);
         }
       }
@@ -714,10 +954,11 @@ export class BookProcessor {
       title: string;
       index: AnchorIndex;
       isNotesPage: boolean;
+      textLength: number;
+      hasImages: boolean;
     }
 
     const prepared: PreparedFile[] = [];
-    let chapterNumber = 1;
 
     for (const htmlPath of htmlFiles) {
       const file = zipContent.files[htmlPath];
@@ -741,23 +982,82 @@ export class BookProcessor {
       const index = buildAnchorIndex(body);
       if (!index.firstBlockXpath) continue;
 
-      const title = extractChapterTitle(doc, body, chapterNumber);
+      let textLength = 0;
+      index.blockTexts.forEach((t) => {
+        textLength += t.length;
+      });
+      const hasImages =
+        body.getElementsByTagName('img').length > 0 ||
+        body.getElementsByTagName('image').length > 0;
+
       prepared.push({
         normPath: normalizeZipPath(htmlPath),
         doc,
         body,
-        chapterNumber,
-        title,
+        chapterNumber: 0,
+        title: '',
         index,
-        isNotesPage: detectNotesPage(body, htmlPath, title),
+        isNotesPage: false,
+        textLength,
+        hasImages,
       });
-      chapterNumber++;
     }
+
+    // Title assignment & junk-page skips, TOC-first (kept in sync with
+    // book-parser.ts — see the comments there for the full rules).
+    const coveredIdx = prepared
+      .map((p, i) => (tocTitleMap.has(p.normPath) ? i : -1))
+      .filter((i) => i >= 0);
+    const tocUsable = coveredIdx.length >= 2;
+    const firstCovered = coveredIdx[0] ?? -1;
+    const lastCovered = coveredIdx[coveredIdx.length - 1] ?? -1;
+
+    const skippedIdx = new Set<number>();
+    let lastTocTitle = '';
+    prepared.forEach((p, i) => {
+      const tocTitle = tocTitleMap.get(p.normPath);
+      if (tocTitle) {
+        p.title = tocTitle;
+        lastTocTitle = tocTitle;
+        return;
+      }
+      if (
+        tocUsable &&
+        i > firstCovered &&
+        p.textLength >= 1500 &&
+        lastTocTitle
+      ) {
+        p.title = lastTocTitle;
+        return;
+      }
+      if (
+        tocUsable &&
+        (i < firstCovered || i > lastCovered) &&
+        p.textLength < 300 &&
+        !p.hasImages
+      ) {
+        skippedIdx.add(i);
+        return;
+      }
+      p.title =
+        extractHeadingTitle(p.doc) ||
+        guideRoleByPath.get(p.normPath) ||
+        matterRoleFromFilename(p.normPath) ||
+        deriveTitleFromShortBlocks(p.body) ||
+        '';
+    });
+
+    const kept = prepared.filter((_, i) => !skippedIdx.has(i));
+    kept.forEach((p, i) => {
+      p.chapterNumber = i + 1;
+      if (!p.title) p.title = `Chapter ${p.chapterNumber}`;
+      p.isNotesPage = detectNotesPage(p.body, p.normPath, p.title);
+    });
 
     const anchorMap = new Map<string, AnchorTarget>();
     const notesFiles = new Set<string>();
     const blockTextByKey = new Map<string, string>();
-    for (const p of prepared) {
+    for (const p of kept) {
       anchorMap.set(p.normPath, {
         chapter: p.chapterNumber,
         xpath: p.index.firstBlockXpath!,
@@ -775,7 +1075,7 @@ export class BookProcessor {
     }
 
     const chapters: ChapterV2[] = [];
-    for (const p of prepared) {
+    for (const p of kept) {
       rewriteInternalLinks({
         body: p.body,
         filePath: p.normPath,
