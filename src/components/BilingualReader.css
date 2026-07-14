@@ -2,7 +2,8 @@
   max-width: 680px;
   margin: 0 auto;
   padding: 40px 50px;
-  font-family: 'LXGW Neo ZhiSong Screen', ui-serif, 'Georgia', 'Times New Roman', serif !important;
+  font-family:
+    'LXGW Neo ZhiSong Screen', ui-serif, 'Georgia', 'Times New Roman', serif !important;
   font-weight: 400;
   line-height: 1.7;
   text-align: left;
@@ -46,7 +47,10 @@
 
 /* Toggle animation for all clickable text elements */
 .toggleable-text {
-  transition: color 0.1s ease, opacity 0.1s ease, transform 0.1s ease;
+  transition:
+    color 0.1s ease,
+    opacity 0.1s ease,
+    transform 0.1s ease;
   transform-origin: center center;
 }
 
@@ -81,7 +85,9 @@
 
 .fab-container {
   position: fixed;
-  bottom: calc(20px + env(safe-area-inset-bottom, 0px) + var(--fab-vv-offset, 0px));
+  bottom: calc(
+    20px + env(safe-area-inset-bottom, 0px) + var(--fab-vv-offset, 0px)
+  );
   right: 20px;
   z-index: 1000;
 }
@@ -96,7 +102,9 @@
   font-size: 20px;
   cursor: pointer;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
-  transition: all 0.2s ease;
+  transition:
+    background-color 0.15s ease,
+    opacity 0.2s ease;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -132,8 +140,7 @@
 }
 
 .fab:hover {
-  background-color: #555;
-  transform: scale(1.05);
+  background-color: #444 !important;
 }
 
 .fab-backdrop {
@@ -178,7 +185,8 @@
 }
 
 .fab-menu-item-completed {
-  color: #4ade80;
+  color: #625a41;
+  font-weight: 600;
 }
 
 .fab-menu-item:disabled {
@@ -194,7 +202,8 @@
 
 .fab-error {
   font-size: 12px;
-  color: #d32f2f;
+  color: #8f3d2c;
+  font-weight: 600;
   padding: 4px 16px;
 }
 
@@ -458,8 +467,12 @@ h3.chapter-text {
 }
 
 .chapter-item.active {
-  background-color: #f0f8ff;
-  border-left: 3px solid #007bff;
+  background-color: #f3f0e8;
+}
+
+.chapter-item.active .chapter-title-original {
+  color: #2b241a;
+  font-weight: 600;
 }
 
 .chapter-number {
@@ -518,7 +531,9 @@ h3.chapter-text {
   font-weight: 900;
   color: #666;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition:
+    color 0.15s ease,
+    opacity 0.15s ease;
   text-decoration: none;
   display: inline-flex;
   align-items: center;
@@ -528,16 +543,10 @@ h3.chapter-text {
 
 .nav-button:hover {
   color: #333;
-  transform: scale(1.1);
 }
 
 .nav-button:active {
-  transform: scale(1.05);
-}
-
-.nav-button:active {
-  transform: translateY(0);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  opacity: 0.65;
 }
 
 .prev-button {
@@ -568,7 +577,9 @@ h3.chapter-text {
   }
 
   .fab-container {
-    bottom: calc(20px + env(safe-area-inset-bottom, 0px) + var(--fab-vv-offset, 0px));
+    bottom: calc(
+      20px + env(safe-area-inset-bottom, 0px) + var(--fab-vv-offset, 0px)
+    );
     right: 16px;
   }
 
@@ -682,19 +693,17 @@ sup:hover {
 /* Onboarding tooltip */
 .onboarding-tooltip {
   position: absolute;
-  background: rgba(30, 30, 30, 0.92);
+  background: #1e1e1e;
   color: #fff;
   padding: 12px 18px;
-  border-radius: 10px;
+  border-radius: 6px;
   font-size: 15px;
   line-height: 1.6;
   text-align: center;
   z-index: 1000;
   cursor: pointer;
   animation: onboarding-fade-in 0.4s ease-out;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.18);
   white-space: nowrap;
   pointer-events: auto;
 }
@@ -706,7 +715,7 @@ sup:hover {
   transform: translateY(-50%) rotate(45deg);
   width: 12px;
   height: 12px;
-  background: rgba(30, 30, 30, 0.92);
+  background: #1e1e1e;
 }
 
 .onboarding-tooltip-en {
