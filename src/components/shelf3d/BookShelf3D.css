@@ -292,12 +292,15 @@
   }
 }
 
-/* Action zone: one full-width letterpress-ink primary (two rule lines
-   tall, margin-top one blank line), with Remove demoted to a quiet red
-   print-voice text line below it — a destructive action shouldn't share
-   the row with (or dress like) the primary. Read 56px + Remove 28px keeps
-   the whole zone on the grid; when only Remove renders (translating /
-   failed books) it stands alone as the single text line. */
+/* Action zone: the primary is an ink-ruled outline button — typeset
+   uppercase serif inside a 2px ink border, like a printed box on the
+   form, filling with ink (cream text) on hover. A solid slab read as a
+   generic web button on the paper. Remove stays a red print-voice text
+   action below it (a destructive action shouldn't dress like the
+   primary) but carries a standing red underline so it's clearly
+   clickable. Read 56px + Remove 28px keeps the whole zone on the grid;
+   when only Remove renders (translating / failed books) it stands alone
+   as the single text line. */
 .closet3d-panel-actions {
   display: flex;
   flex-direction: column;
@@ -310,22 +313,27 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  font-family: Georgia, 'Songti SC', serif;
-  font-size: 15px;
-  font-weight: 600;
-  color: #f6f4ed;
-  background: #2b241a;
-  border: none;
+  font-family: 'Literata', Georgia, 'Songti SC', serif;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.24em;
+  text-indent: 0.24em;
+  text-transform: uppercase;
+  color: #2b241a;
+  background: none;
+  border: 2px solid #2b241a;
   border-radius: 6px;
   padding: 0;
   cursor: pointer;
   transition:
     background 0.2s,
+    color 0.2s,
     transform 0.15s;
 }
 
 .closet3d-read-btn:hover {
-  background: #3d3423;
+  background: #2b241a;
+  color: #f6f4ed;
 }
 
 .closet3d-read-btn:active {
@@ -335,23 +343,28 @@
 .closet3d-remove-btn {
   align-self: center;
   height: 28px;
-  padding: 0 8px;
+  padding: 0 2px;
   border: none;
   background: none;
   font-family: 'American Typewriter', 'Courier New', monospace;
-  font-size: 10.5px;
-  letter-spacing: 0.18em;
+  font-size: 11.5px;
+  letter-spacing: 0.2em;
+  text-indent: 0.2em;
   text-transform: uppercase;
   line-height: 28px;
   color: #b4533c;
+  text-decoration: underline;
+  text-decoration-color: rgba(180, 83, 60, 0.45);
+  text-underline-offset: 4px;
   cursor: pointer;
-  transition: color 0.2s;
+  transition:
+    color 0.2s,
+    text-decoration-color 0.2s;
 }
 
 .closet3d-remove-btn:hover {
   color: #8f3d2c;
-  text-decoration: underline;
-  text-underline-offset: 3px;
+  text-decoration-color: currentColor;
 }
 
 .closet3d-panel-hole {
@@ -503,7 +516,8 @@
 
 /* Flat letterpress-ink primary — brass (gradient/glow) reads as a glossy
    candy pill on cream paper, so it's gone from the paper entirely (the
-   book-detail panel is paper now too — see Form 4 above). Height is
+   book-detail panel is paper now too — see the Book Info card above).
+   Height is
    exactly two lines (56px) via explicit height + flex centering, not
    padding, so top/bottom edges land on rule lines. */
 .closet3d-label-save-btn {
