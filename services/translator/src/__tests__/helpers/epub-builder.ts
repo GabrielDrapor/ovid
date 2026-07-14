@@ -9,6 +9,16 @@ export interface TestChapter {
   paragraphs: string[];
 }
 
+/** A spine file expressed as raw body markup (for footnote/link fixtures). */
+export interface RawTestFile {
+  /** File name inside OEBPS/, e.g. "chapter1.xhtml" */
+  fileName: string;
+  /** Inner <body> markup, verbatim */
+  bodyHtml: string;
+  /** Optional <title> */
+  title?: string;
+}
+
 export interface TestEpubOptions {
   title?: string;
   author?: string;
@@ -31,6 +41,12 @@ export interface TestEpubOptions {
   navTitles?: string[];
   /** Use fragment identifiers in TOC entries */
   tocFragments?: Record<number, string>;
+  /**
+   * Raw spine files (body markup verbatim). When set, replaces `chapters`
+   * entirely — used by footnote/internal-link fixtures that need precise
+   * anchor/link structure.
+   */
+  rawFiles?: RawTestFile[];
 }
 
 const DEFAULT_CHAPTERS: TestChapter[] = [
@@ -53,7 +69,9 @@ const DEFAULT_CHAPTERS: TestChapter[] = [
 /**
  * Build a valid EPUB file as a Buffer.
  */
-export async function buildTestEpub(options: TestEpubOptions = {}): Promise<Buffer> {
+export async function buildTestEpub(
+  options: TestEpubOptions = {}
+): Promise<Buffer> {
   const {
     title = 'Test Book',
     author = 'Test Author',
@@ -86,15 +104,18 @@ export async function buildTestEpub(options: TestEpubOptions = {}): Promise<Buff
   );
 
   // 3. Build chapters
-  const actualChapters: TestChapter[] = empty
-    ? []
-    : [...chapters];
+  const actualChapters: TestChapter[] = empty ? [] : [...chapters];
 
   if (largeChapter) {
-    const largeParagraphs = Array.from({ length: 200 }, (_, i) =>
-      `This is paragraph number ${i + 1} of a very large chapter designed to test handling of books with many text nodes. The quick brown fox jumps over the lazy dog.`
+    const largeParagraphs = Array.from(
+      { length: 200 },
+      (_, i) =>
+        `This is paragraph number ${i + 1} of a very large chapter designed to test handling of books with many text nodes. The quick brown fox jumps over the lazy dog.`
     );
-    actualChapters.push({ title: 'The Large Chapter', paragraphs: largeParagraphs });
+    actualChapters.push({
+      title: 'The Large Chapter',
+      paragraphs: largeParagraphs,
+    });
   }
 
   if (withEntities) {
@@ -118,6 +139,25 @@ export async function buildTestEpub(options: TestEpubOptions = {}): Promise<Buff
 
   // 4. Generate XHTML files for each chapter
   const chapterFiles: string[] = [];
+
+  if (options.rawFiles && options.rawFiles.length > 0) {
+    for (const raw of options.rawFiles) {
+      chapterFiles.push(raw.fileName);
+      const xhtml = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+<head>
+  <title>${raw.title || raw.fileName}</title>
+</head>
+<body>
+${raw.bodyHtml}
+</body>
+</html>`;
+      zip.file(`OEBPS/${raw.fileName}`, xhtml);
+    }
+    actualChapters.length = 0; // raw files replace generated chapters
+  }
+
   for (let i = 0; i < actualChapters.length; i++) {
     const ch = actualChapters[i];
     const filename = `chapter${i + 1}.xhtml`;
@@ -159,7 +199,10 @@ export async function buildTestEpub(options: TestEpubOptions = {}): Promise<Buff
 
   // 5. Optional CSS
   if (includeStyles) {
-    zip.file('OEBPS/styles.css', 'body { font-family: Georgia, serif; line-height: 1.6; }');
+    zip.file(
+      'OEBPS/styles.css',
+      'body { font-family: Georgia, serif; line-height: 1.6; }'
+    );
   }
 
   // 6. Optional image (1x1 red PNG)
@@ -178,7 +221,8 @@ export async function buildTestEpub(options: TestEpubOptions = {}): Promise<Buff
   if (ncxTitles) {
     const navPoints = chapterFiles
       .map((f, i) => {
-        const tocTitle = ncxTitles[i] || actualChapters[i]?.title || `Chapter ${i + 1}`;
+        const tocTitle =
+          ncxTitles[i] || actualChapters[i]?.title || `Chapter ${i + 1}`;
         const fragment = tocFragments[i] ? `#${tocFragments[i]}` : '';
         return `    <navPoint id="np${i + 1}" playOrder="${i + 1}">
       <navLabel><text>${tocTitle}</text></navLabel>
@@ -202,7 +246,8 @@ ${navPoints}
   if (navTitles) {
     const listItems = chapterFiles
       .map((f, i) => {
-        const tocTitle = navTitles[i] || actualChapters[i]?.title || `Chapter ${i + 1}`;
+        const tocTitle =
+          navTitles[i] || actualChapters[i]?.title || `Chapter ${i + 1}`;
         const fragment = tocFragments[i] ? `#${tocFragments[i]}` : '';
         return `        <li><a href="${f}${fragment}">${tocTitle}</a></li>`;
       })

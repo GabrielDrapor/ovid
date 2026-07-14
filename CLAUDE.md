@@ -31,6 +31,7 @@ Guidance for Claude Code working on this repo.
 - `yarn list-books:local` / `yarn list-books:remote` — List books
 - `yarn remove-book:local -- --uuid="..."` / `yarn remove-book:remote -- --uuid="..."` — Remove book
 - `yarn sync-remote-book -- --uuid="..."` — Sync local book to remote D1
+- `yarn backfill-links -- --uuid="..." [--env=remote] [--dry-run]` — Re-parse the original EPUB (from R2 `uploads/{uuid}/original.epub`) and rewrite `raw_html` so pre-footnote-support books get internal links/note popovers; verifies stored translation XPaths still resolve before writing
 
 ## Architecture
 
@@ -57,7 +58,7 @@ TypeScript-first across frontend, backend, CLI, and translator service.
 - `src/worker/book-handlers.ts` — Book CRUD, upload, chapter content
 - `src/worker/credits.ts` — Credit balance, Stripe checkout/webhooks
 - `src/worker/db.ts` — Database helpers, migrations
-- `src/components/BilingualReaderV2.tsx` — Main reader (scroll nav, paragraph toggle, progress)
+- `src/components/BilingualReaderV2.tsx` — Main reader (scroll nav, paragraph toggle, progress). Internal links resolved by the parser (`a[data-ov-chapter][data-ov-xpath]`) navigate in-app: note references (`data-ov-note`) open a bilingual footnote popover (cross-chapter notes fetched via the chapter cache), other links jump via `loadChapter` with a floating "return to reading" chip (stack lives in AppV2); note markers are re-appended after translated text so they stay tappable in translated view
 - `src/components/BookShelf.tsx` — Library UI: hosts the 3D closet (default). Falls back to a classic 2D wall when WebGL is unavailable, but that fallback is legacy/deprecated — it has no upload entry point (upload only happens by clicking an empty slot in the 3D closet) and is slated for removal
 - `src/components/shelf3d/BookShelf3D.tsx` — 3D closet view (three + @react-three/fiber, lazy-loaded): gaze/zoom camera, click-to-fly-out book with info panel, click-empty-slot-to-upload. Requires CORS on the R2 assets domain (configured on bucket `ovid`)
 - `src/components/shelf3d/layout.ts` — Pure shelf-packing math for the 3D view: books explicitly placed in a physical slot (`shelf_row`/`shelf_col`) render at that coordinate; everything else packs into a stable block of rows below the physical slots, grouped by shelf/ownership (adaptive case width, unit-tested)
@@ -67,7 +68,7 @@ TypeScript-first across frontend, backend, CLI, and translator service.
 - `services/translator/src/translate-worker.ts` — Translation logic
 - `services/translator/src/d1-client.ts` — D1 REST API client
 - `services/translator/src/cover-composer.ts` — Composes cover + spine onto blank cloth templates (Sharp): book-face detection, original-cover inset, title/author typesetting, length-based spine thickness
-- `services/translator/src/book-parser.ts` — EPUB parsing; also extracts the embedded cover (used as the cover inset)
+- `services/translator/src/book-parser.ts` — EPUB parsing; also extracts the embedded cover (used as the cover inset). Resolves internal links across spine files to `(chapter, xpath)` coordinates (`data-ov-chapter`/`data-ov-xpath` attributes in `raw_html`) and classifies footnote references (`data-ov-note`) across the common EPUB shapes: EPUB3 `epub:type="noteref"` + `<aside epub:type="footnote">` (aside hidden via `data-ov-hidden`, still translated), separate endnotes pages (heading + backlink-ratio heuristic), Gutenberg-style same-file anchor pairs (note-label echo heuristic), plus plain cross-references; note labels are stripped from the `text` sent to translation. Mirrored in `src/utils/book-processor.ts` (CLI fallback importer) — keep the two in sync
 - `services/translator/src/image-processor.ts` — Legacy cover/spine image processing (Sharp), used by the cover-preview debug page
 - `services/translator/src/cover-preview.ts` — Password-protected cover preview page
 

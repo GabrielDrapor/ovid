@@ -62,6 +62,541 @@ export interface ProcessedBookV2 {
   chapters: TranslatedChapterV2[];
 }
 
+// ---- Parsing helpers (kept in sync with services/translator/src/book-parser.ts) ----
+
+const blockTags = new Set([
+  'p',
+  'div',
+  'h1',
+  'h2',
+  'h3',
+  'h4',
+  'h5',
+  'h6',
+  'li',
+  'blockquote',
+  'pre',
+  'td',
+  'th',
+  'dt',
+  'dd',
+  'figcaption',
+  'article',
+  'section',
+  // EPUB3 popup footnotes live in <aside epub:type="footnote">, often as
+  // bare text without a <p> wrapper — treat aside as a block so that text
+  // is extracted (and translated) instead of silently dropped.
+  'aside',
+]);
+
+const skipTags = new Set([
+  'script',
+  'style',
+  'noscript',
+  'head',
+  'meta',
+  'link',
+]);
+
+/** Collapse ./ and ../ segments in a zip path for reliable matching. */
+function normalizeZipPath(p: string): string {
+  const out: string[] = [];
+  for (const seg of p.split('/')) {
+    if (seg === '..') out.pop();
+    else if (seg !== '.' && seg !== '') out.push(seg);
+  }
+  return out.join('/');
+}
+
+function decodeEntities(text: string): string {
+  return text
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(parseInt(code)))
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function getFullTextContent(node: any): string {
+  let text = '';
+  const children = node.childNodes;
+  if (children) {
+    for (let i = 0; i < children.length; i++) {
+      const child = children[i];
+      if (child.nodeType === 3) text += child.textContent || '';
+      else if (child.nodeType === 1) text += getFullTextContent(child);
+    }
+  }
+  return text;
+}
+
+/**
+ * Like getFullTextContent, but skips note-reference links (superscript
+ * footnote labels rewritten to `a[data-ov-note]`) so they don't pollute
+ * the text sent to translation.
+ */
+function getTranslatableTextContent(node: any): string {
+  let text = '';
+  const children = node.childNodes;
+  if (children) {
+    for (let i = 0; i < children.length; i++) {
+      const child = children[i];
+      if (child.nodeType === 3) text += child.textContent || '';
+      else if (child.nodeType === 1) {
+        if (
+          (child.nodeName || '').toLowerCase() === 'a' &&
+          child.getAttribute?.('data-ov-note')
+        )
+          continue;
+        text += getTranslatableTextContent(child);
+      }
+    }
+  }
+  return text;
+}
+
+function serializeNode(node: any): string {
+  if (node.nodeType === 3) return node.textContent || '';
+  if (node.nodeType !== 1) return '';
+
+  const tagName = (node.nodeName || 'div').toLowerCase();
+
+  let inner = '';
+  const children = node.childNodes;
+  if (children) {
+    for (let i = 0; i < children.length; i++) {
+      inner += serializeNode(children[i]);
+    }
+  }
+
+  // <a> policy: keep external http(s) links, resolved internal links
+  // (data-ov-chapter) and named anchors; unwrap everything else.
+  if (tagName === 'a') {
+    const href = node.getAttribute?.('href');
+    const keep =
+      node.getAttribute?.('data-ov-chapter') ||
+      node.getAttribute?.('id') ||
+      node.getAttribute?.('name') ||
+      (href && href.startsWith('http'));
+    if (!keep) return inner;
+  }
+
+  let attrs = '';
+  if (node.attributes) {
+    for (let i = 0; i < node.attributes.length; i++) {
+      const attr = node.attributes[i];
+      attrs += ` ${attr.name}="${attr.value}"`;
+    }
+  }
+
+  const selfClosing = new Set(['br', 'hr', 'img', 'input', 'meta', 'link']);
+  if (selfClosing.has(tagName)) return `<${tagName}${attrs}/>`;
+
+  return `<${tagName}${attrs}>${inner}</${tagName}>`;
+}
+
+function getInnerHtml(node: any): string {
+  let html = '';
+  const children = node.childNodes;
+  if (children) {
+    for (let i = 0; i < children.length; i++) {
+      const child = children[i];
+      if (child.nodeType === 3) html += child.textContent || '';
+      else if (child.nodeType === 1) html += serializeNode(child);
+    }
+  }
+  return html;
+}
+
+const hasChildBlockElements = (node: any): boolean => {
+  const children = node.childNodes;
+  if (!children) return false;
+  for (let i = 0; i < children.length; i++) {
+    const child = children[i];
+    if (child.nodeType === 1) {
+      const childTag = (child.nodeName || '').toLowerCase();
+      if (blockTags.has(childTag)) return true;
+    }
+  }
+  return false;
+};
+
+/** DFS visiting every leaf block element with its computed XPath. */
+function walkBlockLeaves(body: any, cb: (node: any, xpath: string) => void) {
+  const visit = (node: any, pathSegments: string[]) => {
+    if (!node || node.nodeType !== 1) return;
+
+    const tagName = (node.nodeName || '').toLowerCase();
+    if (skipTags.has(tagName)) return;
+
+    let elementIndex = 1;
+    let sibling = node.previousSibling;
+    while (sibling) {
+      if (
+        sibling.nodeType === 1 &&
+        (sibling.nodeName || '').toLowerCase() === tagName
+      )
+        elementIndex++;
+      sibling = sibling.previousSibling;
+    }
+
+    const currentPath = [...pathSegments, `${tagName}[${elementIndex}]`];
+
+    if (blockTags.has(tagName)) {
+      if (hasChildBlockElements(node)) {
+        const children = node.childNodes;
+        if (children) {
+          for (let i = 0; i < children.length; i++)
+            visit(children[i], currentPath);
+        }
+        return;
+      }
+      cb(node, '/' + currentPath.join('/'));
+      return;
+    }
+
+    const children = node.childNodes;
+    if (children) {
+      for (let i = 0; i < children.length; i++) visit(children[i], currentPath);
+    }
+  };
+
+  const bodyChildren = body.childNodes;
+  for (let i = 0; i < bodyChildren.length; i++) {
+    visit(bodyChildren[i], ['body[1]']);
+  }
+}
+
+function extractTextNodes(body: any): ContentItemV2[] {
+  const textNodes: ContentItemV2[] = [];
+  let orderIndex = 0;
+  walkBlockLeaves(body, (node, xpath) => {
+    const fullText = decodeEntities(getTranslatableTextContent(node));
+    if (fullText.length >= 2) {
+      textNodes.push({
+        xpath,
+        text: fullText,
+        html: getInnerHtml(node),
+        orderIndex: orderIndex++,
+      });
+    }
+  });
+  return textNodes;
+}
+
+function extractChapterTitle(
+  doc: any,
+  body: any,
+  chapterNumber: number
+): string {
+  let chapterTitle = '';
+  const h1 = doc.getElementsByTagName('h1')[0];
+  const h2 = doc.getElementsByTagName('h2')[0];
+  const h3 = doc.getElementsByTagName('h3')[0];
+  if (h1?.textContent?.trim()) chapterTitle = h1.textContent.trim();
+  else if (h2?.textContent?.trim()) chapterTitle = h2.textContent.trim();
+  else if (h3?.textContent?.trim()) chapterTitle = h3.textContent.trim();
+  if (chapterTitle) return chapterTitle;
+
+  const headingParts: string[] = [];
+  let stopScanning = false;
+  const scanForHeadings = (parent: any) => {
+    const children = parent.childNodes;
+    if (!children) return;
+    for (let i = 0; i < children.length; i++) {
+      if (stopScanning || headingParts.length >= 3) return;
+      const child = children[i];
+      if (child.nodeType !== 1) continue;
+      const tag = (child.nodeName || '').toLowerCase();
+      if (skipTags.has(tag)) continue;
+      if (blockTags.has(tag)) {
+        if (hasChildBlockElements(child)) {
+          scanForHeadings(child);
+          continue;
+        }
+        const text = (child.textContent || '').replace(/\s+/g, ' ').trim();
+        if (text.length >= 1 && text.length <= 50) headingParts.push(text);
+        else if (text.length > 50) {
+          stopScanning = true;
+          return;
+        }
+      } else {
+        scanForHeadings(child);
+      }
+    }
+  };
+  scanForHeadings(body);
+  return headingParts.join(' – ') || `Chapter ${chapterNumber}`;
+}
+
+function serializeBodyHtml(body: any): string {
+  let rawHtml = '';
+  const bodyChildren = body.childNodes;
+  for (let i = 0; i < bodyChildren.length; i++) {
+    const child = bodyChildren[i];
+    if (child.nodeType === 1) rawHtml += serializeNode(child);
+    else if (child.nodeType === 3 && child.textContent?.trim())
+      rawHtml += child.textContent;
+  }
+  return rawHtml;
+}
+
+// ---- Internal links & footnotes (see book-parser.ts for the taxonomy) ----
+
+interface AnchorTarget {
+  chapter: number;
+  xpath: string;
+}
+
+interface AnchorIndex {
+  anchors: Map<string, string>;
+  firstBlockXpath: string | null;
+  blockTexts: Map<string, string>;
+}
+
+function buildAnchorIndex(body: any): AnchorIndex {
+  const leaves: { node: any; xpath: string; text: string }[] = [];
+  walkBlockLeaves(body, (node, xpath) => {
+    leaves.push({
+      node,
+      xpath,
+      text: decodeEntities(getFullTextContent(node)),
+    });
+  });
+
+  const blockTexts = new Map<string, string>();
+  for (const l of leaves) blockTexts.set(l.xpath, l.text);
+  const firstContentLeaf = leaves.find((l) => l.text.length >= 2) || null;
+
+  const seqOf = new Map<any, number>();
+  let seq = 0;
+  const numberDfs = (node: any) => {
+    if (!node || node.nodeType !== 1) return;
+    seqOf.set(node, seq++);
+    const children = node.childNodes;
+    if (children) {
+      for (let i = 0; i < children.length; i++) numberDfs(children[i]);
+    }
+  };
+  numberDfs(body);
+
+  const leafXpathByNode = new Map<any, string>();
+  for (const l of leaves) leafXpathByNode.set(l.node, l.xpath);
+
+  const anchors = new Map<string, string>();
+  const collectIds = (node: any) => {
+    if (!node || node.nodeType !== 1) return;
+    const ids: string[] = [];
+    const id = node.getAttribute?.('id');
+    const name =
+      (node.nodeName || '').toLowerCase() === 'a'
+        ? node.getAttribute?.('name')
+        : null;
+    if (id) ids.push(id);
+    if (name && name !== id) ids.push(name);
+
+    if (ids.length > 0) {
+      let xpath: string | undefined;
+      let p = node;
+      while (p && p !== body) {
+        const found = leafXpathByNode.get(p);
+        if (found) {
+          xpath = found;
+          break;
+        }
+        p = p.parentNode;
+      }
+      if (!xpath) {
+        const mySeq = seqOf.get(node) ?? 0;
+        const next = leaves.find((l) => (seqOf.get(l.node) ?? -1) >= mySeq);
+        xpath = (next || leaves[leaves.length - 1])?.xpath;
+      }
+      if (xpath) {
+        for (const key of ids) {
+          if (!anchors.has(key)) anchors.set(key, xpath);
+        }
+      }
+    }
+
+    const children = node.childNodes;
+    if (children) {
+      for (let i = 0; i < children.length; i++) collectIds(children[i]);
+    }
+  };
+  collectIds(body);
+
+  return {
+    anchors,
+    firstBlockXpath: firstContentLeaf?.xpath ?? null,
+    blockTexts,
+  };
+}
+
+const NOTES_HEADING_INDICATORS = [
+  'notes',
+  'endnotes',
+  'footnotes',
+  '注释',
+  '尾注',
+  '脚注',
+  '注釈',
+];
+
+function detectNotesPage(body: any, filePath: string, title: string): boolean {
+  const titleLower = (title || '').trim().toLowerCase();
+  let hasHeading = NOTES_HEADING_INDICATORS.some(
+    (ind) => titleLower.length <= 30 && titleLower.includes(ind)
+  );
+  if (!hasHeading) {
+    outer: for (const tag of ['h1', 'h2', 'h3', 'p']) {
+      const els = body.getElementsByTagName(tag);
+      for (let i = 0; i < Math.min(els.length, 3); i++) {
+        const text = (els[i].textContent || '').trim().toLowerCase();
+        if (
+          text.length > 0 &&
+          text.length < 30 &&
+          NOTES_HEADING_INDICATORS.some((ind) => text.includes(ind))
+        ) {
+          hasHeading = true;
+          break outer;
+        }
+      }
+    }
+  }
+
+  const fileName = filePath.split('/').pop() || filePath;
+  const paragraphs = body.getElementsByTagName('p');
+  let total = 0;
+  let backLinked = 0;
+  for (let i = 0; i < paragraphs.length; i++) {
+    const p = paragraphs[i];
+    const text = (p.textContent || '').trim();
+    if (text.length < 3) continue;
+    total++;
+    const link = p.getElementsByTagName('a')[0];
+    if (!link) continue;
+    const href = link.getAttribute('href') || '';
+    const targetFile = href.split('#')[0];
+    if (
+      targetFile &&
+      !targetFile.startsWith('http') &&
+      !targetFile.endsWith(fileName)
+    ) {
+      backLinked++;
+    }
+  }
+
+  const ratio = total > 0 ? backLinked / total : 0;
+  return (
+    (hasHeading && total >= 3 && ratio >= 0.25) || (total >= 5 && ratio >= 0.5)
+  );
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+const NOTE_LABEL_RE = /^[[(]?(\d{1,4}|[*†‡§‖¶#])[\])]?\.?$/;
+
+function rewriteInternalLinks(opts: {
+  body: any;
+  filePath: string;
+  anchorMap: Map<string, AnchorTarget>;
+  notesFiles: Set<string>;
+  blockTextByKey: Map<string, string>;
+}): void {
+  const { body, filePath, anchorMap, notesFiles, blockTextByKey } = opts;
+  const dir = filePath.includes('/')
+    ? filePath.slice(0, filePath.lastIndexOf('/') + 1)
+    : '';
+
+  const linkEls = body.getElementsByTagName('a');
+  const links: any[] = [];
+  for (let i = 0; i < linkEls.length; i++) links.push(linkEls[i]);
+
+  for (const a of links) {
+    const href = a.getAttribute('href');
+    if (!href) continue;
+    if (/^[a-z][a-z0-9+.-]*:/i.test(href)) continue;
+
+    const [rawPath, rawFrag] = href.split('#', 2);
+    let targetPath = filePath;
+    if (rawPath) {
+      try {
+        const decoded = decodeURIComponent(rawPath);
+        targetPath = normalizeZipPath(
+          decoded.startsWith('/') ? decoded.slice(1) : dir + decoded
+        );
+      } catch {
+        continue;
+      }
+    }
+    let frag: string | null = null;
+    if (rawFrag) {
+      try {
+        frag = decodeURIComponent(rawFrag);
+      } catch {
+        frag = rawFrag;
+      }
+    }
+
+    const target =
+      (frag ? anchorMap.get(`${targetPath}#${frag}`) : undefined) ||
+      anchorMap.get(targetPath);
+    if (!target) continue;
+
+    const label = getFullTextContent(a).trim();
+    const epubType = a.getAttribute('epub:type') || '';
+    const role = a.getAttribute('role') || '';
+    let isNote = /noteref/i.test(epubType) || /doc-noteref/i.test(role);
+    if (!isNote && NOTE_LABEL_RE.test(label)) {
+      if (targetPath !== filePath && notesFiles.has(targetPath)) {
+        isNote = true;
+      } else {
+        const targetText =
+          blockTextByKey.get(`${targetPath}#${target.xpath}`) || '';
+        const core = label.replace(/[[\]().]/g, '');
+        if (
+          core &&
+          new RegExp(`^[[(]?${escapeRegExp(core)}[\\])]?[.):\\s]`).test(
+            targetText + ' '
+          )
+        ) {
+          isNote = true;
+        }
+      }
+    }
+
+    a.setAttribute('data-ov-chapter', String(target.chapter));
+    a.setAttribute('data-ov-xpath', target.xpath);
+    if (isNote) a.setAttribute('data-ov-note', '1');
+    a.removeAttribute('href');
+    a.setAttribute('tabindex', '0');
+    if (!role) a.setAttribute('role', isNote ? 'doc-noteref' : 'link');
+  }
+}
+
+function markFootnoteAsides(body: any): void {
+  const walk = (node: any) => {
+    if (!node || node.nodeType !== 1) return;
+    const epubType = node.getAttribute?.('epub:type') || '';
+    if (
+      /\b(footnote|rearnote|endnote)s?\b/i.test(epubType) &&
+      !/noteref/i.test(epubType)
+    ) {
+      node.setAttribute('data-ov-hidden', 'note');
+    }
+    const children = node.childNodes;
+    if (children) {
+      for (let i = 0; i < children.length; i++) walk(children[i]);
+    }
+  };
+  walk(body);
+}
+
 export class BookProcessor {
   private translator: Translator;
 
@@ -169,8 +704,19 @@ export class BookProcessor {
       }
     }
 
-    // Parse chapters from HTML files with XPath extraction
-    const chapters: ChapterV2[] = [];
+    // Parse chapters in two phases so internal links can resolve across
+    // files (kept in sync with services/translator/src/book-parser.ts).
+    interface PreparedFile {
+      normPath: string;
+      doc: any;
+      body: any;
+      chapterNumber: number;
+      title: string;
+      index: AnchorIndex;
+      isNotesPage: boolean;
+    }
+
+    const prepared: PreparedFile[] = [];
     let chapterNumber = 1;
 
     for (const htmlPath of htmlFiles) {
@@ -178,10 +724,9 @@ export class BookProcessor {
       if (!file) continue;
 
       const htmlContent = await file.async('text');
-      const chapterData = this.parseHTMLChapterV2(htmlContent, chapterNumber);
+      const doc = new DOMParser().parseFromString(htmlContent, 'text/html');
 
       // Extract internal styles
-      const doc = new DOMParser().parseFromString(htmlContent, 'text/html');
       const styleTags = doc.getElementsByTagName('style');
       for (let i = 0; i < styleTags.length; i++) {
         const styleContent = styleTags[i].textContent;
@@ -190,17 +735,70 @@ export class BookProcessor {
         }
       }
 
-      if (chapterData && chapterData.textNodes.length > 0) {
-        chapters.push({
-          ...chapterData,
-          number: chapterNumber++,
+      const body = doc.getElementsByTagName('body')[0];
+      if (!body) continue;
+
+      const index = buildAnchorIndex(body);
+      if (!index.firstBlockXpath) continue;
+
+      const title = extractChapterTitle(doc, body, chapterNumber);
+      prepared.push({
+        normPath: normalizeZipPath(htmlPath),
+        doc,
+        body,
+        chapterNumber,
+        title,
+        index,
+        isNotesPage: detectNotesPage(body, htmlPath, title),
+      });
+      chapterNumber++;
+    }
+
+    const anchorMap = new Map<string, AnchorTarget>();
+    const notesFiles = new Set<string>();
+    const blockTextByKey = new Map<string, string>();
+    for (const p of prepared) {
+      anchorMap.set(p.normPath, {
+        chapter: p.chapterNumber,
+        xpath: p.index.firstBlockXpath!,
+      });
+      p.index.anchors.forEach((xpath, id) => {
+        anchorMap.set(`${p.normPath}#${id}`, {
+          chapter: p.chapterNumber,
+          xpath,
         });
-      }
+      });
+      if (p.isNotesPage) notesFiles.add(p.normPath);
+      p.index.blockTexts.forEach((text, xpath) => {
+        blockTextByKey.set(`${p.normPath}#${xpath}`, text);
+      });
+    }
+
+    const chapters: ChapterV2[] = [];
+    for (const p of prepared) {
+      rewriteInternalLinks({
+        body: p.body,
+        filePath: p.normPath,
+        anchorMap,
+        notesFiles,
+        blockTextByKey,
+      });
+      markFootnoteAsides(p.body);
+
+      chapters.push({
+        number: p.chapterNumber,
+        title: p.title,
+        originalTitle: p.title,
+        rawHtml: serializeBodyHtml(p.body),
+        textNodes: extractTextNodes(p.body),
+      });
     }
 
     // Extract images from EPUB
     const images: EpubImage[] = [];
-    const basePath = opfFile ? opfFile.substring(0, opfFile.lastIndexOf('/') + 1) : '';
+    const basePath = opfFile
+      ? opfFile.substring(0, opfFile.lastIndexOf('/') + 1)
+      : '';
     for (const entry of imageManifestEntries) {
       const imgPath = entry.href.startsWith('/')
         ? entry.href.substring(1)
@@ -238,13 +836,18 @@ export class BookProcessor {
    * @param buffer - Raw file bytes
    * @param fileExtension - '.mobi' or '.azw3' to select the right parser
    */
-  async parseMOBI(buffer: ArrayBuffer, fileExtension: string): Promise<BookDataV2> {
+  async parseMOBI(
+    buffer: ArrayBuffer,
+    fileExtension: string
+  ): Promise<BookDataV2> {
     const uint8 = new Uint8Array(buffer);
 
     // Try KF8 parser for .azw3, MOBI parser for .mobi.
     // If KF8 parsing yields very few chapters (library bug), fall back to MOBI parser.
     const isKf8 = fileExtension === '.azw3';
-    let parser: Awaited<ReturnType<typeof initMobiFile>> | Awaited<ReturnType<typeof initKf8File>>;
+    let parser:
+      | Awaited<ReturnType<typeof initMobiFile>>
+      | Awaited<ReturnType<typeof initKf8File>>;
 
     if (isKf8) {
       // Try KF8 first, fall back to MOBI if chapters fail to load
@@ -269,7 +872,9 @@ export class BookProcessor {
    * Internal: extract BookDataV2 from an already-initialized MOBI/KF8 parser.
    */
   private async _parseMOBIInternal(
-    parser: Awaited<ReturnType<typeof initMobiFile>> | Awaited<ReturnType<typeof initKf8File>>
+    parser:
+      | Awaited<ReturnType<typeof initMobiFile>>
+      | Awaited<ReturnType<typeof initKf8File>>
   ): Promise<BookDataV2> {
     // Placeholder to satisfy TS — actual parser passed in
 
@@ -277,9 +882,10 @@ export class BookProcessor {
     const spine = parser.getSpine();
 
     const title = metadata.title || 'Unknown Title';
-    const author = (metadata.author && metadata.author.length > 0)
-      ? metadata.author.join(', ')
-      : 'Unknown Author';
+    const author =
+      metadata.author && metadata.author.length > 0
+        ? metadata.author.join(', ')
+        : 'Unknown Author';
 
     const chapters: ChapterV2[] = [];
     let chapterNumber = 1;
@@ -337,282 +943,30 @@ export class BookProcessor {
   }
 
   /**
-   * Parse a single HTML chapter with XPath extraction
+   * Parse a single HTML chapter with XPath extraction (single-file mode:
+   * used by the MOBI path, where internal links are stripped beforehand).
    */
   private parseHTMLChapterV2(
     html: string,
     chapterNumber: number
-  ): { title: string; originalTitle: string; rawHtml: string; textNodes: ContentItemV2[] } | null {
+  ): {
+    title: string;
+    originalTitle: string;
+    rawHtml: string;
+    textNodes: ContentItemV2[];
+  } | null {
     const doc = new DOMParser().parseFromString(html, 'text/html');
     const body = doc.getElementsByTagName('body')[0];
     if (!body) return null;
 
-    // Extract body content as rawHtml
-    let rawHtml = '';
-    const bodyChildren = body.childNodes;
-    for (let i = 0; i < bodyChildren.length; i++) {
-      const child = bodyChildren[i];
-      if (child.nodeType === 1) { // ELEMENT_NODE
-        rawHtml += this.serializeNode(child);
-      } else if (child.nodeType === 3 && child.textContent?.trim()) { // TEXT_NODE
-        rawHtml += child.textContent;
-      }
-    }
-
-    // Try to extract chapter title from heading tags
-    let chapterTitle = '';
-    const h1 = doc.getElementsByTagName('h1')[0];
-    const h2 = doc.getElementsByTagName('h2')[0];
-    const h3 = doc.getElementsByTagName('h3')[0];
-
-    if (h1?.textContent?.trim()) {
-      chapterTitle = h1.textContent.trim();
-    } else if (h2?.textContent?.trim()) {
-      chapterTitle = h2.textContent.trim();
-    } else if (h3?.textContent?.trim()) {
-      chapterTitle = h3.textContent.trim();
-    }
-
-    // Extract text nodes with XPath
-    const textNodes: ContentItemV2[] = [];
-    const tagCounts: Record<string, number> = {};
-    let orderIndex = 0;
-
-    // Block-level elements to extract text from
-    const blockTags = new Set([
-      'p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
-      'li', 'blockquote', 'pre', 'td', 'th', 'dt', 'dd',
-      'figcaption', 'article', 'section'
-    ]);
-
-    const skipTags = new Set(['script', 'style', 'noscript', 'head', 'meta', 'link']);
-
-    // Helper to decode HTML entities
-    const decodeEntities = (text: string): string => {
-      return text
-        .replace(/&nbsp;/g, ' ')
-        .replace(/&amp;/g, '&')
-        .replace(/&lt;/g, '<')
-        .replace(/&gt;/g, '>')
-        .replace(/&quot;/g, '"')
-        .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(parseInt(code)))
-        .replace(/\s+/g, ' ')
-        .trim();
-    };
-
-    // Helper to get full text content
-    const getFullTextContent = (node: any): string => {
-      let text = '';
-      const children = node.childNodes;
-      if (children) {
-        for (let i = 0; i < children.length; i++) {
-          const child = children[i];
-          if (child.nodeType === 3) { // TEXT_NODE
-            text += child.textContent || '';
-          } else if (child.nodeType === 1) { // ELEMENT_NODE
-            text += getFullTextContent(child);
-          }
-        }
-      }
-      return text;
-    };
-
-    // Helper to get innerHTML (preserves formatting tags)
-    const getInnerHtml = (node: any): string => {
-      let html = '';
-      const children = node.childNodes;
-      if (children) {
-        for (let i = 0; i < children.length; i++) {
-          const child = children[i];
-          if (child.nodeType === 3) { // TEXT_NODE
-            html += child.textContent || '';
-          } else if (child.nodeType === 1) { // ELEMENT_NODE
-            html += this.serializeNode(child);
-          }
-        }
-      }
-      return html;
-    };
-
-    // Check if a node contains any child block elements (direct or nested)
-    const hasChildBlockElements = (node: any): boolean => {
-      const children = node.childNodes;
-      if (!children) return false;
-      for (let i = 0; i < children.length; i++) {
-        const child = children[i];
-        if (child.nodeType === 1) {
-          const childTag = (child.nodeName || '').toLowerCase();
-          if (blockTags.has(childTag)) return true;
-        }
-      }
-      return false;
-    };
-
-    // Recursive walk to extract from block elements
-    // pathSegments tracks the full XPath from body to build hierarchical paths
-    // matching exactly how the reader's walkAndMap builds paths
-    const walkNode = (node: any, pathSegments: string[]) => {
-      if (!node) return;
-
-      const nodeType = node.nodeType;
-      if (nodeType !== 1) return; // Only process ELEMENT_NODE
-
-      const tagName = (node.nodeName || '').toLowerCase();
-      if (skipTags.has(tagName)) return;
-
-      // Count element index among siblings of same tag name
-      let elementIndex = 1;
-      let sibling = node.previousSibling;
-      while (sibling) {
-        if (sibling.nodeType === 1 && (sibling.nodeName || '').toLowerCase() === tagName) {
-          elementIndex++;
-        }
-        sibling = sibling.previousSibling;
-      }
-
-      const currentPath = [...pathSegments, `${tagName}[${elementIndex}]`];
-
-      if (blockTags.has(tagName)) {
-        // If this block contains child blocks, recurse into them
-        if (hasChildBlockElements(node)) {
-          const children = node.childNodes;
-          if (children) {
-            for (let i = 0; i < children.length; i++) {
-              walkNode(children[i], currentPath);
-            }
-          }
-          return;
-        }
-
-        const fullText = decodeEntities(getFullTextContent(node));
-        if (fullText.length >= 2) {
-          const xpath = '/' + currentPath.join('/');
-
-          textNodes.push({
-            xpath,
-            text: fullText,
-            html: getInnerHtml(node),
-            orderIndex: orderIndex++,
-          });
-        }
-        return; // Don't recurse into leaf block elements
-      }
-
-      // Recurse into children for non-block elements
-      const children = node.childNodes;
-      if (children) {
-        for (let i = 0; i < children.length; i++) {
-          walkNode(children[i], currentPath);
-        }
-      }
-    };
-
-    // Walk body children
-    for (let i = 0; i < bodyChildren.length; i++) {
-      walkNode(bodyChildren[i], ['body[1]']);
-    }
-
-    // If no heading tag found, derive title from first short block elements
-    if (!chapterTitle) {
-      const headingParts: string[] = [];
-      let stopScanning = false;
-      // Walk block elements looking for short heading-like text
-      const scanForHeadings = (parent: any) => {
-        const children = parent.childNodes;
-        if (!children) return;
-        for (let i = 0; i < children.length; i++) {
-          if (stopScanning || headingParts.length >= 3) return;
-          const child = children[i];
-          if (child.nodeType !== 1) continue;
-          const tag = (child.nodeName || '').toLowerCase();
-          if (skipTags.has(tag)) continue;
-          if (blockTags.has(tag)) {
-            // Check if this block has child blocks (container) - recurse into it
-            let hasChildBlocks = false;
-            const grandchildren = child.childNodes;
-            if (grandchildren) {
-              for (let j = 0; j < grandchildren.length; j++) {
-                if (grandchildren[j].nodeType === 1 && blockTags.has((grandchildren[j].nodeName || '').toLowerCase())) {
-                  hasChildBlocks = true;
-                  break;
-                }
-              }
-            }
-            if (hasChildBlocks) {
-              scanForHeadings(child);
-              continue;
-            }
-            const text = (child.textContent || '').replace(/\s+/g, ' ').trim();
-            if (text.length >= 1 && text.length <= 50) {
-              headingParts.push(text);
-            } else if (text.length > 50) {
-              stopScanning = true;
-              return;
-            }
-          } else {
-            scanForHeadings(child);
-          }
-        }
-      };
-      scanForHeadings(body);
-      chapterTitle = headingParts.join(' \u2013 ') || `Chapter ${chapterNumber}`;
-    }
+    const chapterTitle = extractChapterTitle(doc, body, chapterNumber);
 
     return {
       title: chapterTitle,
       originalTitle: chapterTitle,
-      rawHtml,
-      textNodes,
+      rawHtml: serializeBodyHtml(body),
+      textNodes: extractTextNodes(body),
     };
-  }
-
-  /**
-   * Serialize a DOM node to string
-   */
-  private serializeNode(node: any): string {
-    if (node.nodeType === 3) { // TEXT_NODE
-      return node.textContent || '';
-    }
-    if (node.nodeType !== 1) return ''; // Only serialize ELEMENT_NODE
-
-    const tagName = (node.nodeName || 'div').toLowerCase();
-
-    // Get inner content first (needed for <a> unwrapping)
-    let inner = '';
-    const children = node.childNodes;
-    if (children) {
-      for (let i = 0; i < children.length; i++) {
-        inner += this.serializeNode(children[i]);
-      }
-    }
-
-    // Strip internal <a> links — keep only inner content
-    // Internal links point to other EPUB files (.xhtml, .html) or use # anchors
-    if (tagName === 'a') {
-      const href = node.getAttribute?.('href');
-      if (!href || !href.startsWith('http')) {
-        // Internal link — unwrap, keep content
-        return inner;
-      }
-    }
-
-    let attrs = '';
-
-    // Serialize attributes
-    if (node.attributes) {
-      for (let i = 0; i < node.attributes.length; i++) {
-        const attr = node.attributes[i];
-        attrs += ` ${attr.name}="${attr.value}"`;
-      }
-    }
-
-    // Self-closing tags
-    const selfClosing = new Set(['br', 'hr', 'img', 'input', 'meta', 'link']);
-    if (selfClosing.has(tagName)) {
-      return `<${tagName}${attrs}/>`;
-    }
-
-    return `<${tagName}${attrs}>${inner}</${tagName}>`;
   }
 
   /**
@@ -632,10 +986,13 @@ export class BookProcessor {
     let completedItems = 0;
 
     // Translate book title
-    const translatedBookTitle = await this.translator.translateText(bookData.title, {
-      sourceLanguage,
-      targetLanguage,
-    });
+    const translatedBookTitle = await this.translator.translateText(
+      bookData.title,
+      {
+        sourceLanguage,
+        targetLanguage,
+      }
+    );
     completedItems++;
     if (onProgress) onProgress(completedItems, totalItems);
 
@@ -647,16 +1004,19 @@ export class BookProcessor {
 
     const processChapter = async (chapter: ChapterV2, index: number) => {
       // Translate chapter title
-      const translatedTitle = await this.translator.translateText(chapter.title, {
-        sourceLanguage,
-        targetLanguage,
-      });
+      const translatedTitle = await this.translator.translateText(
+        chapter.title,
+        {
+          sourceLanguage,
+          targetLanguage,
+        }
+      );
       completedItems++;
       if (onProgress) onProgress(completedItems, totalItems);
 
       // Translate text nodes
       const translations = new Map<string, string>();
-      const texts = chapter.textNodes.map(n => n.text);
+      const texts = chapter.textNodes.map((n) => n.text);
 
       const translatedTexts = await this.translator.translateBatch(texts, {
         sourceLanguage,
@@ -684,9 +1044,13 @@ export class BookProcessor {
       if (inProgress.length >= chapterConcurrency) {
         await Promise.race(inProgress);
         // Remove completed promises
-        const completed = inProgress.filter(p => {
+        const completed = inProgress.filter((p) => {
           let resolved = false;
-          p.then(() => { resolved = true; }).catch(() => { resolved = true; });
+          p.then(() => {
+            resolved = true;
+          }).catch(() => {
+            resolved = true;
+          });
           return !resolved;
         });
         inProgress.length = 0;
