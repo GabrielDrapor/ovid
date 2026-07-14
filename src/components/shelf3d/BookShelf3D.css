@@ -90,21 +90,52 @@
   }
 }
 
+/* Form 4 · Loan Card — the book-detail panel, restyled as the checkout card
+   from the book's back pocket. Same "the doc IS the modal" cream-paper
+   system as Form 1/2 (BookShelf.css) and Form 3 below, with literal values
+   since this stylesheet doesn't share BookShelf.css's custom properties.
+   Vertical rhythm: 28px rule grid — padding-top one blank line,
+   padding-bottom two lines (blank line + the line the rod hole floats in),
+   same convention as .uf-doc / .closet3d-label-slip. Keeps the panel's own
+   right-of-scene desktop placement and mobile bottom-sheet behavior. */
 .closet3d-panel {
   position: absolute;
   top: 50%;
   right: 7%;
   transform: translateY(-50%);
-  width: min(320px, 38vw);
-  padding: 26px 26px 22px;
-  background: rgba(24, 18, 14, 0.78);
-  border: 1px solid rgba(255, 235, 205, 0.14);
-  border-radius: 14px;
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  color: #f4ead9;
+  width: min(340px, 40vw);
   z-index: 5;
+  font-family: 'Literata', Georgia, 'Songti SC', serif;
+  color: #2b241a;
+  background:
+    repeating-linear-gradient(
+      transparent,
+      transparent 27px,
+      rgba(94, 118, 169, 0.28) 27px,
+      rgba(94, 118, 169, 0.28) 28px
+    ),
+    linear-gradient(160deg, #f6f4ed 82%, #eae4d3);
+  border-radius: 10px;
+  padding: 28px 30px 56px 40px;
+  box-shadow:
+    0 1px 0 #cfc8b8 inset,
+    0 24px 60px rgba(0, 0, 0, 0.6),
+    0 4px 12px rgba(0, 0, 0, 0.4);
   animation: closet3d-panel-in 0.35s ease both;
+}
+
+.closet3d-panel::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 18px;
+  border-left: 1.5px solid rgba(196, 90, 66, 0.5);
+}
+
+.closet3d-panel button:focus-visible {
+  outline: 2px solid #b4533c;
+  outline-offset: 2px;
 }
 
 @keyframes closet3d-panel-in {
@@ -118,24 +149,59 @@
   }
 }
 
+.closet3d-panel-form-no {
+  font-family: 'American Typewriter', 'Courier New', monospace;
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  line-height: 28px;
+  color: #4a4330;
+  text-align: center;
+  margin: 0;
+}
+
+.closet3d-panel-form-no small {
+  font-size: inherit;
+  color: inherit;
+  letter-spacing: inherit;
+}
+
+/* Pre-printed caption voice — identical to .closet3d-label-print. */
+.closet3d-panel-print {
+  font-family: 'American Typewriter', 'Courier New', monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #625a41;
+  line-height: 28px;
+}
+
+.closet3d-panel-line-gap {
+  height: 28px;
+}
+
+/* Filled-in content voice: serif ink, every line on the 28px grid. */
 .closet3d-panel h2 {
-  margin: 0 0 4px;
-  font-size: 22px;
-  line-height: 1.25;
-  font-family: Georgia, 'Songti SC', serif;
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 28px;
+  font-family: inherit;
 }
 
 .closet3d-panel h3 {
-  margin: 0 0 4px;
-  font-size: 15px;
+  margin: 0;
+  font-size: 14px;
   font-weight: 400;
-  color: rgba(244, 234, 217, 0.75);
+  line-height: 28px;
+  color: rgba(43, 36, 26, 0.7);
 }
 
 .closet3d-author {
-  margin: 6px 0 18px;
-  font-size: 13px;
-  color: rgba(244, 234, 217, 0.6);
+  margin: 0;
+  font-size: 14px;
+  line-height: 28px;
+  color: #2b241a;
 }
 
 .closet3d-panel-close {
@@ -144,7 +210,7 @@
   right: 12px;
   background: none;
   border: none;
-  color: rgba(244, 234, 217, 0.55);
+  color: rgba(43, 36, 26, 0.5);
   font-size: 22px;
   line-height: 1;
   cursor: pointer;
@@ -152,78 +218,159 @@
 }
 
 .closet3d-panel-close:hover {
-  color: #f4ead9;
+  color: #2b241a;
 }
 
+/* Reading-record zone: exactly two rule lines — the pencil-fill bar
+   (track vertically centered in its line) and a print-voice label. */
 .closet3d-progress {
-  margin-bottom: 16px;
-  font-size: 12px;
-  color: rgba(244, 234, 217, 0.65);
+  font-family: 'American Typewriter', 'Courier New', monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  line-height: 28px;
+  color: #625a41;
 }
 
 .closet3d-progress-bar {
-  height: 5px;
-  border-radius: 3px;
-  background: rgba(255, 235, 205, 0.15);
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(43, 36, 26, 0.14);
   overflow: hidden;
-  margin-bottom: 6px;
+  margin: 12px 0;
 }
 
 .closet3d-progress-bar > div {
   height: 100%;
-  border-radius: 3px;
-  background: #d8b271;
+  border-radius: 2px;
+  background: rgba(43, 36, 26, 0.75);
   transition: width 0.4s ease;
+}
+
+/* Rubber "COMPLETED" stamp in place of the percentage label. Inline-block
+   inside the label line and sized to roughly fit it — a slight overlap of
+   the rules is authentic for a stamp. */
+.closet3d-stamp-done {
+  display: inline-block;
+  font-size: 10px;
+  line-height: 1;
+  color: #b4533c;
+  border: 2.5px double #b4533c;
+  border-radius: 5px;
+  padding: 4px 10px 3px;
+  transform: rotate(-4deg);
+  opacity: 0.88;
+  mix-blend-mode: multiply;
+  animation: closet3d-stamp-in 0.4s cubic-bezier(0.3, 1.6, 0.5, 1) both;
+  animation-delay: 0.35s;
+}
+
+@keyframes closet3d-stamp-in {
+  from {
+    transform: rotate(-4deg) scale(1.7);
+    opacity: 0;
+  }
+  to {
+    transform: rotate(-4deg) scale(1);
+    opacity: 0.88;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .closet3d-stamp-done {
+    animation: none;
+  }
 }
 
 .closet3d-processing {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-bottom: 8px;
-  font-size: 13px;
-  color: rgba(244, 234, 217, 0.75);
+  font-family: 'American Typewriter', 'Courier New', monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  line-height: 28px;
+  color: #625a41;
 }
 
+/* Error is print voice in stamp-red — red stays semantic on the paper. */
 .closet3d-error {
-  margin-bottom: 8px;
-  font-size: 13px;
-  color: #ff8a80;
+  font-family: 'American Typewriter', 'Courier New', monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  line-height: 28px;
+  color: #b4533c;
+}
+
+/* Action bar: same anatomy as Form 3's — flat letterpress-ink primary and
+   an outlined quiet secondary (stamp-red here: Remove is destructive),
+   both exactly two rule lines tall, margin-top one blank line. */
+.closet3d-panel-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 28px;
 }
 
 .closet3d-read-btn {
-  display: block;
-  width: 100%;
-  padding: 11px 0;
-  border: none;
-  border-radius: 9px;
-  background: #d8b271;
-  color: #241a10;
+  flex: 1.6;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: Georgia, 'Songti SC', serif;
   font-size: 15px;
   font-weight: 600;
+  color: #f6f4ed;
+  background: #2b241a;
+  border: none;
+  border-radius: 6px;
+  padding: 0;
   cursor: pointer;
-  transition: background 0.2s ease;
+  transition:
+    background 0.2s,
+    transform 0.15s;
 }
 
 .closet3d-read-btn:hover {
-  background: #e6c68d;
+  background: #3d3423;
+}
+
+.closet3d-read-btn:active {
+  transform: translateY(1px);
 }
 
 .closet3d-remove-btn {
-  display: block;
-  width: 100%;
-  margin-top: 10px;
-  padding: 8px 0;
-  border: 1px solid rgba(255, 138, 128, 0.4);
-  border-radius: 9px;
+  flex: 1;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1.5px solid rgba(180, 83, 60, 0.55);
+  border-radius: 6px;
   background: none;
-  color: #ff8a80;
-  font-size: 13px;
+  color: #b4533c;
+  font-size: 14px;
+  font-family: Georgia, 'Songti SC', serif;
   cursor: pointer;
+  transition: background 0.2s;
 }
 
 .closet3d-remove-btn:hover {
-  background: rgba(255, 138, 128, 0.12);
+  background: rgba(180, 83, 60, 0.08);
+}
+
+.closet3d-panel-hole {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  width: 13px;
+  height: 13px;
+  margin-left: -7px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, #23201a, #0d0b08);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.55);
 }
 
 /* Form 3 · Shelf Label — a standalone cream paper slip; it does NOT extend
@@ -362,11 +509,10 @@
 }
 
 /* Flat letterpress-ink primary — brass (gradient/glow) reads as a glossy
-   candy pill on cream paper, so it's gone from the paper entirely; brass
-   stays only in the 3D scene's own dark-chrome UI (e.g. .closet3d-read-btn
-   on the book-detail panel). Height is exactly two lines (56px) via
-   explicit height + flex centering, not padding, so top/bottom edges land
-   on rule lines. */
+   candy pill on cream paper, so it's gone from the paper entirely (the
+   book-detail panel is paper now too — see Form 4 above). Height is
+   exactly two lines (56px) via explicit height + flex centering, not
+   padding, so top/bottom edges land on rule lines. */
 .closet3d-label-save-btn {
   flex: 1.6;
   height: 56px;
@@ -435,8 +581,8 @@
     transform: none;
     width: auto;
     border-radius: 18px 18px 0 0;
-    /* keep the buttons clear of the iPhone home indicator */
-    padding-bottom: calc(22px + env(safe-area-inset-bottom, 0px));
+    /* keep the rod hole and buttons clear of the iPhone home indicator */
+    padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px));
     animation: closet3d-sheet-in 0.3s ease both;
   }
 
@@ -468,9 +614,10 @@
 
 @media (max-width: 480px) {
   /* Horizontal-only tweak, matching .uf-doc's narrow-screen step-down —
-     the slip is already full-width via the 768px bottom-sheet rule above,
-     so only the gutter needs to shrink here. */
-  .closet3d-label-slip {
+     both papers are already full-width via the 768px bottom-sheet rules
+     above, so only the gutter needs to shrink here. */
+  .closet3d-label-slip,
+  .closet3d-panel {
     padding-left: 32px;
     padding-right: 24px;
   }
