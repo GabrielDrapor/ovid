@@ -1495,6 +1495,10 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
   const selectedBook = selectedUuid
     ? (bookByUuid.get(selectedUuid) ?? null)
     : null;
+  const selectedPending = selectedBook
+    ? isBookImportPending(selectedBook)
+    : false;
+  const selectedFailed = selectedBook?.status === 'error';
 
   // If the selected book disappears (e.g. deleted), close the panel.
   useEffect(() => {
@@ -1715,14 +1719,20 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
           >
             ×
           </button>
+          <div className="closet3d-panel-heading">Book Info</div>
+          <div className="closet3d-panel-print">title</div>
           <h2>{selectedBook.original_title || selectedBook.title}</h2>
           {selectedBook.original_title &&
             selectedBook.title !== selectedBook.original_title && (
               <h3>{selectedBook.title}</h3>
             )}
-          <p className="closet3d-author">By {selectedBook.author}</p>
+          <div className="closet3d-panel-row">
+            <span className="closet3d-panel-print">author</span>
+            <span className="closet3d-panel-entry">{selectedBook.author}</span>
+          </div>
+          <div className="closet3d-panel-line-gap" />
 
-          {isBookImportPending(selectedBook) ? (
+          {selectedPending ? (
             <div className="closet3d-processing">
               {(() => {
                 const tp = translationProgress.get(selectedBook.uuid);
@@ -1732,10 +1742,12 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
                   );
                   return (
                     <>
-                      <span>
-                        Translating… {tp.chaptersCompleted}/{tp.chaptersTotal}{' '}
-                        chapters ({pct}%)
-                      </span>
+                      <div className="closet3d-panel-row">
+                        <span className="closet3d-panel-print">status</span>
+                        <span className="closet3d-panel-entry closet3d-panel-num">
+                          Translating… {tp.chaptersCompleted}/{tp.chaptersTotal}
+                        </span>
+                      </div>
                       <div className="closet3d-progress-bar">
                         <div style={{ width: `${pct}%` }} />
                       </div>
@@ -1743,58 +1755,75 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
                   );
                 }
                 return (
-                  <span>
-                    {tp?.phase === 'glossary'
-                      ? 'Extracting glossary…'
-                      : selectedBook.status === 'processing' &&
-                          !selectedBook.language_pair?.endsWith('-none')
-                        ? 'Translating…'
-                        : 'Preparing cover and spine…'}
-                  </span>
+                  <div className="closet3d-panel-row">
+                    <span className="closet3d-panel-print">status</span>
+                    <span className="closet3d-panel-entry">
+                      {tp?.phase === 'glossary'
+                        ? 'Extracting glossary…'
+                        : selectedBook.status === 'processing' &&
+                            !selectedBook.language_pair?.endsWith('-none')
+                          ? 'Translating…'
+                          : 'Preparing cover and spine…'}
+                    </span>
+                  </div>
                 );
               })()}
             </div>
-          ) : selectedBook.status === 'error' ? (
-            <div className="closet3d-error">Translation failed</div>
+          ) : selectedFailed ? (
+            <div className="closet3d-panel-row">
+              <span className="closet3d-panel-print">status</span>
+              <span className="closet3d-panel-entry closet3d-panel-red">
+                Translation failed
+              </span>
+            </div>
           ) : (
-            <>
-              {showProgress &&
-                (() => {
-                  const progress = progressMap.get(selectedBook.uuid);
-                  const pct = progress?.is_completed
-                    ? 100
-                    : progress?.reading_progress || 0;
-                  const label = progress?.is_completed
-                    ? '✓ Completed'
-                    : pct > 0
-                      ? `${pct}% read`
-                      : 'Not started';
-                  return (
-                    <div className="closet3d-progress">
-                      <div className="closet3d-progress-bar">
-                        <div style={{ width: `${pct}%` }} />
-                      </div>
-                      <span>{label}</span>
-                    </div>
-                  );
-                })()}
-              <button
-                className="closet3d-read-btn"
-                onClick={() => onRead(selectedBook.uuid)}
-              >
-                Read
-              </button>
-            </>
+            showProgress &&
+            (() => {
+              const progress = progressMap.get(selectedBook.uuid);
+              const pct = progress?.is_completed
+                ? 100
+                : progress?.reading_progress || 0;
+              return (
+                <div className="closet3d-progress">
+                  <div className="closet3d-panel-row">
+                    <span className="closet3d-panel-print">progress</span>
+                    {progress?.is_completed ? (
+                      <span className="closet3d-stamp-done">Completed</span>
+                    ) : (
+                      <span className="closet3d-panel-entry closet3d-panel-num">
+                        {pct > 0 ? `${pct}% read` : 'Not started'}
+                      </span>
+                    )}
+                  </div>
+                  <div className="closet3d-progress-bar">
+                    <div style={{ width: `${pct}%` }} />
+                  </div>
+                </div>
+              );
+            })()
           )}
 
-          {selectedBook.user_id && (
-            <button
-              className="closet3d-remove-btn"
-              onClick={() => onDelete(selectedBook.uuid)}
-            >
-              Remove
-            </button>
+          {(!(selectedPending || selectedFailed) || selectedBook.user_id) && (
+            <div className="closet3d-panel-actions">
+              {!(selectedPending || selectedFailed) && (
+                <button
+                  className="closet3d-read-btn"
+                  onClick={() => onRead(selectedBook.uuid)}
+                >
+                  Read
+                </button>
+              )}
+              {selectedBook.user_id && (
+                <button
+                  className="closet3d-remove-btn"
+                  onClick={() => onDelete(selectedBook.uuid)}
+                >
+                  Remove
+                </button>
+              )}
+            </div>
           )}
+          <div className="closet3d-panel-hole" />
         </div>
       )}
     </div>
