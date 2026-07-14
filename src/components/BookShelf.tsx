@@ -1299,8 +1299,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                 </div>
                 {use3D && (
                   <span className="closet-dock-hint">
-                    Move the mouse to look around · scroll to zoom · click a
-                    book
+                    Move to look around · Scroll to zoom · Click to open
                   </span>
                 )}
               </div>
