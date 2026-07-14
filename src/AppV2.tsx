@@ -96,6 +96,10 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
 
   // Track current visible xpath and intra-chapter fraction for saving
   const currentXpathRef = useRef<string | undefined>(undefined);
+  // Positions to return to after following internal links (footnotes etc.)
+  const [returnStack, setReturnStack] = useState<
+    { chapter: number; xpath?: string }[]
+  >([]);
   const chapterFractionRef = useRef<number>(0);
 
   // Debounce timer for progress API updates
@@ -520,12 +524,39 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
 
   // Wrapper for manual chapter navigation (no xpath) - must be before early returns.
   // Returns the Promise so the reader can await it inside document.startViewTransition().
+  // Manual navigation invalidates any pending "return to reading" position.
   const handleLoadChapter = useCallback(
     (chapterNumber: number) => {
+      setReturnStack([]);
       return loadChapter(chapterNumber);
     },
     [bookUuid]
   );
+
+  // Follow an internal link (footnote jump / cross-reference) — remembers
+  // where the reader was so the floating chip can take them back.
+  const handleNavigateInternal = useCallback(
+    (chapterNumber: number, xpath: string) => {
+      setReturnStack((stack) =>
+        [
+          ...stack,
+          { chapter: currentChapter, xpath: currentXpathRef.current },
+        ].slice(-5)
+      );
+      loadChapter(chapterNumber, xpath);
+    },
+    [bookUuid, currentChapter]
+  );
+
+  const handleReturnToReading = useCallback(() => {
+    setReturnStack((stack) => {
+      const top = stack[stack.length - 1];
+      if (top) {
+        loadChapter(top.chapter, top.xpath);
+      }
+      return stack.slice(0, -1);
+    });
+  }, [bookUuid]);
 
   if (error) {
     return (
@@ -575,7 +606,14 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
         onProgressChange={handleProgressChange}
         initialShowOriginal={initialShowOriginal ?? true}
         onShowOriginalChange={handleShowOriginalChange}
+        onNavigateInternal={handleNavigateInternal}
+        fetchChapter={fetchChapterData}
       />
+      {returnStack.length > 0 && (
+        <button className="return-chip" onClick={handleReturnToReading}>
+          ↩ {t.reader.returnToReading}
+        </button>
+      )}
     </div>
   );
 }

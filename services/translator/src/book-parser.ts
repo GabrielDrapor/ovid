@@ -79,6 +79,32 @@ function getFullTextContent(node: any): string {
   return text;
 }
 
+/**
+ * Like getFullTextContent, but skips note-reference links (superscript
+ * footnote labels rewritten to `a[data-ov-note]`). Used for the `text` sent
+ * to translation, so stray "1"/"[23]" markers don't pollute LLM input. The
+ * labels stay in `html`/raw_html, where the reader renders them tappable.
+ */
+function getTranslatableTextContent(node: any): string {
+  let text = '';
+  const children = node.childNodes;
+  if (children) {
+    for (let i = 0; i < children.length; i++) {
+      const child = children[i];
+      if (child.nodeType === 3) text += child.textContent || '';
+      else if (child.nodeType === 1) {
+        if (
+          (child.nodeName || '').toLowerCase() === 'a' &&
+          child.getAttribute?.('data-ov-note')
+        )
+          continue;
+        text += getTranslatableTextContent(child);
+      }
+    }
+  }
+  return text;
+}
+
 function serializeNode(node: any): string {
   if (node.nodeType === 3) return node.textContent || '';
   if (node.nodeType !== 1) return '';
@@ -93,10 +119,19 @@ function serializeNode(node: any): string {
     }
   }
 
-  // Strip internal <a> links
+  // <a> policy: keep external http(s) links, resolved internal links
+  // (rewritten to data-ov-chapter/data-ov-xpath by rewriteInternalLinks),
+  // and named anchors that are jump targets. Everything else — internal
+  // links we couldn't resolve — unwraps to its inner content, matching the
+  // old behavior for genuinely dead links.
   if (tagName === 'a') {
     const href = node.getAttribute?.('href');
-    if (!href || !href.startsWith('http')) return inner;
+    const keep =
+      node.getAttribute?.('data-ov-chapter') ||
+      node.getAttribute?.('id') ||
+      node.getAttribute?.('name') ||
+      (href && href.startsWith('http'));
+    if (!keep) return inner;
   }
 
   let attrs = '';
@@ -152,6 +187,10 @@ const blockTags = new Set([
   'tbody',
   'thead',
   'tfoot',
+  // EPUB3 popup footnotes live in <aside epub:type="footnote">, often as
+  // bare text without a <p> wrapper — treat aside as a block so that text
+  // is extracted (and translated) instead of silently dropped.
+  'aside',
 ]);
 
 const skipTags = new Set([
@@ -312,64 +351,27 @@ function normalizeTableBodies(body: any, doc: any) {
   }
 }
 
-function parseHTMLChapter(
-  html: string,
-  chapterNumber: number
-): {
-  title: string;
-  originalTitle: string;
-  rawHtml: string;
-  textNodes: ContentItemV2[];
-} | null {
-  const doc = new DOMParser().parseFromString(html, 'text/html');
-  const body = doc.getElementsByTagName('body')[0];
-  if (!body) return null;
-
-  // Wrap loose <tr> children in <tbody> to match browser auto-insertion.
-  // Must run before rawHtml serialization and walkNode so XPaths line up
-  // with what the reader sees in the rendered DOM.
-  normalizeTableBodies(body, doc);
-
-  // Convert <br><br>-separated content inside leaf blocks into <p> siblings.
-  // Must run before rawHtml serialization so the reader gets the <p> structure.
-  splitBrSeparatedParagraphs(body, doc);
-
-  let rawHtml = '';
-  const bodyChildren = body.childNodes;
-  for (let i = 0; i < bodyChildren.length; i++) {
-    const child = bodyChildren[i];
-    if (child.nodeType === 1) rawHtml += serializeNode(child);
-    else if (child.nodeType === 3 && child.textContent?.trim())
-      rawHtml += child.textContent;
-  }
-
-  // Extract chapter title
-  let chapterTitle = '';
-  const h1 = doc.getElementsByTagName('h1')[0];
-  const h2 = doc.getElementsByTagName('h2')[0];
-  const h3 = doc.getElementsByTagName('h3')[0];
-  if (h1?.textContent?.trim()) chapterTitle = h1.textContent.trim();
-  else if (h2?.textContent?.trim()) chapterTitle = h2.textContent.trim();
-  else if (h3?.textContent?.trim()) chapterTitle = h3.textContent.trim();
-
-  // Extract text nodes with XPath
-  const textNodes: ContentItemV2[] = [];
-  let orderIndex = 0;
-
-  const hasChildBlockElements = (node: any): boolean => {
-    const children = node.childNodes;
-    if (!children) return false;
-    for (let i = 0; i < children.length; i++) {
-      const child = children[i];
-      if (child.nodeType === 1) {
-        const childTag = (child.nodeName || '').toLowerCase();
-        if (blockTags.has(childTag)) return true;
-      }
+const hasChildBlockElements = (node: any): boolean => {
+  const children = node.childNodes;
+  if (!children) return false;
+  for (let i = 0; i < children.length; i++) {
+    const child = children[i];
+    if (child.nodeType === 1) {
+      const childTag = (child.nodeName || '').toLowerCase();
+      if (blockTags.has(childTag)) return true;
     }
-    return false;
-  };
+  }
+  return false;
+};
 
-  const walkNode = (node: any, pathSegments: string[]) => {
+/**
+ * DFS over the body visiting every leaf block element (a block tag with no
+ * block children) with its computed XPath. This is THE canonical walk: text
+ * extraction, anchor mapping and the reader's own DOM walk must all agree on
+ * it, or stored XPaths stop resolving.
+ */
+function walkBlockLeaves(body: any, cb: (node: any, xpath: string) => void) {
+  const visit = (node: any, pathSegments: string[]) => {
     if (!node || node.nodeType !== 1) return;
 
     const tagName = (node.nodeName || '').toLowerCase();
@@ -393,85 +395,430 @@ function parseHTMLChapter(
         const children = node.childNodes;
         if (children) {
           for (let i = 0; i < children.length; i++)
-            walkNode(children[i], currentPath);
+            visit(children[i], currentPath);
         }
         return;
       }
-
-      const fullText = decodeEntities(getFullTextContent(node));
-      if (fullText.length >= 2) {
-        textNodes.push({
-          xpath: '/' + currentPath.join('/'),
-          text: fullText,
-          html: getInnerHtml(node),
-          orderIndex: orderIndex++,
-        });
-      }
+      cb(node, '/' + currentPath.join('/'));
       return;
     }
 
     const children = node.childNodes;
     if (children) {
-      for (let i = 0; i < children.length; i++)
-        walkNode(children[i], currentPath);
+      for (let i = 0; i < children.length; i++) visit(children[i], currentPath);
     }
   };
 
+  const bodyChildren = body.childNodes;
   for (let i = 0; i < bodyChildren.length; i++) {
-    walkNode(bodyChildren[i], ['body[1]']);
+    visit(bodyChildren[i], ['body[1]']);
   }
+}
+
+function extractTextNodes(body: any): ContentItemV2[] {
+  const textNodes: ContentItemV2[] = [];
+  let orderIndex = 0;
+  walkBlockLeaves(body, (node, xpath) => {
+    const fullText = decodeEntities(getTranslatableTextContent(node));
+    if (fullText.length >= 2) {
+      textNodes.push({
+        xpath,
+        text: fullText,
+        html: getInnerHtml(node),
+        orderIndex: orderIndex++,
+      });
+    }
+  });
+  return textNodes;
+}
+
+function extractChapterTitle(doc: any, body: any, chapterNumber: number) {
+  let chapterTitle = '';
+  const h1 = doc.getElementsByTagName('h1')[0];
+  const h2 = doc.getElementsByTagName('h2')[0];
+  const h3 = doc.getElementsByTagName('h3')[0];
+  if (h1?.textContent?.trim()) chapterTitle = h1.textContent.trim();
+  else if (h2?.textContent?.trim()) chapterTitle = h2.textContent.trim();
+  else if (h3?.textContent?.trim()) chapterTitle = h3.textContent.trim();
+  if (chapterTitle) return chapterTitle;
 
   // Derive title from short blocks if no heading
-  if (!chapterTitle) {
-    const headingParts: string[] = [];
-    let stopScanning = false;
-    const scanForHeadings = (parent: any) => {
-      const children = parent.childNodes;
-      if (!children) return;
-      for (let i = 0; i < children.length; i++) {
-        if (stopScanning || headingParts.length >= 3) return;
-        const child = children[i];
-        if (child.nodeType !== 1) continue;
-        const tag = (child.nodeName || '').toLowerCase();
-        if (skipTags.has(tag)) continue;
-        if (blockTags.has(tag)) {
-          let hasChildBlocks = false;
-          const grandchildren = child.childNodes;
-          if (grandchildren) {
-            for (let j = 0; j < grandchildren.length; j++) {
-              if (
-                grandchildren[j].nodeType === 1 &&
-                blockTags.has((grandchildren[j].nodeName || '').toLowerCase())
-              ) {
-                hasChildBlocks = true;
-                break;
-              }
-            }
-          }
-          if (hasChildBlocks) {
-            scanForHeadings(child);
-            continue;
-          }
-          const text = (child.textContent || '').replace(/\s+/g, ' ').trim();
-          if (text.length >= 1 && text.length <= 50) headingParts.push(text);
-          else if (text.length > 50) {
-            stopScanning = true;
-            return;
-          }
-        } else {
+  const headingParts: string[] = [];
+  let stopScanning = false;
+  const scanForHeadings = (parent: any) => {
+    const children = parent.childNodes;
+    if (!children) return;
+    for (let i = 0; i < children.length; i++) {
+      if (stopScanning || headingParts.length >= 3) return;
+      const child = children[i];
+      if (child.nodeType !== 1) continue;
+      const tag = (child.nodeName || '').toLowerCase();
+      if (skipTags.has(tag)) continue;
+      if (blockTags.has(tag)) {
+        if (hasChildBlockElements(child)) {
           scanForHeadings(child);
+          continue;
+        }
+        const text = (child.textContent || '').replace(/\s+/g, ' ').trim();
+        if (text.length >= 1 && text.length <= 50) headingParts.push(text);
+        else if (text.length > 50) {
+          stopScanning = true;
+          return;
+        }
+      } else {
+        scanForHeadings(child);
+      }
+    }
+  };
+  scanForHeadings(body);
+  return headingParts.join(' \u2013 ') || `Chapter ${chapterNumber}`;
+}
+
+function serializeBodyHtml(body: any): string {
+  let rawHtml = '';
+  const bodyChildren = body.childNodes;
+  for (let i = 0; i < bodyChildren.length; i++) {
+    const child = bodyChildren[i];
+    if (child.nodeType === 1) rawHtml += serializeNode(child);
+    else if (child.nodeType === 3 && child.textContent?.trim())
+      rawHtml += child.textContent;
+  }
+  return rawHtml;
+}
+
+// ---- Internal links & footnotes ----
+//
+// EPUB footnotes come in a handful of shapes; we resolve them all to one
+// uniform representation. The main kinds in the wild:
+//   1. EPUB3 semantic:  <a epub:type="noteref" href="#fn1">1</a> +
+//      <aside epub:type="footnote" id="fn1">\u2026</aside> (same file, popup)
+//   2. Separate endnotes file (Calibre/trade press):
+//      <a href="notes.xhtml#n12">12</a>; notes page entries link back
+//   3. Same-file anchors (Project Gutenberg):
+//      <a id="FNanchor_1" href="#Footnote_1">[1]</a> + note block at file end
+//   4. Plain cross-references / in-text TOC links (not notes, still useful)
+// At parse time every internal link that resolves gets
+// data-ov-chapter/data-ov-xpath (the reader jumps via loadChapter), and the
+// ones classified as note references additionally get data-ov-note (the
+// reader shows a popover instead of jumping).
+
+interface AnchorTarget {
+  chapter: number;
+  xpath: string;
+}
+
+interface AnchorIndex {
+  /** fragment id/name \u2192 xpath of the block to scroll to */
+  anchors: Map<string, string>;
+  /** xpath of the first non-trivial text block (chapter-start target) */
+  firstBlockXpath: string | null;
+  /** xpath \u2192 full plain text of that block (for note-label echo checks) */
+  blockTexts: Map<string, string>;
+}
+
+/**
+ * Map every id/name anchor in a file to the XPath of the block a jump should
+ * land on: the containing leaf block when the anchor sits inside one,
+ * otherwise the next leaf block in document order (e.g. ids on container
+ * divs or bare <a id> markers between paragraphs).
+ */
+function buildAnchorIndex(body: any): AnchorIndex {
+  const leaves: { node: any; xpath: string; text: string }[] = [];
+  walkBlockLeaves(body, (node, xpath) => {
+    leaves.push({
+      node,
+      xpath,
+      text: decodeEntities(getFullTextContent(node)),
+    });
+  });
+
+  const blockTexts = new Map<string, string>();
+  for (const l of leaves) blockTexts.set(l.xpath, l.text);
+  const firstContentLeaf = leaves.find((l) => l.text.length >= 2) || null;
+
+  // Document-order sequence numbers for "next block after this anchor".
+  const seqOf = new Map<any, number>();
+  let seq = 0;
+  const numberDfs = (node: any) => {
+    if (!node || node.nodeType !== 1) return;
+    seqOf.set(node, seq++);
+    const children = node.childNodes;
+    if (children) {
+      for (let i = 0; i < children.length; i++) numberDfs(children[i]);
+    }
+  };
+  numberDfs(body);
+
+  const leafXpathByNode = new Map<any, string>();
+  for (const l of leaves) leafXpathByNode.set(l.node, l.xpath);
+
+  const anchors = new Map<string, string>();
+  const collectIds = (node: any) => {
+    if (!node || node.nodeType !== 1) return;
+    const ids: string[] = [];
+    const id = node.getAttribute?.('id');
+    const name =
+      (node.nodeName || '').toLowerCase() === 'a'
+        ? node.getAttribute?.('name')
+        : null;
+    if (id) ids.push(id);
+    if (name && name !== id) ids.push(name);
+
+    if (ids.length > 0) {
+      // Containing leaf block, if any
+      let xpath: string | undefined;
+      let p = node;
+      while (p && p !== body) {
+        const found = leafXpathByNode.get(p);
+        if (found) {
+          xpath = found;
+          break;
+        }
+        p = p.parentNode;
+      }
+      // Otherwise the next leaf in document order (fall back to the last)
+      if (!xpath) {
+        const mySeq = seqOf.get(node) ?? 0;
+        const next = leaves.find((l) => (seqOf.get(l.node) ?? -1) >= mySeq);
+        xpath = (next || leaves[leaves.length - 1])?.xpath;
+      }
+      if (xpath) {
+        for (const key of ids) {
+          if (!anchors.has(key)) anchors.set(key, xpath);
         }
       }
-    };
-    scanForHeadings(body);
-    chapterTitle = headingParts.join(' \u2013 ') || `Chapter ${chapterNumber}`;
+    }
+
+    const children = node.childNodes;
+    if (children) {
+      for (let i = 0; i < children.length; i++) collectIds(children[i]);
+    }
+  };
+  collectIds(body);
+
+  return {
+    anchors,
+    firstBlockXpath: firstContentLeaf?.xpath ?? null,
+    blockTexts,
+  };
+}
+
+const NOTES_HEADING_INDICATORS = [
+  'notes',
+  'endnotes',
+  'footnotes',
+  '\u6ce8\u91ca',
+  '\u5c3e\u6ce8',
+  '\u811a\u6ce8',
+  '\u6ce8\u91c8',
+];
+
+/**
+ * Heuristic detection of a dedicated endnotes page (Calibre-style): a
+ * "Notes"-ish heading and/or most paragraphs leading with a back-link into
+ * another chapter file.
+ */
+function detectNotesPage(body: any, filePath: string, title: string): boolean {
+  const titleLower = (title || '').trim().toLowerCase();
+  let hasHeading = NOTES_HEADING_INDICATORS.some(
+    (ind) => titleLower.length <= 30 && titleLower.includes(ind)
+  );
+  if (!hasHeading) {
+    outer: for (const tag of ['h1', 'h2', 'h3', 'p']) {
+      const els = body.getElementsByTagName(tag);
+      for (let i = 0; i < Math.min(els.length, 3); i++) {
+        const text = (els[i].textContent || '').trim().toLowerCase();
+        if (
+          text.length > 0 &&
+          text.length < 30 &&
+          NOTES_HEADING_INDICATORS.some((ind) => text.includes(ind))
+        ) {
+          hasHeading = true;
+          break outer;
+        }
+      }
+    }
   }
+
+  const fileName = filePath.split('/').pop() || filePath;
+  const paragraphs = body.getElementsByTagName('p');
+  let total = 0;
+  let backLinked = 0;
+  for (let i = 0; i < paragraphs.length; i++) {
+    const p = paragraphs[i];
+    const text = (p.textContent || '').trim();
+    if (text.length < 3) continue;
+    total++;
+    const link = p.getElementsByTagName('a')[0];
+    if (!link) continue;
+    const href = link.getAttribute('href') || '';
+    const targetFile = href.split('#')[0];
+    if (
+      targetFile &&
+      !targetFile.startsWith('http') &&
+      !targetFile.endsWith(fileName)
+    ) {
+      backLinked++;
+    }
+  }
+
+  const ratio = total > 0 ? backLinked / total : 0;
+  return (
+    (hasHeading && total >= 3 && ratio >= 0.25) || (total >= 5 && ratio >= 0.5)
+  );
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** Short numeric or symbol footnote label like "1", "[23]", "*", "(a)". */
+const NOTE_LABEL_RE =
+  /^[[(]?(\d{1,4}|[*\u2020\u2021\u00a7\u2016\u00b6#])[\])]?\.?$/;
+
+/**
+ * Resolve every internal <a href> in a chapter body to a stable
+ * (chapter, xpath) coordinate and classify note references.
+ * Mutates the DOM in place; must run before serialization/text extraction.
+ */
+function rewriteInternalLinks(opts: {
+  body: any;
+  filePath: string;
+  anchorMap: Map<string, AnchorTarget>;
+  notesFiles: Set<string>;
+  blockTextByKey: Map<string, string>;
+}): void {
+  const { body, filePath, anchorMap, notesFiles, blockTextByKey } = opts;
+  const dir = filePath.includes('/')
+    ? filePath.slice(0, filePath.lastIndexOf('/') + 1)
+    : '';
+
+  const linkEls = body.getElementsByTagName('a');
+  const links: any[] = [];
+  for (let i = 0; i < linkEls.length; i++) links.push(linkEls[i]);
+
+  for (const a of links) {
+    const href = a.getAttribute('href');
+    if (!href) continue;
+    // Absolute scheme (http, mailto, \u2026) \u2014 leave to the serializer policy.
+    if (/^[a-z][a-z0-9+.-]*:/i.test(href)) continue;
+
+    const [rawPath, rawFrag] = href.split('#', 2);
+    let targetPath = filePath;
+    if (rawPath) {
+      try {
+        const decoded = decodeURIComponent(rawPath);
+        targetPath = normalizeZipPath(
+          decoded.startsWith('/') ? decoded.slice(1) : dir + decoded
+        );
+      } catch {
+        continue;
+      }
+    }
+    let frag: string | null = null;
+    if (rawFrag) {
+      try {
+        frag = decodeURIComponent(rawFrag);
+      } catch {
+        frag = rawFrag;
+      }
+    }
+
+    const target =
+      (frag ? anchorMap.get(`${targetPath}#${frag}`) : undefined) ||
+      anchorMap.get(targetPath);
+    if (!target) continue; // unresolved \u2014 serializer will unwrap it
+
+    // Classify BEFORE clobbering role below.
+    const label = getFullTextContent(a).trim();
+    const epubType = a.getAttribute('epub:type') || '';
+    const role = a.getAttribute('role') || '';
+    let isNote = /noteref/i.test(epubType) || /doc-noteref/i.test(role);
+    if (!isNote && NOTE_LABEL_RE.test(label)) {
+      if (targetPath !== filePath && notesFiles.has(targetPath)) {
+        isNote = true;
+      } else {
+        // Label echo: the target block starts with the same label
+        // ("12. The quote is from\u2026") \u2014 the signature of a note entry.
+        const targetText =
+          blockTextByKey.get(`${targetPath}#${target.xpath}`) || '';
+        const core = label.replace(/[[\]().]/g, '');
+        if (
+          core &&
+          new RegExp(`^[[(]?${escapeRegExp(core)}[\\])]?[.):\\s]`).test(
+            targetText + ' '
+          )
+        ) {
+          isNote = true;
+        }
+      }
+    }
+
+    a.setAttribute('data-ov-chapter', String(target.chapter));
+    a.setAttribute('data-ov-xpath', target.xpath);
+    if (isNote) a.setAttribute('data-ov-note', '1');
+    // Drop the raw href: it can't resolve inside the SPA, and the worker's
+    // legacy fallback path strips href-bearing internal links. Keep the
+    // element keyboard-reachable instead.
+    a.removeAttribute('href');
+    a.setAttribute('tabindex', '0');
+    if (!role) a.setAttribute('role', isNote ? 'doc-noteref' : 'link');
+  }
+}
+
+/**
+ * Mark EPUB3 footnote/endnote containers (typically <aside
+ * epub:type="footnote">) so the reader can hide them from the main flow \u2014
+ * their content is still extracted and translated, and surfaces through the
+ * note popover.
+ */
+function markFootnoteAsides(body: any): void {
+  const walk = (node: any) => {
+    if (!node || node.nodeType !== 1) return;
+    const epubType = node.getAttribute?.('epub:type') || '';
+    if (
+      /\b(footnote|rearnote|endnote)s?\b/i.test(epubType) &&
+      !/noteref/i.test(epubType)
+    ) {
+      node.setAttribute('data-ov-hidden', 'note');
+    }
+    const children = node.childNodes;
+    if (children) {
+      for (let i = 0; i < children.length; i++) walk(children[i]);
+    }
+  };
+  walk(body);
+}
+
+function parseHTMLChapter(
+  html: string,
+  chapterNumber: number
+): {
+  title: string;
+  originalTitle: string;
+  rawHtml: string;
+  textNodes: ContentItemV2[];
+} | null {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const body = doc.getElementsByTagName('body')[0];
+  if (!body) return null;
+
+  // Wrap loose <tr> children in <tbody> to match browser auto-insertion.
+  // Must run before rawHtml serialization and the leaf walk so XPaths line
+  // up with what the reader sees in the rendered DOM.
+  normalizeTableBodies(body, doc);
+
+  // Convert <br><br>-separated content inside leaf blocks into <p> siblings.
+  // Must run before rawHtml serialization so the reader gets the <p> structure.
+  splitBrSeparatedParagraphs(body, doc);
+
+  const chapterTitle = extractChapterTitle(doc, body, chapterNumber);
 
   return {
     title: chapterTitle,
     originalTitle: chapterTitle,
-    rawHtml,
-    textNodes,
+    rawHtml: serializeBodyHtml(body),
+    textNodes: extractTextNodes(body),
   };
 }
 
@@ -742,8 +1089,21 @@ export async function parseEPUB(
     }
   }
 
-  // Parse chapters
-  const chapters: ChapterV2[] = [];
+  // Parse chapters in two phases so internal links can resolve across files:
+  // phase 1 parses every spine file and indexes its anchors; phase 2 rewrites
+  // links against the global anchor map, then extracts text and serializes.
+  interface PreparedFile {
+    zipPath: string;
+    normPath: string;
+    doc: any;
+    body: any;
+    chapterNumber: number;
+    title: string;
+    index: AnchorIndex;
+    isNotesPage: boolean;
+  }
+
+  const prepared: PreparedFile[] = [];
   let chapterNumber = 1;
 
   for (const htmlPath of htmlFiles) {
@@ -751,10 +1111,9 @@ export async function parseEPUB(
     if (!file) continue;
 
     const htmlContent = await file.async('text');
-    const chapterData = parseHTMLChapter(htmlContent, chapterNumber);
+    const doc = new DOMParser().parseFromString(htmlContent, 'text/html');
 
     // Collect internal styles
-    const doc = new DOMParser().parseFromString(htmlContent, 'text/html');
     const styleTags = doc.getElementsByTagName('style');
     for (let i = 0; i < styleTags.length; i++) {
       const styleContent = styleTags[i].textContent;
@@ -762,15 +1121,73 @@ export async function parseEPUB(
         globalStyles += `/* Internal from ${htmlPath} */\n${styleContent}\n`;
     }
 
-    if (chapterData && chapterData.textNodes.length > 0) {
-      // Override title with TOC entry if available
-      const tocTitle = tocTitleMap.get(htmlPath);
-      if (tocTitle) {
-        chapterData.title = tocTitle;
-        chapterData.originalTitle = tocTitle;
-      }
-      chapters.push({ ...chapterData, number: chapterNumber++ });
+    const body = doc.getElementsByTagName('body')[0];
+    if (!body) continue;
+
+    normalizeTableBodies(body, doc);
+    splitBrSeparatedParagraphs(body, doc);
+
+    const index = buildAnchorIndex(body);
+    // Same inclusion rule as before: files without real text content
+    // (image-only pages etc.) don't become chapters.
+    if (!index.firstBlockXpath) continue;
+
+    const title =
+      tocTitleMap.get(htmlPath) ||
+      extractChapterTitle(doc, body, chapterNumber);
+
+    prepared.push({
+      zipPath: htmlPath,
+      normPath: normalizeZipPath(htmlPath),
+      doc,
+      body,
+      chapterNumber,
+      title,
+      index,
+      isNotesPage: detectNotesPage(body, htmlPath, title),
+    });
+    chapterNumber++;
+  }
+
+  // Global anchor map: file → chapter start, file#fragment → exact block.
+  const anchorMap = new Map<string, AnchorTarget>();
+  const notesFiles = new Set<string>();
+  const blockTextByKey = new Map<string, string>();
+  for (const p of prepared) {
+    anchorMap.set(p.normPath, {
+      chapter: p.chapterNumber,
+      xpath: p.index.firstBlockXpath!,
+    });
+    for (const [id, xpath] of p.index.anchors) {
+      anchorMap.set(`${p.normPath}#${id}`, {
+        chapter: p.chapterNumber,
+        xpath,
+      });
     }
+    if (p.isNotesPage) notesFiles.add(p.normPath);
+    for (const [xpath, text] of p.index.blockTexts) {
+      blockTextByKey.set(`${p.normPath}#${xpath}`, text);
+    }
+  }
+
+  const chapters: ChapterV2[] = [];
+  for (const p of prepared) {
+    rewriteInternalLinks({
+      body: p.body,
+      filePath: p.normPath,
+      anchorMap,
+      notesFiles,
+      blockTextByKey,
+    });
+    markFootnoteAsides(p.body);
+
+    chapters.push({
+      number: p.chapterNumber,
+      title: p.title,
+      originalTitle: p.title,
+      rawHtml: serializeBodyHtml(p.body),
+      textNodes: extractTextNodes(p.body),
+    });
   }
 
   // Extract images

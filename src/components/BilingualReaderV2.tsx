@@ -44,6 +44,22 @@ interface BilingualReaderV2Props {
   // Show translation / show original toggle persistence
   initialShowOriginal?: boolean;
   onShowOriginalChange?: (showOriginal: boolean) => void;
+  // Internal links (footnotes / cross-references rewritten by the parser to
+  // a[data-ov-chapter][data-ov-xpath], optionally [data-ov-note])
+  onNavigateInternal?: (chapterNumber: number, xpath: string) => void;
+  fetchChapter?: (
+    chapterNumber: number
+  ) => Promise<{ translations: Translation[] } | null>;
+}
+
+interface NotePopoverState {
+  label: string;
+  chapter: number;
+  xpath: string;
+  originalHtml?: string;
+  translated?: string;
+  loading: boolean;
+  missing?: boolean;
 }
 
 /**
@@ -115,6 +131,8 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
   onProgressChange,
   initialShowOriginal,
   onShowOriginalChange,
+  onNavigateInternal,
+  fetchChapter,
 }) => {
   const { t, locale } = useI18n();
   const contentRef = useRef<HTMLDivElement>(null);
@@ -174,6 +192,9 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
   // Store element references for toggling
   // originalHtml preserves formatting (innerHTML), translated is plain text
   // showingOriginal tracks the current state to avoid innerHTML comparison issues
+  // noteRefChunks: serialized footnote-reference markers (a[data-ov-note], with
+  // their <sup> wrapper when present) re-appended after translated text so the
+  // notes stay reachable in translated view
   const elementsRef = useRef<
     Map<
       string,
@@ -182,9 +203,13 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
         originalHtml: string;
         translated: string;
         showingOriginal: boolean;
+        noteRefChunks: string[];
       }
     >
   >(new Map());
+
+  // Footnote/endnote popover (opened by tapping an a[data-ov-note] marker)
+  const [notePopover, setNotePopover] = useState<NotePopoverState | null>(null);
 
   // Track the topmost visible element for progress saving
   const visibleXpathRef = useRef<string | undefined>(undefined);
@@ -199,6 +224,40 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
 
   // Track when translations have been applied (for observer setup timing)
   const [translationsReady, setTranslationsReady] = useState(0);
+
+  /**
+   * Serialize the footnote-reference markers inside an element (while it
+   * still shows original content) so they can be re-appended after the
+   * plain-text translation replaces innerHTML.
+   */
+  const collectNoteRefChunks = (el: HTMLElement): string[] => {
+    const seen = new Set<Element>();
+    const chunks: string[] = [];
+    el.querySelectorAll('a[data-ov-note]').forEach((a) => {
+      const sup = a.closest('sup');
+      const chunk = sup && el.contains(sup) && sup !== el ? sup : a;
+      if (!seen.has(chunk)) {
+        seen.add(chunk);
+        chunks.push(chunk.outerHTML);
+      }
+    });
+    return chunks;
+  };
+
+  /** Swap an element to its translated text, keeping note markers tappable. */
+  const renderTranslated = (data: {
+    element: HTMLElement;
+    translated: string;
+    noteRefChunks: string[];
+  }) => {
+    data.element.textContent = data.translated;
+    if (data.noteRefChunks.length > 0) {
+      data.element.insertAdjacentHTML(
+        'beforeend',
+        ' ' + data.noteRefChunks.join('')
+      );
+    }
+  };
 
   /**
    * Apply translations to the rendered HTML
@@ -257,6 +316,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
           originalHtml: translation.original_html || translation.original_text,
           translated: translation.translated_text,
           showingOriginal: true, // Will be set by updateAllElements
+          noteRefChunks: collectNoteRefChunks(el as HTMLElement),
         });
 
         // Make element clickable
@@ -307,6 +367,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
             originalHtml: el.innerHTML,
             translated: translation.translated_text,
             showingOriginal: true, // Will be set by updateAllElements
+            noteRefChunks: collectNoteRefChunks(el),
           });
 
           // Make element clickable
@@ -361,8 +422,8 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
 
     // Use tracked state instead of comparing innerHTML (browser normalizes HTML differently)
     if (data.showingOriginal) {
-      // Switch to translated (plain text)
-      data.element.textContent = data.translated;
+      // Switch to translated (plain text + re-appended note markers)
+      renderTranslated(data);
       data.showingOriginal = false;
     } else {
       // Switch to original (with HTML formatting)
@@ -380,37 +441,151 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
       if (showOrig) {
         data.element.innerHTML = data.originalHtml;
       } else {
-        data.element.textContent = data.translated;
+        renderTranslated(data);
       }
       data.showingOriginal = showOrig;
     });
   }, []);
 
-  // Intercept clicks on internal <a> links in the content area
-  // EPUB books often have internal links (TOC anchors, cross-references) that
-  // would cause navigation away from the reader if clicked
+  /**
+   * Open the footnote popover for a note reference. Same-chapter notes read
+   * from the already-loaded translations/DOM; cross-chapter notes fetch the
+   * target chapter (cached upstream by AppV2).
+   */
+  const openNotePopover = useCallback(
+    (chapter: number, xpath: string, label: string) => {
+      const base: NotePopoverState = { label, chapter, xpath, loading: false };
+
+      const fromTranslations = (list: Translation[]) => {
+        const t = list.find((x) => x.xpath === xpath);
+        if (!t) return null;
+        return {
+          originalHtml: t.original_html || t.original_text,
+          translated: t.translated_text,
+        };
+      };
+
+      if (chapter === currentChapter) {
+        const found = fromTranslations(translations);
+        if (found) {
+          setNotePopover({ ...base, ...found });
+          return;
+        }
+        // Untranslated book — pull the raw block from the rendered DOM
+        const el = elementsRef.current.get(xpath);
+        if (el) {
+          setNotePopover({
+            ...base,
+            originalHtml: el.originalHtml || el.element.innerHTML,
+          });
+          return;
+        }
+        setNotePopover({ ...base, missing: true });
+        return;
+      }
+
+      if (!fetchChapter) {
+        // No fetcher — fall back to jumping
+        onNavigateInternal?.(chapter, xpath);
+        return;
+      }
+
+      setNotePopover({ ...base, loading: true });
+      fetchChapter(chapter)
+        .then((data) => {
+          const found = data ? fromTranslations(data.translations) : null;
+          setNotePopover((cur) => {
+            // A newer popover/close superseded this fetch
+            if (!cur || cur.xpath !== xpath || cur.chapter !== chapter)
+              return cur;
+            return found
+              ? { ...cur, ...found, loading: false }
+              : { ...cur, loading: false, missing: true };
+          });
+        })
+        .catch(() => {
+          setNotePopover((cur) =>
+            cur && cur.xpath === xpath && cur.chapter === chapter
+              ? { ...cur, loading: false, missing: true }
+              : cur
+          );
+        });
+    },
+    [currentChapter, translations, fetchChapter, onNavigateInternal]
+  );
+
+  /**
+   * Activate an internal link (parser-resolved a[data-ov-chapter]):
+   * note refs open the popover, everything else jumps via AppV2.
+   * Returns true when the event was handled.
+   */
+  const activateInternalLink = useCallback(
+    (target: HTMLElement): boolean => {
+      const link = target.closest('a[data-ov-chapter]') as HTMLElement | null;
+      if (!link) return false;
+
+      const chapter = parseInt(link.getAttribute('data-ov-chapter') || '', 10);
+      const xpath = link.getAttribute('data-ov-xpath') || '';
+      if (!chapter || !xpath) return true; // malformed — swallow the click
+
+      if (link.hasAttribute('data-ov-note')) {
+        openNotePopover(chapter, xpath, (link.textContent || '').trim());
+      } else {
+        onNavigateInternal?.(chapter, xpath);
+      }
+      return true;
+    },
+    [openNotePopover, onNavigateInternal]
+  );
+
+  // Intercept clicks on links in the content area (capture phase, so the
+  // paragraph-level bilingual toggle underneath never fires for link taps).
+  // Resolved internal links navigate in-app; legacy unresolved internal
+  // links (old imports) are still blocked from navigating away.
   useEffect(() => {
     const container = contentRef.current;
     if (!container) return;
 
     const handleLinkClick = (e: MouseEvent) => {
+      if (activateInternalLink(e.target as HTMLElement)) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+
       const target = (e.target as HTMLElement).closest('a');
       if (!target) return;
-
       const href = target.getAttribute('href');
       if (!href) return;
-
       // Allow external links (http/https) to open normally
       if (href.startsWith('http://') || href.startsWith('https://')) return;
-
-      // Block all internal links (EPUB cross-references, anchors, etc.)
+      // Block all remaining internal links (legacy content)
       e.preventDefault();
       e.stopPropagation();
     };
 
-    container.addEventListener('click', handleLinkClick);
-    return () => container.removeEventListener('click', handleLinkClick);
-  }, [rawHtml]);
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      const target = e.target as HTMLElement;
+      if (!target?.matches?.('a[data-ov-chapter]')) return;
+      if (activateInternalLink(target)) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+
+    container.addEventListener('click', handleLinkClick, true);
+    container.addEventListener('keydown', handleKeyDown, true);
+    return () => {
+      container.removeEventListener('click', handleLinkClick, true);
+      container.removeEventListener('keydown', handleKeyDown, true);
+    };
+  }, [rawHtml, activateInternalLink]);
+
+  // Close the note popover when the chapter changes
+  useEffect(() => {
+    setNotePopover(null);
+  }, [currentChapter]);
 
   /**
    * Register block-level elements for scroll tracking, without bilingual toggle
@@ -470,6 +645,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
           originalHtml: '',
           translated: '',
           showingOriginal: true,
+          noteRefChunks: [],
         });
       });
       return;
@@ -500,6 +676,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
           originalHtml: '',
           translated: '',
           showingOriginal: true,
+          noteRefChunks: [],
         });
         return; // Leaf block — don't recurse
       }
@@ -703,9 +880,15 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
         doScroll();
       }
     }, 1000);
+    // Briefly highlight the target so jumps (footnotes, cross-references)
+    // land with a visible anchor point
+    el.classList.add('ov-jump-flash');
+    const t3 = setTimeout(() => el.classList.remove('ov-jump-flash'), 2200);
     return () => {
       clearTimeout(t1);
       clearTimeout(t2);
+      clearTimeout(t3);
+      el.classList.remove('ov-jump-flash');
     };
   }, [translationsReady, initialXpath]);
 
@@ -1011,6 +1194,91 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
           </div>
         )}
       </main>
+
+      {/* Footnote / endnote popover */}
+      {notePopover && (
+        <>
+          <div
+            className="note-popover-backdrop"
+            onClick={() => setNotePopover(null)}
+          />
+          <div
+            className="note-popover"
+            role="dialog"
+            aria-label={`${t.reader.note} ${notePopover.label}`}
+          >
+            <div className="note-popover-header">
+              <span className="note-popover-title">
+                {t.reader.note} {notePopover.label}
+              </span>
+              <button
+                className="note-popover-close"
+                aria-label="Close"
+                onClick={() => setNotePopover(null)}
+              >
+                ×
+              </button>
+            </div>
+            <div className="note-popover-body">
+              {notePopover.loading ? (
+                <p className="note-popover-status">…</p>
+              ) : notePopover.missing ? (
+                <p className="note-popover-status">{t.reader.noteNotFound}</p>
+              ) : (
+                <>
+                  {notePopover.originalHtml && (
+                    <div
+                      className="note-popover-original"
+                      onClickCapture={(e) => {
+                        const link = (e.target as HTMLElement).closest(
+                          'a[data-ov-chapter]'
+                        );
+                        if (!link) return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const chapter = parseInt(
+                          link.getAttribute('data-ov-chapter') || '',
+                          10
+                        );
+                        const xpath = link.getAttribute('data-ov-xpath') || '';
+                        if (!chapter || !xpath) return;
+                        if (link.hasAttribute('data-ov-note')) {
+                          openNotePopover(
+                            chapter,
+                            xpath,
+                            (link.textContent || '').trim()
+                          );
+                        } else {
+                          setNotePopover(null);
+                          onNavigateInternal?.(chapter, xpath);
+                        }
+                      }}
+                      dangerouslySetInnerHTML={{
+                        __html: notePopover.originalHtml,
+                      }}
+                    />
+                  )}
+                  {notePopover.translated && (
+                    <div className="note-popover-translated">
+                      {notePopover.translated}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+            <button
+              className="note-popover-goto"
+              onClick={() => {
+                const { chapter, xpath } = notePopover;
+                setNotePopover(null);
+                onNavigateInternal?.(chapter, xpath);
+              }}
+            >
+              {t.reader.viewInContext} →
+            </button>
+          </div>
+        </>
+      )}
 
       <div className="fab-container">
         {/* Backdrop for mobile bottom sheet */}
