@@ -1728,8 +1728,10 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
             selectedBook.title !== selectedBook.original_title && (
               <h3>{selectedBook.title}</h3>
             )}
-          <div className="closet3d-panel-print">author</div>
-          <p className="closet3d-author">{selectedBook.author}</p>
+          <div className="closet3d-panel-row">
+            <span className="closet3d-panel-print">author</span>
+            <span className="closet3d-panel-entry">{selectedBook.author}</span>
+          </div>
           <div className="closet3d-panel-line-gap" />
 
           {selectedPending ? (
@@ -1742,30 +1744,40 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
                   );
                   return (
                     <>
+                      <div className="closet3d-panel-row">
+                        <span className="closet3d-panel-print">status</span>
+                        <span className="closet3d-panel-entry closet3d-panel-num">
+                          Translating… {tp.chaptersCompleted}/{tp.chaptersTotal}
+                        </span>
+                      </div>
                       <div className="closet3d-progress-bar">
                         <div style={{ width: `${pct}%` }} />
                       </div>
-                      <span>
-                        Translating… {tp.chaptersCompleted}/{tp.chaptersTotal}{' '}
-                        chapters ({pct}%)
-                      </span>
                     </>
                   );
                 }
                 return (
-                  <span>
-                    {tp?.phase === 'glossary'
-                      ? 'Extracting glossary…'
-                      : selectedBook.status === 'processing' &&
-                          !selectedBook.language_pair?.endsWith('-none')
-                        ? 'Translating…'
-                        : 'Preparing cover and spine…'}
-                  </span>
+                  <div className="closet3d-panel-row">
+                    <span className="closet3d-panel-print">status</span>
+                    <span className="closet3d-panel-entry">
+                      {tp?.phase === 'glossary'
+                        ? 'Extracting glossary…'
+                        : selectedBook.status === 'processing' &&
+                            !selectedBook.language_pair?.endsWith('-none')
+                          ? 'Translating…'
+                          : 'Preparing cover and spine…'}
+                    </span>
+                  </div>
                 );
               })()}
             </div>
           ) : selectedFailed ? (
-            <div className="closet3d-error">Translation failed</div>
+            <div className="closet3d-panel-row">
+              <span className="closet3d-panel-print">status</span>
+              <span className="closet3d-panel-entry closet3d-panel-red">
+                Translation failed
+              </span>
+            </div>
           ) : (
             showProgress &&
             (() => {
@@ -1775,14 +1787,19 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
                 : progress?.reading_progress || 0;
               return (
                 <div className="closet3d-progress">
+                  <div className="closet3d-panel-row">
+                    <span className="closet3d-panel-print">progress</span>
+                    {progress?.is_completed ? (
+                      <span className="closet3d-stamp-done">Completed</span>
+                    ) : (
+                      <span className="closet3d-panel-entry closet3d-panel-num">
+                        {pct > 0 ? `${pct}% read` : 'Not started'}
+                      </span>
+                    )}
+                  </div>
                   <div className="closet3d-progress-bar">
                     <div style={{ width: `${pct}%` }} />
                   </div>
-                  {progress?.is_completed ? (
-                    <span className="closet3d-stamp-done">Completed</span>
-                  ) : (
-                    <span>{pct > 0 ? `${pct}% read` : 'Not started'}</span>
-                  )}
                 </div>
               );
             })()

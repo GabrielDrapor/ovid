@@ -180,10 +180,37 @@
   height: 28px;
 }
 
+/* Caption→value row: printed caption left, filled-in entry right — the
+   same label/value anatomy as BookShelf.css's .uf-row, so every fact on
+   the card reads as a form field rather than free-floating text. */
+.closet3d-panel-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  line-height: 28px;
+}
+
 /* Filled-in content voice: serif ink, every line on the 28px grid. */
+.closet3d-panel-entry {
+  font-family: inherit;
+  font-size: 15px;
+  line-height: 28px;
+  color: #2b241a;
+  text-align: right;
+}
+
+.closet3d-panel-num {
+  font-variant-numeric: tabular-nums;
+}
+
+.closet3d-panel-red {
+  color: #b4533c;
+}
+
 .closet3d-panel h2 {
   margin: 0;
-  font-size: 20px;
+  font-size: 22px;
   font-weight: 600;
   line-height: 28px;
   font-family: inherit;
@@ -191,17 +218,10 @@
 
 .closet3d-panel h3 {
   margin: 0;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 400;
   line-height: 28px;
-  color: rgba(43, 36, 26, 0.7);
-}
-
-.closet3d-author {
-  margin: 0;
-  font-size: 14px;
-  line-height: 28px;
-  color: #2b241a;
+  color: rgba(43, 36, 26, 0.72);
 }
 
 .closet3d-panel-close {
@@ -221,29 +241,22 @@
   color: #2b241a;
 }
 
-/* Reading-record zone: exactly two rule lines — the pencil-fill bar
-   (track vertically centered in its line) and a print-voice label. */
-.closet3d-progress {
-  font-family: 'American Typewriter', 'Courier New', monospace;
-  font-size: 10.5px;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  line-height: 28px;
-  color: #625a41;
-}
-
+/* Reading-record zone: exactly two rule lines — a caption→value row
+   ("progress · 38% read") and the pencil-fill bar centered in the line
+   below it. Full-ink fill on a faint track so the filled length is
+   readable at a glance on cream. */
 .closet3d-progress-bar {
-  height: 4px;
-  border-radius: 2px;
-  background: rgba(43, 36, 26, 0.14);
+  height: 5px;
+  border-radius: 2.5px;
+  background: rgba(43, 36, 26, 0.16);
   overflow: hidden;
-  margin: 12px 0;
+  margin: 11px 0 12px;
 }
 
 .closet3d-progress-bar > div {
   height: 100%;
-  border-radius: 2px;
-  background: rgba(43, 36, 26, 0.75);
+  border-radius: 2.5px;
+  background: #2b241a;
   transition: width 0.4s ease;
 }
 
@@ -280,27 +293,6 @@
   .closet3d-stamp-done {
     animation: none;
   }
-}
-
-.closet3d-processing {
-  display: flex;
-  flex-direction: column;
-  font-family: 'American Typewriter', 'Courier New', monospace;
-  font-size: 10.5px;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  line-height: 28px;
-  color: #625a41;
-}
-
-/* Error is print voice in stamp-red — red stays semantic on the paper. */
-.closet3d-error {
-  font-family: 'American Typewriter', 'Courier New', monospace;
-  font-size: 10.5px;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  line-height: 28px;
-  color: #b4533c;
 }
 
 /* Action bar: same anatomy as Form 3's — flat letterpress-ink primary and
