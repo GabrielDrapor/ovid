@@ -1719,9 +1719,7 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
           >
             ×
           </button>
-          <div className="closet3d-panel-form-no">
-            Form 4 <small>· Loan Card</small>
-          </div>
+          <div className="closet3d-panel-heading">Book Info</div>
           <div className="closet3d-panel-print">title</div>
           <h2>{selectedBook.original_title || selectedBook.title}</h2>
           {selectedBook.original_title &&
