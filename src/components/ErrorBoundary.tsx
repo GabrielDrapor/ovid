@@ -1,5 +1,6 @@
 // @ts-nocheck
 import React, { Component, ErrorInfo, ReactNode } from 'react';
+import { detectLocale, getMessages } from '../i18n';
 
 interface Props {
   children?: ReactNode;
@@ -30,6 +31,9 @@ class ErrorBoundary extends Component<Props, State> {
 
   render() {
     if (this.state.hasError) {
+      // Class components can't use the useI18n hook — resolve the locale
+      // directly. This screen renders rarely, so no need for reactivity.
+      const t = getMessages(detectLocale());
       return (
         <div
           style={{
@@ -43,9 +47,11 @@ class ErrorBoundary extends Component<Props, State> {
             fontFamily: 'system-ui, -apple-system, sans-serif',
           }}
         >
-          <h1 style={{ fontSize: '24px', marginBottom: '12px' }}>Something went wrong</h1>
+          <h1 style={{ fontSize: '24px', marginBottom: '12px' }}>
+            {t.errors.somethingWentWrong}
+          </h1>
           <p style={{ color: '#666', marginBottom: '24px', maxWidth: '400px' }}>
-            An unexpected error occurred. Please try again.
+            {t.errors.unexpectedError}
           </p>
           <button
             onClick={this.handleRetry}
@@ -59,7 +65,7 @@ class ErrorBoundary extends Component<Props, State> {
               cursor: 'pointer',
             }}
           >
-            Try Again
+            {t.errors.tryAgain}
           </button>
         </div>
       );

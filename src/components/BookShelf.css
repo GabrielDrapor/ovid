@@ -1156,6 +1156,16 @@
   background: rgba(255, 255, 255, 0.1);
 }
 
+/* Language toggle uses the same look as the link items, on a <button>. */
+.shelf-help-item-btn {
+  width: 100%;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+}
+
 .shelf-user-dropdown {
   position: absolute;
   bottom: 40px;

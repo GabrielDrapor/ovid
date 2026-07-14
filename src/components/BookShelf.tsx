@@ -7,6 +7,7 @@ import React, {
   Suspense,
 } from 'react';
 import { SUPPORTED_LANGUAGES } from '../utils/translator';
+import { useI18n } from '../i18n';
 import { useUser } from '../contexts/UserContext';
 import { ApiError, fetchApi } from '../utils/api';
 import {
@@ -68,6 +69,7 @@ function needsTranslationDrive(book: Book): boolean {
 }
 
 const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
+  const { t, locale, setLocale } = useI18n();
   const [books, setBooks] = useState<Book[]>([]);
   const [shelfSlots, setShelfSlots] = useState<ShelfSlot[]>([]);
   const [spineRatios, setSpineRatios] = useState<Map<string, number>>(
@@ -237,7 +239,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
         }
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch books');
+      setError(err instanceof Error ? err.message : t.errors.fetchBooksFailed);
       console.error('Error fetching books:', err);
       setLoading(false);
     }
@@ -586,7 +588,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
 
   const handleFileSelect = async (file: File) => {
     if (!user) {
-      alert('Please login to upload books');
+      alert(t.upload.loginRequired);
       return;
     }
 
@@ -631,7 +633,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
           ? err.message
           : err instanceof Error
             ? err.message
-            : 'Failed to estimate book'
+            : t.upload.estimateFailed
       );
     } finally {
       setEstimating(false);
@@ -703,7 +705,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
           ? err.message
           : err instanceof Error
             ? err.message
-            : 'Failed to re-estimate'
+            : t.upload.reEstimateFailed
       );
     } finally {
       setReEstimating(false);
@@ -730,7 +732,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
 
     setUploading(true);
     setUploadProgress(
-      estimate.fileKey ? 'Starting translation...' : 'Uploading...'
+      estimate.fileKey ? t.upload.startingTranslation : t.upload.uploading
     );
     setUploadError(null);
 
@@ -755,7 +757,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
 
         // If estimate file not found in R2, silently retry with FormData
         if (response.status === 404) {
-          setUploadProgress('Uploading...');
+          setUploadProgress(t.upload.uploading);
           const formData = new FormData();
           formData.append('file', estimate.file);
           formData.append('targetLanguage', estimate.targetLanguage);
@@ -794,7 +796,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
 
         if (response.status === 402) {
           setUploadError({
-            message: errorData.message || 'Insufficient credits',
+            message: errorData.message || t.upload.insufficientCredits,
             required: errorData.required,
             available: errorData.available,
           });
@@ -804,7 +806,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
           return;
         }
 
-        throw new ApiError(errorData.error || 'Upload failed', {
+        throw new ApiError(errorData.error || t.upload.uploadFailed, {
           status: response.status,
           requestId:
             errorData.requestId ||
@@ -842,10 +844,10 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
         err instanceof ApiError
           ? err.message
           : err instanceof TypeError
-            ? 'Network error while uploading. Please retry. If it keeps failing, contact support with time and browser.'
+            ? t.upload.networkError
             : err instanceof Error
               ? err.message
-              : 'Upload failed';
+              : t.upload.uploadFailed;
       alert(message);
     }
   };
@@ -857,19 +859,19 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
   };
 
   const handleDeleteBook = async (bookUuid: string) => {
-    if (!confirm('Are you sure you want to remove this book?')) return;
+    if (!confirm(t.shelf.confirmRemove)) return;
     try {
       const response = await fetch(`/api/book/${bookUuid}`, {
         method: 'DELETE',
       });
       if (!response.ok) {
         const data = (await response.json()) as { error?: string };
-        throw new Error(data.error || 'Failed to delete');
+        throw new Error(data.error || t.errors.deleteBookFailed);
       }
       setHoveredBook(null);
       await fetchBooks();
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to delete book');
+      alert(err instanceof Error ? err.message : t.errors.deleteBookFailed);
     }
   };
 
@@ -885,7 +887,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
       });
       if (!response.ok) {
         const data = (await response.json()) as { error?: string };
-        throw new Error(data.error || 'Failed to save label');
+        throw new Error(data.error || t.errors.saveLabelFailed);
       }
       // Optimistic: the slots list drives label rendering; books also carry a
       // stale shelf_slot_label, so refetch to keep a cleared label cleared.
@@ -897,7 +899,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
       await fetchBooks();
       return true;
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to save label');
+      alert(err instanceof Error ? err.message : t.errors.saveLabelFailed);
       return false;
     }
   };
@@ -928,7 +930,8 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
       const before = siblings[insertIndex - 1];
       const after = siblings[insertIndex];
       const beforePos =
-        before?.shelf_position ?? (after ? (after.shelf_position ?? 0) - 2 : -1);
+        before?.shelf_position ??
+        (after ? (after.shelf_position ?? 0) - 2 : -1);
       const afterPos = after?.shelf_position ?? beforePos + 2;
 
       const next = prev.slice();
@@ -957,7 +960,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
       });
       if (!response.ok) {
         const data = (await response.json()) as { error?: string };
-        throw new Error(data.error || 'Failed to move book');
+        throw new Error(data.error || t.errors.moveBookFailed);
       }
     } catch (err) {
       // Revert only the moved book's placement — restoring a whole-array
@@ -975,7 +978,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
             : b
         )
       );
-      alert(err instanceof Error ? err.message : 'Failed to move book');
+      alert(err instanceof Error ? err.message : t.errors.moveBookFailed);
       return;
     }
 
@@ -991,7 +994,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
   if (error) {
     return (
       <div className="bookshelf-error">
-        <h2>Unable to load books</h2>
+        <h2>{t.shelf.unableToLoadBooks}</h2>
         <p>{error}</p>
       </div>
     );
@@ -1010,10 +1013,10 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
   // a single computed value so every phase's dialog root reports it
   // identically to how the old single-wrapper markup did.
   const uploadDialogLabel = estimate
-    ? 'Confirm book upload'
+    ? t.upload.dialogConfirm
     : uploadTarget
-      ? 'Add book here'
-      : 'Upload book';
+      ? t.upload.dialogAddHere
+      : t.upload.dialogUpload;
 
   return (
     <div className="bookshelf-container">
@@ -1073,11 +1076,11 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                         clearTimeout(toastTimerRef.current);
                     }}
                   >
-                    <strong>Book uploaded!</strong>
+                    <strong>{t.shelf.uploadedTitle}</strong>
                     <span>
                       {book.language_pair?.endsWith('-none')
-                        ? 'Preparing cover and spine — original language only.'
-                        : 'Translation is in progress — you can safely close this page.'}
+                        ? t.shelf.uploadedOriginalOnly
+                        : t.shelf.uploadedTranslating}
                     </span>
                   </div>
                 )}
@@ -1195,7 +1198,9 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                           <span className="user-email">{user.email}</span>
                         </div>
                         <div className="user-credits">
-                          <span className="credits-label">Credits</span>
+                          <span className="credits-label">
+                            {t.shelf.credits}
+                          </span>
                           <span className="credits-amount">
                             {credits?.toLocaleString() ?? '...'}
                           </span>
@@ -1207,10 +1212,10 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                             setShowCreditsModal(true);
                           }}
                         >
-                          Buy Credits
+                          {t.shelf.buyCredits}
                         </button>
                         <button className="logout-btn" onClick={logout}>
-                          Logout
+                          {t.shelf.logout}
                         </button>
                       </div>
                     )}
@@ -1240,14 +1245,14 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                         d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
                       />
                     </svg>
-                    <span>Sign in</span>
+                    <span>{t.shelf.signIn}</span>
                   </button>
                 )}
                 <div className="shelf-help-wrapper" ref={helpRef}>
                   <button
                     className="shelf-help-btn"
                     onClick={() => setShowHelpMenu(!showHelpMenu)}
-                    title="Help"
+                    title={t.shelf.help}
                   >
                     <svg
                       viewBox="0 0 24 24"
@@ -1294,13 +1299,29 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                         </svg>
                         <span>Discord</span>
                       </a>
+                      <button
+                        type="button"
+                        className="shelf-help-item shelf-help-item-btn"
+                        onClick={() => {
+                          setLocale(locale === 'en' ? 'zh' : 'en');
+                          setShowHelpMenu(false);
+                        }}
+                      >
+                        <svg
+                          viewBox="0 0 24 24"
+                          width="16"
+                          height="16"
+                          fill="currentColor"
+                        >
+                          <path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zm6.93 6h-2.95c-.32-1.25-.78-2.45-1.38-3.56 1.84.63 3.37 1.91 4.33 3.56zM12 4.04c.83 1.2 1.48 2.53 1.91 3.96h-3.82c.43-1.43 1.08-2.76 1.91-3.96zM4.26 14C4.1 13.36 4 12.69 4 12s.1-1.36.26-2h3.38c-.08.66-.14 1.32-.14 2s.06 1.34.14 2H4.26zm.82 2h2.95c.32 1.25.78 2.45 1.38 3.56-1.84-.63-3.37-1.9-4.33-3.56zm2.95-8H5.08c.96-1.66 2.49-2.93 4.33-3.56C8.81 5.55 8.35 6.75 8.03 8zM12 19.96c-.83-1.2-1.48-2.53-1.91-3.96h3.82c-.43 1.43-1.08 2.76-1.91 3.96zM14.34 14H9.66c-.09-.66-.16-1.32-.16-2s.07-1.35.16-2h4.68c.09.65.16 1.32.16 2s-.07 1.34-.16 2zm.25 5.56c.6-1.11 1.06-2.31 1.38-3.56h2.95c-.96 1.65-2.49 2.93-4.33 3.56zM16.36 14c.08-.66.14-1.32.14-2s-.06-1.34-.14-2h3.38c.16.64.26 1.31.26 2s-.1 1.36-.26 2h-3.38z" />
+                        </svg>
+                        <span>{locale === 'en' ? '中文' : 'English'}</span>
+                      </button>
                     </div>
                   )}
                 </div>
                 {use3D && (
-                  <span className="closet-dock-hint">
-                    Move to look around · Scroll to zoom · Click to open
-                  </span>
+                  <span className="closet-dock-hint">{t.shelf.dockHint}</span>
                 )}
               </div>
               {!use3D && row2Books.length > 0 && (
@@ -1317,7 +1338,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                   <button
                     type="button"
                     className="shelf-page-btn"
-                    aria-label="Previous shelf page"
+                    aria-label={t.shelf.prevPage}
                     onClick={() => goPage(-1)}
                     disabled={page === 0}
                   >
@@ -1329,7 +1350,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                   <button
                     type="button"
                     className="shelf-page-btn"
-                    aria-label="Next shelf page"
+                    aria-label={t.shelf.nextPage}
                     onClick={() => goPage(1)}
                     disabled={page >= totalPages - 1}
                   >
@@ -1369,7 +1390,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                   hoveredBook.title !== hoveredBook.original_title && (
                     <h3 className="translated-title">{hoveredBook.title}</h3>
                   )}
-                <p className="author">By {hoveredBook.author}</p>
+                <p className="author">{t.shelf.byAuthor(hoveredBook.author)}</p>
 
                 {isBookImportPending(hoveredBook) ? (
                   <div className="book-status-processing">
@@ -1383,8 +1404,11 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                         return (
                           <>
                             <span>
-                              Translating... {tp.chaptersCompleted}/
-                              {tp.chaptersTotal} chapters ({pct}%)
+                              {t.shelf.translatingProgress(
+                                tp.chaptersCompleted,
+                                tp.chaptersTotal,
+                                pct
+                              )}
                             </span>
                             <div className="translation-progress-bar">
                               <div
@@ -1398,21 +1422,20 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                       return (
                         <span>
                           {tp?.phase === 'glossary'
-                            ? 'Extracting glossary...'
+                            ? t.shelf.extractingGlossary
                             : needsTranslationDrive(hoveredBook)
-                              ? 'Translating...'
-                              : 'Preparing cover and spine...'}
+                              ? t.shelf.translating
+                              : t.shelf.preparingArtwork}
                         </span>
                       );
                     })()}
                     <span className="safe-to-close-hint">
-                      You can safely close this page — the book will be ready
-                      when you return.
+                      {t.shelf.safeToClose}
                     </span>
                   </div>
                 ) : hoveredBook.status === 'error' ? (
                   <div className="book-status-error">
-                    <span>Translation failed</span>
+                    <span>{t.shelf.translationFailed}</span>
                   </div>
                 ) : null}
                 {(() => {
@@ -1421,10 +1444,10 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                     ? 100
                     : progress?.reading_progress || 0;
                   const statusText = progress?.is_completed
-                    ? '✓ Completed'
+                    ? t.shelf.completed
                     : progressPercent > 0
-                      ? `${progressPercent}% read`
-                      : 'Not started';
+                      ? t.shelf.percentRead(progressPercent)
+                      : t.shelf.notStarted;
                   return (
                     <>
                       {/* Progress bar - show only for ready books */}
@@ -1448,7 +1471,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                             e.stopPropagation();
                             handleDeleteBook(hoveredBook.uuid);
                           }}
-                          title="Remove Book"
+                          title={t.shelf.removeBook}
                         >
                           <svg
                             viewBox="0 0 24 24"
@@ -1465,7 +1488,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                             <line x1="10" y1="11" x2="10" y2="17" />
                             <line x1="14" y1="11" x2="14" y2="17" />
                           </svg>
-                          <span>Remove</span>
+                          <span>{t.common.remove}</span>
                         </button>
                       )}
                     </>
@@ -1508,7 +1531,9 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                   {mobileSelectedBook.title}
                 </p>
               )}
-            <p className="sheet-author">By {mobileSelectedBook.author}</p>
+            <p className="sheet-author">
+              {t.shelf.byAuthor(mobileSelectedBook.author)}
+            </p>
 
             {(() => {
               const progress = bookProgressMap.get(mobileSelectedBook.uuid);
@@ -1516,10 +1541,10 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                 ? 100
                 : progress?.reading_progress || 0;
               const statusText = progress?.is_completed
-                ? '✓ Completed'
+                ? t.shelf.completed
                 : progressPercent > 0
-                  ? `${progressPercent}% read`
-                  : 'Not started';
+                  ? t.shelf.percentRead(progressPercent)
+                  : t.shelf.notStarted;
               return user && !isBookImportPending(mobileSelectedBook) ? (
                 <div className="progress-section">
                   <div className="progress-bar">
@@ -1547,27 +1572,29 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                     );
                     return (
                       <span>
-                        Translating... {tp.chaptersCompleted}/{tp.chaptersTotal}{' '}
-                        chapters ({pct}%)
+                        {t.shelf.translatingProgress(
+                          tp.chaptersCompleted,
+                          tp.chaptersTotal,
+                          pct
+                        )}
                       </span>
                     );
                   }
                   return (
                     <span>
                       {needsTranslationDrive(mobileSelectedBook)
-                        ? 'Translating...'
-                        : 'Preparing cover and spine...'}
+                        ? t.shelf.translating
+                        : t.shelf.preparingArtwork}
                     </span>
                   );
                 })()}
                 <span className="safe-to-close-hint">
-                  You can safely close this page — the book will be ready when
-                  you return.
+                  {t.shelf.safeToClose}
                 </span>
               </div>
             ) : mobileSelectedBook.status === 'error' ? (
               <div className="sheet-status" style={{ color: '#ff6b6b' }}>
-                Translation failed
+                {t.shelf.translationFailed}
               </div>
             ) : (
               <button
@@ -1577,7 +1604,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                   onSelectBook(mobileSelectedBook.uuid);
                 }}
               >
-                Read
+                {t.common.read}
               </button>
             )}
 
@@ -1603,7 +1630,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                   <polyline points="3 6 5 6 21 6" />
                   <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
                 </svg>
-                <span>Remove</span>
+                <span>{t.common.remove}</span>
               </button>
             )}
           </div>
@@ -1633,36 +1660,38 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
               onClick={(e) => e.stopPropagation()}
             >
               <div className="uf-form-no">
-                Form 1 <small>· Acquisition</small>
+                {t.upload.form1No} <small>· {t.upload.form1Kind}</small>
               </div>
               <p className="uf-entry uf-stamp-text">{uploadError.message}</p>
-              {uploadError.required &&
-                uploadError.available !== undefined && (
-                  <>
-                    <div className="uf-gap" />
-                    <div className="uf-row">
-                      <span className="uf-print">required</span>
-                      <span className="uf-entry uf-num">
-                        {uploadError.required.toLocaleString()}
-                      </span>
-                    </div>
-                    <div className="uf-row">
-                      <span className="uf-print">available</span>
-                      <span className="uf-entry uf-num">
-                        {uploadError.available.toLocaleString()}
-                      </span>
-                    </div>
-                    <div className="uf-row">
-                      <span className="uf-print uf-stamp-text">need</span>
-                      <span className="uf-entry uf-num uf-stamp-text">
-                        {(
+              {uploadError.required && uploadError.available !== undefined && (
+                <>
+                  <div className="uf-gap" />
+                  <div className="uf-row">
+                    <span className="uf-print">{t.upload.requiredField}</span>
+                    <span className="uf-entry uf-num">
+                      {uploadError.required.toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="uf-row">
+                    <span className="uf-print">{t.upload.availableField}</span>
+                    <span className="uf-entry uf-num">
+                      {uploadError.available.toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="uf-row">
+                    <span className="uf-print uf-stamp-text">
+                      {t.upload.needField}
+                    </span>
+                    <span className="uf-entry uf-num uf-stamp-text">
+                      {t.upload.moreAmount(
+                        (
                           uploadError.required - uploadError.available
-                        ).toLocaleString()}{' '}
-                        more
-                      </span>
-                    </div>
-                  </>
-                )}
+                        ).toLocaleString()
+                      )}
+                    </span>
+                  </div>
+                </>
+              )}
               <div className="uf-actions">
                 <button
                   className="uf-btn-primary"
@@ -1671,13 +1700,13 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                     setShowCreditsModal(true);
                   }}
                 >
-                  Buy Credits
+                  {t.shelf.buyCredits}
                 </button>
                 <button
                   className="uf-btn-quiet-paper"
                   onClick={closeUploadModal}
                 >
-                  Cancel
+                  {t.common.cancel}
                 </button>
               </div>
               <div className="uf-hole" />
@@ -1690,7 +1719,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
               onClick={(e) => e.stopPropagation()}
             >
               <div className="uf-form-no">
-                Form 2 <small>· Catalogue</small>
+                {t.upload.form2No} <small>· {t.upload.form2Kind}</small>
               </div>
               <p className="uf-card-title">{estimate.title}</p>
               <p className="uf-card-author">{estimate.author}</p>
@@ -1706,7 +1735,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                   <div
                     className="uf-mode-selector"
                     role="radiogroup"
-                    aria-label="Upload mode"
+                    aria-label={t.upload.modeAria}
                   >
                     <label
                       className={`uf-mode-row ${!skipTranslation ? 'checked' : 'dim'}`}
@@ -1720,9 +1749,11 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                         onChange={() => setSkipTranslation(false)}
                       />
                       <span className="uf-box" aria-hidden="true" />
-                      <span className="uf-entry">Translate this book</span>
+                      <span className="uf-entry">
+                        {t.upload.translateThisBook}
+                      </span>
                       <span className="uf-mode-note uf-print">
-                        bilingual
+                        {t.upload.bilingualNote}
                       </span>
                     </label>
                     <label
@@ -1737,17 +1768,23 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                         onChange={() => setSkipTranslation(true)}
                       />
                       <span className="uf-box" aria-hidden="true" />
-                      <span className="uf-entry">Import original only</span>
-                      <span className="uf-mode-note uf-print">free</span>
+                      <span className="uf-entry">
+                        {t.upload.importOriginalOnly}
+                      </span>
+                      <span className="uf-mode-note uf-print">
+                        {t.upload.freeNote}
+                      </span>
                     </label>
                   </div>
                   {!skipTranslation && (
                     <div className="uf-row uf-lang-line">
-                      <span className="uf-print">languages</span>
+                      <span className="uf-print">
+                        {t.upload.languagesField}
+                      </span>
                       <span className="uf-lang-fields">
                         <select
                           id="estimate-source-language"
-                          aria-label="Source language"
+                          aria-label={t.upload.sourceLanguage}
                           value={estimate.sourceLanguage}
                           disabled={reEstimating}
                           onChange={(e) =>
@@ -1757,7 +1794,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                           {Object.entries(SUPPORTED_LANGUAGES).map(
                             ([code, label]) => (
                               <option key={code} value={code}>
-                                {label}
+                                {t.languageNames[code] || label}
                               </option>
                             )
                           )}
@@ -1765,7 +1802,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                         <span className="uf-print uf-arrow">→</span>
                         <select
                           id="estimate-target-language"
-                          aria-label="Target language"
+                          aria-label={t.upload.targetLanguage}
                           value={estimate.targetLanguage}
                           disabled={reEstimating}
                           onChange={(e) =>
@@ -1775,7 +1812,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                           {Object.entries(SUPPORTED_LANGUAGES).map(
                             ([code, label]) => (
                               <option key={code} value={code}>
-                                {label}
+                                {t.languageNames[code] || label}
                               </option>
                             )
                           )}
@@ -1790,13 +1827,17 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                       <div className="uf-fee-zone">
                         <div className="uf-fee-lines">
                           <div className="uf-row">
-                            <span className="uf-print">balance</span>
+                            <span className="uf-print">
+                              {t.upload.balanceField}
+                            </span>
                             <span className="uf-entry uf-num">
                               {estimate.availableCredits.toLocaleString()}
                             </span>
                           </div>
                           <div className="uf-row">
-                            <span className="uf-print">after</span>
+                            <span className="uf-print">
+                              {t.upload.afterField}
+                            </span>
                             <span className="uf-entry uf-num">
                               {reEstimating
                                 ? '—'
@@ -1808,12 +1849,12 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                           </div>
                           {!estimate.canAfford && !reEstimating && (
                             <p className="uf-print uf-stamp-text uf-need-more">
-                              need{' '}
-                              {(
-                                estimate.requiredCredits -
-                                estimate.availableCredits
-                              ).toLocaleString()}{' '}
-                              more
+                              {t.upload.needMore(
+                                (
+                                  estimate.requiredCredits -
+                                  estimate.availableCredits
+                                ).toLocaleString()
+                              )}
                             </p>
                           )}
                         </div>
@@ -1823,7 +1864,9 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                               ? '…'
                               : estimate.requiredCredits.toLocaleString()}
                           </div>
-                          <div className="uf-stamp-unit">credits</div>
+                          <div className="uf-stamp-unit">
+                            {t.upload.creditsUnit}
+                          </div>
                         </div>
                       </div>
                     </>
@@ -1831,8 +1874,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                   {!skipTranslation &&
                     estimate.sourceLanguage === estimate.targetLanguage && (
                       <p className="uf-print uf-stamp-text uf-lang-warning">
-                        source and target language are the same — change one
-                        to continue
+                        {t.upload.sameLanguageWarning}
                       </p>
                     )}
                   <div className="uf-actions">
@@ -1842,7 +1884,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                         onClick={handleConfirmUpload}
                         disabled={uploading || reEstimating}
                       >
-                        Import without Translation
+                        {t.upload.importWithoutTranslation}
                       </button>
                     ) : estimate.canAfford ? (
                       <button
@@ -1854,7 +1896,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                           estimate.sourceLanguage === estimate.targetLanguage
                         }
                       >
-                        Confirm & Translate
+                        {t.upload.confirmTranslate}
                       </button>
                     ) : (
                       <button
@@ -1865,7 +1907,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                         }}
                         disabled={reEstimating}
                       >
-                        Buy Credits
+                        {t.shelf.buyCredits}
                       </button>
                     )}
                     <button
@@ -1873,7 +1915,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                       onClick={handleCancelEstimate}
                       disabled={reEstimating}
                     >
-                      Cancel
+                      {t.common.cancel}
                     </button>
                   </div>
                 </>
@@ -1888,11 +1930,11 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
               onClick={(e) => e.stopPropagation()}
             >
               <div className="uf-form-no">
-                Form 1 <small>· Acquisition</small>
+                {t.upload.form1No} <small>· {t.upload.form1Kind}</small>
               </div>
               <div className="uf-doc-status">
                 <div className="uf-spinner" />
-                <p className="uf-print">analyzing book…</p>
+                <p className="uf-print">{t.upload.analyzing}</p>
               </div>
               <div className="uf-hole" />
             </div>
@@ -1904,7 +1946,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
               onClick={(e) => e.stopPropagation()}
             >
               <div className="uf-form-no">
-                Form 1 <small>· Acquisition</small>
+                {t.upload.form1No} <small>· {t.upload.form1Kind}</small>
               </div>
               <div className="uf-doc-status">
                 <div className="uf-spinner" />
@@ -1920,19 +1962,19 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
               onClick={(e) => e.stopPropagation()}
             >
               <div className="uf-form-no">
-                Form 1 <small>· Acquisition</small>
+                {t.upload.form1No} <small>· {t.upload.form1Kind}</small>
               </div>
               <label htmlFor="epub-file-input" className="uf-doc-affix">
                 {uploadTarget && (
                   <div className="uf-row">
-                    <span className="uf-print">shelf</span>
+                    <span className="uf-print">{t.upload.shelfField}</span>
                     <span className="uf-entry">
-                      {uploadTarget.label || 'Selected shelf'}
+                      {uploadTarget.label || t.upload.selectedShelf}
                     </span>
                   </div>
                 )}
                 <div className="uf-row">
-                  <span className="uf-print">credits</span>
+                  <span className="uf-print">{t.upload.creditsUnit}</span>
                   <span className="uf-entry uf-num">
                     {credits?.toLocaleString() ?? '...'}
                   </span>
@@ -1953,12 +1995,10 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                   <div className="uf-plus" aria-hidden="true">
                     +
                   </div>
-                  <div className="uf-affix-note">affix epub here</div>
+                  <div className="uf-affix-note">{t.upload.affixHere}</div>
                 </div>
                 <div className="uf-row" style={{ justifyContent: 'center' }}>
-                  <span className="uf-print">
-                    languages chosen on the next form
-                  </span>
+                  <span className="uf-print">{t.upload.languagesNextForm}</span>
                 </div>
               </label>
               <div className="uf-actions">
@@ -1967,7 +2007,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                   style={{ flex: 1 }}
                   onClick={closeUploadModal}
                 >
-                  Cancel
+                  {t.common.cancel}
                 </button>
               </div>
               <div className="uf-hole" />
@@ -1985,13 +2025,14 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
           <div
             className="upload-modal-content credits-modal"
             role="dialog"
-            aria-label="Buy credits"
+            aria-label={t.creditsModal.dialogAria}
             onClick={(e) => e.stopPropagation()}
           >
-            <h2>Buy Credits</h2>
+            <h2>{t.creditsModal.title}</h2>
             <p className="credits-balance">
-              Current balance:{' '}
-              <strong>{credits?.toLocaleString() ?? '0'}</strong> credits
+              {t.creditsModal.balancePrefix}{' '}
+              <strong>{credits?.toLocaleString() ?? '0'}</strong>{' '}
+              {t.creditsModal.creditsSuffix}
             </p>
             <div className="credit-packages">
               {creditPackages.map((pkg) => (
@@ -2003,23 +2044,23 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                   <span className="package-credits">
                     {pkg.credits.toLocaleString()}
                   </span>
-                  <span className="package-label">credits</span>
+                  <span className="package-label">
+                    {t.creditsModal.packageUnit}
+                  </span>
                   <span className="package-price">
                     ${(pkg.price / 100).toFixed(2)}
                   </span>
                 </button>
               ))}
             </div>
-            <p className="credits-info">
-              Credits are used for book translations.
-            </p>
+            <p className="credits-info">{t.creditsModal.info}</p>
             <div className="uf-actions">
               <button
                 className="uf-btn-quiet"
                 style={{ flex: 1 }}
                 onClick={() => setShowCreditsModal(false)}
               >
-                Cancel
+                {t.common.cancel}
               </button>
             </div>
           </div>

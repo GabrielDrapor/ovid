@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import BilingualReaderV2 from './BilingualReaderV2';
 import { fetchWithRetry } from '../utils/fetchWithRetry';
+import { useI18n } from '../i18n';
 import '../App.css';
 
 interface Chapter {
@@ -39,7 +40,10 @@ interface SharedBookViewProps {
 }
 
 function SharedBookView({ shareToken }: SharedBookViewProps) {
-  const [chapterContent, setChapterContent] = useState<ChapterContent | null>(null);
+  const { t } = useI18n();
+  const [chapterContent, setChapterContent] = useState<ChapterContent | null>(
+    null
+  );
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -49,16 +53,18 @@ function SharedBookView({ shareToken }: SharedBookViewProps) {
   useEffect(() => {
     const loadChapters = async () => {
       try {
-        const response = await fetchWithRetry(`/api/shared/${shareToken}/chapters`);
+        const response = await fetchWithRetry(
+          `/api/shared/${shareToken}/chapters`
+        );
         if (response.status === 404) {
-          setError('This shared link is no longer valid.');
+          setError(t.shared.linkInvalid);
           return;
         }
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
         setChapters(data as Chapter[]);
       } catch (err) {
-        setError('Failed to load book.');
+        setError(t.shared.loadBookFailed);
       }
     };
     loadChapters();
@@ -67,14 +73,16 @@ function SharedBookView({ shareToken }: SharedBookViewProps) {
   const loadChapter = async (chapterNumber: number) => {
     setLoading(true);
     try {
-      const response = await fetchWithRetry(`/api/shared/${shareToken}/chapter/${chapterNumber}`);
+      const response = await fetchWithRetry(
+        `/api/shared/${shareToken}/chapter/${chapterNumber}`
+      );
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
       setChapterContent(data as ChapterContent);
       setCurrentChapter(chapterNumber);
       window.scrollTo(0, 0);
     } catch (err) {
-      setError('Failed to load chapter.');
+      setError(t.shared.loadChapterFailed);
     } finally {
       setLoading(false);
     }
@@ -85,16 +93,28 @@ function SharedBookView({ shareToken }: SharedBookViewProps) {
     loadChapter(1);
   }, [shareToken]);
 
-  const handleLoadChapter = useCallback((chapterNumber: number) => {
-    return loadChapter(chapterNumber);
-  }, [shareToken]);
+  const handleLoadChapter = useCallback(
+    (chapterNumber: number) => {
+      return loadChapter(chapterNumber);
+    },
+    [shareToken]
+  );
 
   if (error) {
     return (
       <div className="App">
         <div style={{ textAlign: 'center', padding: '50px' }}>
           <div>{error}</div>
-          <a href="/" style={{ color: '#666', marginTop: '20px', display: 'inline-block' }}>Go to Library</a>
+          <a
+            href="/"
+            style={{
+              color: '#666',
+              marginTop: '20px',
+              display: 'inline-block',
+            }}
+          >
+            {t.shared.goToLibrary}
+          </a>
         </div>
       </div>
     );
@@ -103,7 +123,9 @@ function SharedBookView({ shareToken }: SharedBookViewProps) {
   if (loading && !chapterContent) {
     return (
       <div className="App">
-        <div style={{ textAlign: 'center', padding: '50px' }}>Loading shared book...</div>
+        <div style={{ textAlign: 'center', padding: '50px' }}>
+          {t.shared.loadingSharedBook}
+        </div>
       </div>
     );
   }
@@ -123,7 +145,9 @@ function SharedBookView({ shareToken }: SharedBookViewProps) {
         chapters={chapters}
         onLoadChapter={handleLoadChapter}
         isLoading={loading}
-        onBackToShelf={() => { window.location.href = '/'; }}
+        onBackToShelf={() => {
+          window.location.href = '/';
+        }}
       />
     </div>
   );

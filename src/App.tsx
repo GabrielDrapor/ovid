@@ -4,9 +4,11 @@ import AppV2 from './AppV2';
 import SharedBookView from './components/SharedBookView';
 import ErrorBoundary from './components/ErrorBoundary';
 import { UserProvider } from './contexts/UserContext';
+import { useI18n } from './i18n';
 import './App.css';
 
 function App() {
+  const { t } = useI18n();
   const [bookUuid, setBookUuid] = useState<string | null>(null);
   const [shareToken, setShareToken] = useState<string | null>(null);
   const [showBookShelf, setShowBookShelf] = useState(false);
@@ -105,14 +107,14 @@ function App() {
       <ErrorBoundary>
         <div className="App">
           <div style={{ textAlign: 'center', padding: '50px' }}>
-            <div>Error: {error}</div>
+            <div>{t.common.error(error)}</div>
             <button
               onClick={() => {
                 window.history.pushState({}, '', '/');
                 syncFromUrl();
               }}
             >
-              Go Home
+              {t.common.goHome}
             </button>
           </div>
         </div>
