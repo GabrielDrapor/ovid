@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { getMessages, useI18n } from '../i18n';
+import { READER_THEMES, themeCssVars } from '../reader/themes';
+import { useReaderTheme } from '../reader/useReaderTheme';
 import './BilingualReader.css';
 
 interface Chapter {
@@ -29,6 +31,8 @@ interface BilingualReaderV2Props {
   onLoadChapter: (chapterNumber: number) => void | Promise<void>;
   isLoading: boolean;
   bookUuid?: string;
+  /** e.g. 'en-zh' — used to set lang attributes for hyphenation/rendering */
+  languagePair?: string;
   onBackToShelf?: () => void;
   // Reading status
   onMarkComplete?: (isCompleted: boolean) => Promise<void>;
@@ -120,6 +124,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
   onLoadChapter,
   isLoading,
   bookUuid,
+  languagePair,
   onBackToShelf,
   onMarkComplete,
   isCompleted,
@@ -135,7 +140,18 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
   fetchChapter,
 }) => {
   const { t, locale } = useI18n();
+  const { theme, themePref, setThemePref } = useReaderTheme();
   const contentRef = useRef<HTMLDivElement>(null);
+
+  // Source/target language codes for lang attributes (hyphenation, CJK
+  // rendering). Kept in a ref so DOM-mutating helpers can read them without
+  // being re-created.
+  const langsRef = useRef<{ src?: string; tgt?: string }>({});
+  {
+    const [src, tgt] = (languagePair ?? '').split('-');
+    langsRef.current.src = src || undefined;
+    langsRef.current.tgt = tgt && tgt !== 'none' ? tgt : undefined;
+  }
   const [showOriginal, setShowOriginal] = useState(initialShowOriginal ?? true);
   const showOriginalRef = useRef(showOriginal);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -144,8 +160,10 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
   const [paragraphSpacing, setParagraphSpacing] = useState(
     typographyDefaults.paragraphSpacing ?? 0
   );
+  // 1.75 default: CJK body text conventionally runs looser (1.6–2.0) than
+  // Latin; measured peers: Douban Read 2.0, WeRead ~1.9, clreq range 1.5–2.0.
   const [lineHeight, setLineHeight] = useState(
-    typographyDefaults.lineHeight ?? 1.6
+    typographyDefaults.lineHeight ?? 1.75
   );
   const [letterSpacing, setLetterSpacing] = useState(
     typographyDefaults.letterSpacing ?? -0.03
@@ -157,6 +175,11 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
     typographyDefaults.fontWeight ?? 450
   );
   const [fontSize, setFontSize] = useState(typographyDefaults.fontSize ?? 19);
+  // Traditional CJK paragraph mode: 2em first-line indent, no gap (stored as
+  // 0/1 alongside the numeric typography settings).
+  const [indentParagraphs, setIndentParagraphs] = useState(
+    (typographyDefaults.indentParagraphs ?? 0) === 1
+  );
   const [isMarkingComplete, setIsMarkingComplete] = useState(false);
   const [markCompleteError, setMarkCompleteError] = useState<string | null>(
     null
@@ -175,10 +198,12 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
           wordSpacing,
           fontWeight,
           fontSize,
+          indentParagraphs: indentParagraphs ? 1 : 0,
         })
       );
     } catch {}
   }, [
+    indentParagraphs,
     paragraphSpacing,
     lineHeight,
     letterSpacing,
@@ -430,6 +455,15 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
       data.element.innerHTML = data.originalHtml;
       data.showingOriginal = true;
     }
+    applyElementLang(data.element, data.showingOriginal);
+  };
+
+  /** Keep the element's lang attribute in sync with the text it shows, so
+   *  hyphenation and CJK-aware rendering apply to the right language. */
+  const applyElementLang = (el: HTMLElement, showingOriginal: boolean) => {
+    const lang = showingOriginal ? langsRef.current.src : langsRef.current.tgt;
+    if (lang) el.lang = lang;
+    else el.removeAttribute('lang');
   };
 
   /**
@@ -444,6 +478,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
         renderTranslated(data);
       }
       data.showingOriginal = showOrig;
+      applyElementLang(data.element, showOrig);
     });
   }, []);
 
@@ -921,10 +956,11 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
   const resetTypography = () => {
     setFontSize(19);
     setParagraphSpacing(0);
-    setLineHeight(1.6);
+    setLineHeight(1.75);
     setLetterSpacing(-0.03);
     setWordSpacing(0);
     setFontWeight(450);
+    setIndentParagraphs(false);
   };
 
   // View-transition wrapper: crossfades chapters using the browser's View
@@ -1023,7 +1059,10 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
   }, []);
 
   return (
-    <div className="bilingual-reader">
+    <div
+      className="bilingual-reader"
+      style={themeCssVars(theme) as React.CSSProperties}
+    >
       {/* Inject EPUB CSS styles — scoped to .epub-content to prevent leaking */}
       {styles && (
         <style dangerouslySetInnerHTML={{ __html: scopeEpubStyles(styles) }} />
@@ -1048,6 +1087,8 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
           hyphens: auto;
           overflow-wrap: break-word;
           word-break: break-word;
+          /* CJK/Latin mixed-script spacing (clreq); ignored where unsupported */
+          text-autospace: normal;
         }
         @media (max-width: 768px) {
           .reader-content-v2 {
@@ -1059,11 +1100,18 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
           transition: background-color 0.2s;
         }
         .reader-content-v2 [data-bilingual]:hover {
-          background-color: rgba(0, 0, 0, 0.02);
+          background-color: var(--rt-hover, rgba(0, 0, 0, 0.02));
         }
         .reader-content-v2 p {
-          margin: 0 0 0.8em 0;
-          text-indent: 0;
+          /* Two paragraph modes: western (gap, no indent) and traditional
+             CJK (2em first-line indent, no gap). The gap slider offsets
+             either base. */
+          margin: 0 0 ${
+            indentParagraphs
+              ? `${Math.max(0, paragraphSpacing)}px`
+              : `calc(0.8em + ${paragraphSpacing}px)`
+          } 0;
+          text-indent: ${indentParagraphs ? '2em' : '0'};
         }
         .reader-content-v2 h1,
         .reader-content-v2 h2,
@@ -1125,7 +1173,9 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
           lineHeight: lineHeight,
           letterSpacing: `${letterSpacing}em`,
           wordSpacing: `${wordSpacing}em`,
-          fontWeight: fontWeight,
+          // Light-on-dark text renders visually heavier; compensate so the
+          // dark theme keeps the same apparent weight.
+          fontWeight: theme.dark ? Math.max(300, fontWeight - 25) : fontWeight,
         }}
       >
         {isLoading && (
@@ -1152,6 +1202,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
           <div
             className="epub-content"
             ref={contentRef}
+            lang={langsRef.current.src}
             dangerouslySetInnerHTML={{ __html: rawHtml }}
           />
         )}
@@ -1408,6 +1459,44 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
             {/* Divider */}
             <div className="fab-divider" />
 
+            {/* Theme swatches: Auto (follow system) + each defined theme */}
+            <div className="fab-theme-row">
+              <span className="fab-typo-label">{t.reader.theme}</span>
+              <div className="fab-theme-swatches">
+                <button
+                  type="button"
+                  className={`fab-theme-swatch fab-theme-swatch-auto ${
+                    themePref === 'auto' ? 'active' : ''
+                  }`}
+                  title={t.reader.themeAuto}
+                  aria-label={t.reader.themeAuto}
+                  aria-pressed={themePref === 'auto'}
+                  onClick={() => setThemePref('auto')}
+                >
+                  ◐
+                </button>
+                {READER_THEMES.map((th) => (
+                  <button
+                    type="button"
+                    key={th.id}
+                    className={`fab-theme-swatch ${
+                      themePref === th.id ? 'active' : ''
+                    }`}
+                    style={{
+                      backgroundColor: th.colors.bg,
+                      color: th.colors.text,
+                    }}
+                    title={t.reader.themeNames[th.id] || th.id}
+                    aria-label={t.reader.themeNames[th.id] || th.id}
+                    aria-pressed={themePref === th.id}
+                    onClick={() => setThemePref(th.id)}
+                  >
+                    A
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {/* Typography section - collapsible */}
             <button
               className="fab-menu-item fab-section-toggle"
@@ -1538,6 +1627,20 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
                       +
                     </button>
                   </div>
+                </div>
+                <div className="fab-typo-row">
+                  <span className="fab-typo-label">
+                    {t.reader.firstLineIndent}
+                  </span>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={indentParagraphs}
+                    className={`fab-switch ${indentParagraphs ? 'on' : ''}`}
+                    onClick={() => setIndentParagraphs((v) => !v)}
+                  >
+                    <span className="fab-switch-knob" />
+                  </button>
                 </div>
                 <button className="fab-reset-btn" onClick={resetTypography}>
                   {t.reader.resetToDefault}

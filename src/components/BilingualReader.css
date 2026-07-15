@@ -7,8 +7,8 @@
   font-weight: 400;
   line-height: 1.7;
   text-align: left;
-  color: #1a1a1a;
-  background-color: #fefefe;
+  color: var(--rt-text, #2f2a21);
+  background-color: var(--rt-bg, #faf6ec);
 }
 
 .reader-header {
@@ -18,7 +18,7 @@
 
 .reader-title {
   font-size: 1.8em;
-  color: #1a1a1a;
+  color: var(--rt-text, #2f2a21);
   margin: 0 0 40px 0;
   font-weight: 400;
   text-align: center;
@@ -36,7 +36,7 @@
 
 .paragraph {
   font-size: 16px;
-  color: #1a1a1a;
+  color: var(--rt-text, #2f2a21);
   cursor: pointer;
   padding: 0;
   margin: 0;
@@ -59,28 +59,28 @@
   /* transform: scale(0.995); */
 }
 
-/* Translated text styling - dark grey color */
+/* Translated text styling - one step softer than the original */
 .translated-text-style {
-  color: #333333;
+  color: var(--rt-text-translated, #4a443a);
 }
 
 /* Original text styling - maintain darker color */
 .original-text-style {
-  color: #1a1a1a;
+  color: var(--rt-text, #2f2a21);
 }
 
 /* Ensure translated styling applies to titles and chapters */
 .title-text.translated-text-style,
 .chapter-text.translated-text-style {
-  color: #333333;
+  color: var(--rt-text-translated, #4a443a);
 }
 
 .title-text.original-text-style {
-  color: #1a1a1a;
+  color: var(--rt-text, #2f2a21);
 }
 
 .chapter-text.original-text-style {
-  color: #333;
+  color: var(--rt-text, #2f2a21);
 }
 
 .fab-container {
@@ -96,8 +96,8 @@
   width: 30px;
   height: 30px;
   border-radius: 25%;
-  background-color: #333 !important;
-  color: white !important;
+  background-color: var(--rt-fab-bg, #3a3324) !important;
+  color: var(--rt-fab-fg, #f6f2e7) !important;
   border: none !important;
   font-size: 20px;
   cursor: pointer;
@@ -114,7 +114,7 @@
 .fab-dots {
   width: 4px;
   height: 4px;
-  background-color: white;
+  background-color: var(--rt-fab-fg, #f6f2e7);
   border-radius: 50%;
   position: relative;
   pointer-events: none;
@@ -126,7 +126,7 @@
   position: absolute;
   width: 4px;
   height: 4px;
-  background-color: white;
+  background-color: var(--rt-fab-fg, #f6f2e7);
   border-radius: 50%;
   left: 0;
 }
@@ -140,7 +140,7 @@
 }
 
 .fab:hover {
-  background-color: #444 !important;
+  filter: brightness(1.15);
 }
 
 .fab-backdrop {
@@ -151,14 +151,14 @@
   position: absolute;
   bottom: 46px;
   right: 0;
-  background-color: white;
+  background-color: var(--rt-surface, #fffdf6);
   border-radius: 12px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
   padding: 8px 0;
   min-width: 200px;
   max-height: 70vh;
   overflow-y: auto;
-  border: 1px solid #e0e0e0;
+  border: 1px solid var(--rt-border, #e6dfcc);
 }
 
 .fab-menu-item {
@@ -172,20 +172,20 @@
   text-align: left;
   cursor: pointer;
   font-size: 14px;
-  color: #333;
+  color: var(--rt-text, #2f2a21);
   transition: background-color 0.15s ease;
 }
 
 .fab-menu-item:hover {
-  background-color: #f5f5f5;
+  background-color: var(--rt-surface-alt, #f2edde);
 }
 
 .fab-menu-item:active {
-  background-color: #eee;
+  background-color: var(--rt-border, #e6dfcc);
 }
 
 .fab-menu-item-completed {
-  color: #625a41;
+  color: var(--rt-accent, #8b5a2b);
   font-weight: 600;
 }
 
@@ -196,7 +196,7 @@
 
 .fab-divider {
   height: 1px;
-  background: #eee;
+  background: var(--rt-border, #e6dfcc);
   margin: 4px 0;
 }
 
@@ -210,17 +210,100 @@
 /* Collapsible section toggle */
 .fab-section-toggle {
   font-size: 14px;
-  color: #333;
+  color: var(--rt-text, #2f2a21);
 }
 
 .fab-chevron {
   transition: transform 0.2s ease;
   font-size: 14px;
-  color: #999;
+  color: var(--rt-text-muted, #8a8171);
 }
 
 .fab-chevron.open {
   transform: rotate(90deg);
+}
+
+/* Theme swatch row — label above, swatches below, so the swatch strip
+   never widens the menu. */
+.fab-theme-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 16px;
+}
+
+.fab-theme-swatches {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.fab-theme-swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid var(--rt-border, #e6dfcc);
+  font-size: 12px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  transition:
+    box-shadow 0.15s ease,
+    transform 0.15s ease;
+}
+
+.fab-theme-swatch:hover {
+  transform: scale(1.08);
+}
+
+.fab-theme-swatch.active {
+  box-shadow: 0 0 0 2px var(--rt-accent, #8b5a2b);
+}
+
+.fab-theme-swatch-auto {
+  background: transparent;
+  color: var(--rt-text, #2f2a21);
+  font-size: 14px;
+}
+
+/* First-line indent switch */
+.fab-switch {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  border-radius: 999px;
+  border: 1px solid var(--rt-border, #e6dfcc);
+  background: var(--rt-surface-alt, #f2edde);
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.15s ease;
+}
+
+.fab-switch-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--rt-text-muted, #8a8171);
+  transition:
+    left 0.15s ease,
+    background 0.15s ease;
+}
+
+.fab-switch.on {
+  background: var(--rt-accent-soft, rgba(139, 90, 43, 0.12));
+}
+
+.fab-switch.on .fab-switch-knob {
+  left: 18px;
+  background: var(--rt-accent, #8b5a2b);
 }
 
 /* Typography panel */
@@ -237,14 +320,14 @@
 
 .fab-typo-label {
   font-size: 13px;
-  color: #555;
+  color: var(--rt-text-translated, #4a443a);
   flex-shrink: 0;
   min-width: 100px;
 }
 
 .fab-typo-value {
   font-size: 12px;
-  color: #888;
+  color: var(--rt-text-muted, #8a8171);
   min-width: 40px;
   text-align: center;
   font-variant-numeric: tabular-nums;
@@ -260,12 +343,12 @@
   width: 26px;
   height: 26px;
   border-radius: 50%;
-  background-color: #f0f0f0;
-  border: 1px solid #ddd;
+  background-color: var(--rt-surface-alt, #f2edde);
+  border: 1px solid var(--rt-border, #e6dfcc);
   cursor: pointer;
   font-size: 13px;
   font-weight: bold;
-  color: #333;
+  color: var(--rt-text, #2f2a21);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -273,7 +356,7 @@
 }
 
 .fab-control-btn:hover {
-  background-color: #e0e0e0;
+  background-color: var(--rt-border, #e6dfcc);
 }
 
 .fab-control-btn:active {
@@ -284,18 +367,18 @@
   width: 100%;
   padding: 6px 0;
   margin-top: 8px;
-  border: 1px solid #d0d0d0;
+  border: 1px solid var(--rt-border, #e6dfcc);
   border-radius: 6px;
   background: transparent;
-  color: #666;
+  color: var(--rt-text-muted, #8a8171);
   font-size: 12px;
   cursor: pointer;
   transition: all 0.15s;
 }
 
 .fab-reset-btn:hover {
-  background-color: #f0f0f0;
-  color: #333;
+  background-color: var(--rt-surface-alt, #f2edde);
+  color: var(--rt-text, #2f2a21);
 }
 
 .fab-reset-btn:active {
@@ -315,11 +398,11 @@
   font-size: 2.2em;
   font-weight: 600;
   text-align: center;
-  color: #1a1a1a;
+  color: var(--rt-text, #2f2a21);
   margin-bottom: 30px;
   text-indent: 0;
   letter-spacing: 0.5px;
-  border-bottom: 2px solid #e0e0e0;
+  border-bottom: 2px solid var(--rt-border, #e6dfcc);
   padding-bottom: 20px;
 }
 
@@ -327,11 +410,11 @@ h2.title-text {
   font-size: 2.2em;
   font-weight: 600;
   text-align: center;
-  color: #1a1a1a;
+  color: var(--rt-text, #2f2a21);
   margin-bottom: 30px;
   text-indent: 0;
   letter-spacing: 0.5px;
-  border-bottom: 2px solid #e0e0e0;
+  border-bottom: 2px solid var(--rt-border, #e6dfcc);
   padding-bottom: 20px;
 }
 
@@ -339,7 +422,7 @@ h2.title-text {
   font-size: 1.6em;
   font-weight: 500;
   text-align: center;
-  color: #333;
+  color: var(--rt-text, #2f2a21);
   margin: 40px 0 30px 0;
   text-indent: 0;
   letter-spacing: 0.3px;
@@ -349,7 +432,7 @@ h3.chapter-text {
   font-size: 1.6em;
   font-weight: 500;
   text-align: center;
-  color: #333;
+  color: var(--rt-text, #2f2a21);
   margin: 40px 0 30px 0;
   text-indent: 0;
   letter-spacing: 0.3px;
@@ -387,7 +470,7 @@ h3.chapter-text {
 }
 
 .chapters-content {
-  background: white;
+  background: var(--rt-surface, #fffdf6);
   border-radius: 12px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
   max-width: 500px;
@@ -403,14 +486,14 @@ h3.chapter-text {
   justify-content: space-between;
   align-items: center;
   padding: 20px 24px;
-  border-bottom: 1px solid #e0e0e0;
-  background: #f8f9fa;
+  border-bottom: 1px solid var(--rt-border, #e6dfcc);
+  background: var(--rt-surface-alt, #f2edde);
 }
 
 .chapters-header h3 {
   margin: 0;
   font-size: 1.3em;
-  color: #333;
+  color: var(--rt-text, #2f2a21);
   font-weight: 600;
 }
 
@@ -425,14 +508,14 @@ h3.chapter-text {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #666;
+  color: var(--rt-text-muted, #8a8171);
   border-radius: 50%;
   transition: all 0.2s ease;
 }
 
 .chapters-close:hover {
-  background-color: #e9ecef;
-  color: #333;
+  background-color: var(--rt-border, #e6dfcc);
+  color: var(--rt-text, #2f2a21);
 }
 
 .chapters-list {
@@ -449,7 +532,7 @@ h3.chapter-text {
   margin-bottom: 1px;
   background: none;
   border: none;
-  border-bottom: 1px solid #e0e0e0;
+  border-bottom: 1px solid var(--rt-border, #e6dfcc);
   border-radius: 0;
   cursor: pointer;
   text-align: left;
@@ -458,7 +541,7 @@ h3.chapter-text {
 }
 
 .chapter-item:hover {
-  background-color: #f5f5f5;
+  background-color: var(--rt-surface-alt, #f2edde);
 }
 
 .chapter-item:last-child {
@@ -467,16 +550,16 @@ h3.chapter-text {
 }
 
 .chapter-item.active {
-  background-color: #f3f0e8;
+  background-color: var(--rt-accent-soft, rgba(139, 90, 43, 0.12));
 }
 
 .chapter-item.active .chapter-title-original {
-  color: #2b241a;
+  color: var(--rt-text, #2f2a21);
   font-weight: 600;
 }
 
 .chapter-number {
-  color: #666;
+  color: var(--rt-text-muted, #8a8171);
   font-size: 14px;
   font-weight: 500;
   flex-shrink: 0;
@@ -492,7 +575,7 @@ h3.chapter-text {
 .chapter-title-original {
   font-size: 16px;
   font-weight: 500;
-  color: #333;
+  color: var(--rt-text, #2f2a21);
   margin-bottom: 4px;
   white-space: nowrap;
   overflow: hidden;
@@ -501,7 +584,7 @@ h3.chapter-text {
 
 .chapter-title-translated {
   font-size: 14px;
-  color: #666;
+  color: var(--rt-text-muted, #8a8171);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -529,7 +612,7 @@ h3.chapter-text {
   border: none;
   font-size: 32px;
   font-weight: 900;
-  color: #666;
+  color: var(--rt-text-muted, #8a8171);
   cursor: pointer;
   transition:
     color 0.15s ease,
@@ -542,7 +625,7 @@ h3.chapter-text {
 }
 
 .nav-button:hover {
-  color: #333;
+  color: var(--rt-text, #2f2a21);
 }
 
 .nav-button:active {
@@ -680,12 +763,12 @@ sup {
   position: relative;
   top: -0.4em;
   margin-left: 2px;
-  color: #666;
+  color: var(--rt-text-muted, #8a8171);
   cursor: pointer;
 }
 
 sup:hover {
-  color: #007bff;
+  color: var(--rt-accent, #8b5a2b);
 }
 
 /* (removed - completed style now in .fab-completed) */
@@ -755,11 +838,11 @@ sup:hover {
 
 /* Plain internal jump links (cross-references, in-text TOC links) */
 .reader-content-v2 a[data-ov-chapter] {
-  color: #8b5a2b;
+  color: var(--rt-accent, #8b5a2b);
   cursor: pointer;
   text-decoration: underline;
   text-decoration-style: dotted;
-  text-decoration-color: rgba(139, 90, 43, 0.5);
+  text-decoration-color: var(--rt-accent-soft, rgba(139, 90, 43, 0.5));
   text-underline-offset: 3px;
 }
 
@@ -774,13 +857,13 @@ sup:hover {
 }
 
 .reader-content-v2 a[data-ov-note]:hover {
-  background: rgba(139, 90, 43, 0.1);
+  background: var(--rt-accent-soft, rgba(139, 90, 43, 0.1));
 }
 
 /* Landing highlight after a jump (also used by progress restore) */
 @keyframes ov-jump-flash {
   0% {
-    background: rgba(216, 178, 113, 0.45);
+    background: var(--rt-flash, rgba(216, 178, 113, 0.45));
   }
   100% {
     background: transparent;
@@ -816,9 +899,9 @@ sup:hover {
   max-height: min(55vh, 480px);
   display: flex;
   flex-direction: column;
-  background: #fffdf7;
-  color: #1a1a1a;
-  border: 1px solid rgba(43, 36, 26, 0.12);
+  background: var(--rt-surface, #fffdf6);
+  color: var(--rt-text, #2f2a21);
+  border: 1px solid var(--rt-border, #e6dfcc);
   border-radius: 14px;
   box-shadow:
     0 24px 60px rgba(0, 0, 0, 0.28),
@@ -848,14 +931,14 @@ sup:hover {
   align-items: center;
   justify-content: space-between;
   padding: 12px 16px 8px;
-  border-bottom: 1px solid rgba(43, 36, 26, 0.08);
+  border-bottom: 1px solid var(--rt-border, #e6dfcc);
 }
 
 .note-popover-title {
   font-size: 12px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: #8b5a2b;
+  color: var(--rt-accent, #8b5a2b);
 }
 
 .note-popover-close {
@@ -864,12 +947,12 @@ sup:hover {
   font-size: 20px;
   line-height: 1;
   padding: 4px 6px;
-  color: rgba(26, 26, 26, 0.5);
+  color: var(--rt-text-muted, #8a8171);
   cursor: pointer;
 }
 
 .note-popover-close:hover {
-  color: #1a1a1a;
+  color: var(--rt-text, #2f2a21);
 }
 
 .note-popover-body {
@@ -884,7 +967,7 @@ sup:hover {
 }
 
 .note-popover-original a[data-ov-chapter] {
-  color: #8b5a2b;
+  color: var(--rt-accent, #8b5a2b);
   cursor: pointer;
   text-decoration: underline;
   text-decoration-style: dotted;
@@ -894,12 +977,12 @@ sup:hover {
 .note-popover-translated {
   margin-top: 10px;
   padding-top: 10px;
-  border-top: 1px dashed rgba(43, 36, 26, 0.15);
-  color: rgba(26, 26, 26, 0.85);
+  border-top: 1px dashed var(--rt-border, #e6dfcc);
+  color: var(--rt-text-translated, #4a443a);
 }
 
 .note-popover-status {
-  color: rgba(26, 26, 26, 0.5);
+  color: var(--rt-text-muted, #8a8171);
   text-align: center;
   margin: 8px 0;
 }
@@ -911,11 +994,11 @@ sup:hover {
   background: none;
   border: none;
   font-size: 13px;
-  color: #8b5a2b;
+  color: var(--rt-accent, #8b5a2b);
   cursor: pointer;
   text-decoration: underline;
   text-underline-offset: 3px;
-  text-decoration-color: rgba(139, 90, 43, 0.4);
+  text-decoration-color: var(--rt-accent-soft, rgba(139, 90, 43, 0.4));
 }
 
 .note-popover-goto:hover {
@@ -935,8 +1018,8 @@ sup:hover {
   padding: 9px 16px;
   border: none;
   border-radius: 999px;
-  background: #2b241a;
-  color: #f6f4ed;
+  background: var(--rt-fab-bg, #3a3324);
+  color: var(--rt-fab-fg, #f6f2e7);
   font-size: 13.5px;
   font-family: inherit;
   cursor: pointer;
@@ -945,7 +1028,7 @@ sup:hover {
 }
 
 .return-chip:hover {
-  background: #3d3423;
+  filter: brightness(1.15);
 }
 
 @keyframes return-chip-in {

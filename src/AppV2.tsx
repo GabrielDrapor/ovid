@@ -116,6 +116,9 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
   // Share state
   const [shareToken, setShareToken] = useState<string | null>(null);
   const [bookOwnerId, setBookOwnerId] = useState<number | null>(null);
+  const [languagePair, setLanguagePair] = useState<string | undefined>(
+    undefined
+  );
   const { user } = useUser();
 
   // Calculate reading progress percentage (chapter-granular + intra-chapter fraction)
@@ -297,16 +300,20 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
       }
     };
 
-    // Fetch book metadata to know the owner
+    // Fetch book metadata to know the owner and language pair
     const loadBookMeta = async () => {
       try {
         const response = await fetchApi('/api/books');
         const books = (await response.json()) as Array<{
           uuid: string;
           user_id: number | null;
+          language_pair?: string | null;
         }>;
         const book = books.find((b: any) => b.uuid === bookUuid);
-        if (book) setBookOwnerId(book.user_id);
+        if (book) {
+          setBookOwnerId(book.user_id);
+          setLanguagePair(book.language_pair ?? undefined);
+        }
       } catch {
         // ignore
       }
@@ -595,6 +602,7 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
         onLoadChapter={handleLoadChapter}
         isLoading={loading}
         bookUuid={bookUuid}
+        languagePair={languagePair}
         onBackToShelf={onBackToShelf}
         onMarkComplete={handleMarkComplete}
         isCompleted={isCompleted}
