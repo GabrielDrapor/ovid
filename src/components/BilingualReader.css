@@ -223,23 +223,26 @@
   transform: rotate(90deg);
 }
 
-/* Theme swatch row */
+/* Theme swatch row — label above, swatches below, so the swatch strip
+   never widens the menu. */
 .fab-theme-row {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
   padding: 8px 16px;
 }
 
 .fab-theme-swatches {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
 }
 
 .fab-theme-swatch {
-  width: 24px;
-  height: 24px;
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
   border: 1px solid var(--rt-border, #e6dfcc);
   font-size: 12px;
