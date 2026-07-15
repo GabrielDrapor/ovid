@@ -48,6 +48,25 @@ export interface ReaderTheme {
 
 export const READER_THEMES: ReaderTheme[] = [
   {
+    id: 'white',
+    dark: false,
+    colors: {
+      bg: '#fefefe',
+      text: '#262626',
+      textTranslated: '#454545',
+      textMuted: '#8b8b85',
+      surface: '#ffffff',
+      surfaceAlt: '#f3f3f1',
+      border: '#e4e4e0',
+      accent: '#8b5a2b',
+      accentSoft: 'rgba(139, 90, 43, 0.1)',
+      hover: 'rgba(0, 0, 0, 0.03)',
+      flash: 'rgba(216, 178, 113, 0.4)',
+      fabBg: '#333333',
+      fabFg: '#ffffff',
+    },
+  },
+  {
     id: 'paper',
     dark: false,
     colors: {

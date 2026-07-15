@@ -142,6 +142,7 @@ export const zh: Messages = {
     theme: '主题',
     themeAuto: '跟随系统',
     themeNames: {
+      white: '纯白',
       paper: '纸白',
       sepia: '羊皮纸',
       green: '护眼绿',

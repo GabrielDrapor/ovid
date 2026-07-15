@@ -24,8 +24,9 @@ function contrast(fg: string, bg: string): number {
 }
 
 describe('reader themes', () => {
-  it('defines the four launch themes', () => {
+  it('defines the launch themes, lightest to darkest', () => {
     expect(READER_THEMES.map((t) => t.id)).toEqual([
+      'white',
       'paper',
       'sepia',
       'green',

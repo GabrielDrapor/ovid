@@ -144,6 +144,7 @@ export const en = {
     theme: 'Theme',
     themeAuto: 'Auto (follow system)',
     themeNames: {
+      white: 'White',
       paper: 'Paper',
       sepia: 'Sepia',
       green: 'Green',
