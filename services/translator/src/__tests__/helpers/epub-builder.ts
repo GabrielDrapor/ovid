@@ -17,6 +17,8 @@ export interface RawTestFile {
   bodyHtml: string;
   /** Optional <title> */
   title?: string;
+  /** Set linear="no" on this file's spine itemref */
+  nonLinear?: boolean;
 }
 
 export interface TestEpubOptions {
@@ -47,6 +49,13 @@ export interface TestEpubOptions {
    * anchor/link structure.
    */
   rawFiles?: RawTestFile[];
+  /**
+   * Precise NCX entries (src may include fragments and need not cover every
+   * spine file). Overrides `ncxTitles` when set.
+   */
+  ncxEntries?: { src: string; title: string }[];
+  /** OPF <guide> references. */
+  guide?: { type: string; href: string }[];
 }
 
 const DEFAULT_CHAPTERS: TestChapter[] = [
@@ -217,8 +226,31 @@ ${raw.bodyHtml}
     zip.file('OEBPS/images/test.png', pngData);
   }
 
+  // 7a. Precise NCX entries (sparse coverage, fragments, odd paths)
+  if (options.ncxEntries) {
+    const navPoints = options.ncxEntries
+      .map(
+        (e, i) => `    <navPoint id="np${i + 1}" playOrder="${i + 1}">
+      <navLabel><text>${e.title}</text></navLabel>
+      <content src="${e.src}"/>
+    </navPoint>`
+      )
+      .join('\n');
+    zip.file(
+      'OEBPS/toc.ncx',
+      `<?xml version="1.0" encoding="UTF-8"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+  <head><meta name="dtb:uid" content="test-uid"/></head>
+  <docTitle><text>${title}</text></docTitle>
+  <navMap>
+${navPoints}
+  </navMap>
+</ncx>`
+    );
+  }
+
   // 7. Generate toc.ncx if requested
-  if (ncxTitles) {
+  if (ncxTitles && !options.ncxEntries) {
     const navPoints = chapterFiles
       .map((f, i) => {
         const tocTitle =
@@ -276,8 +308,14 @@ ${listItems}
     )
     .join('\n');
 
+  const nonLinearByName = new Map(
+    (options.rawFiles || []).map((r) => [r.fileName, !!r.nonLinear])
+  );
   const spineItems = chapterFiles
-    .map((_, i) => `    <itemref idref="ch${i + 1}"/>`)
+    .map((f, i) => {
+      const linear = nonLinearByName.get(f) ? ' linear="no"' : '';
+      return `    <itemref idref="ch${i + 1}"${linear}/>`;
+    })
     .join('\n');
 
   const imageManifest = includeImage
@@ -288,12 +326,24 @@ ${listItems}
     ? '    <item id="css1" href="styles.css" media-type="text/css"/>'
     : '';
 
-  const ncxManifest = ncxTitles
-    ? '    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>'
-    : '';
+  const ncxManifest =
+    ncxTitles || options.ncxEntries
+      ? '    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>'
+      : '';
 
   const navManifest = navTitles
     ? '    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>'
+    : '';
+
+  const guideXml = options.guide
+    ? `  <guide>
+${options.guide
+  .map(
+    (g) =>
+      `    <reference type="${g.type}" title="${g.type}" href="${g.href}"/>`
+  )
+  .join('\n')}
+  </guide>`
     : '';
 
   const opf = `<?xml version="1.0" encoding="UTF-8"?>
@@ -313,6 +363,7 @@ ${styleManifest}
   <spine>
 ${spineItems}
   </spine>
+${guideXml}
 </package>`;
 
   zip.file('OEBPS/content.opf', opf);
