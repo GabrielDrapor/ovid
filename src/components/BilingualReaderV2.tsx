@@ -74,9 +74,32 @@ interface NotePopoverState {
  * (e.g. titlepage.xhtml's `body { text-align: center }`) into individual xhtml
  * files. The book parser concatenates all of them into one stylesheet, so a
  * single titlepage rule would otherwise center every paragraph in the book.
+ *
+ * Color declarations (`color`, `background-color`, colored `background`
+ * shorthands) are stripped: the reader's theme owns text/page colors, and a
+ * publisher's hardcoded dark-on-light palette would render dark-on-dark under
+ * the dark theme (and clash with sepia/green). `background` shorthands that
+ * reference an image are kept — dropping those would lose decorative artwork.
  */
-function scopeEpubStyles(css: string): string {
-  return css.replace(/([^{}@]+)\{/g, (match, selectors: string) => {
+export function scopeEpubStyles(css: string): string {
+  // Filter declarations inside each innermost block. @media wrappers only
+  // contain nested rule blocks, so matching innermost `{...}` covers all
+  // declaration lists.
+  const withoutColors = css.replace(
+    /\{([^{}]*)\}/g,
+    (_m, decls: string) =>
+      `{${decls
+        .split(';')
+        .filter((decl) => {
+          const prop = decl.split(':')[0]?.trim().toLowerCase();
+          if (prop === 'color' || prop === 'background-color') return false;
+          if (prop === 'background' && !/url\s*\(/i.test(decl)) return false;
+          return true;
+        })
+        .join(';')}}`
+  );
+
+  return withoutColors.replace(/([^{}@]+)\{/g, (match, selectors: string) => {
     // Don't scope @-rules (media queries, keyframes, etc.)
     if (selectors.trim().startsWith('@')) return match;
     const scoped = selectors
@@ -1101,6 +1124,16 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
         }
         .reader-content-v2 [data-bilingual]:hover {
           background-color: var(--rt-hover, rgba(0, 0, 0, 0.02));
+        }
+        ${
+          theme.dark
+            ? `/* Dark theme: inline publisher colors (style="color:…") would
+               render dark-on-dark — force theme colors for those elements. */
+        .epub-content [style*="color"] {
+          color: inherit !important;
+          background-color: transparent !important;
+        }`
+            : ''
         }
         .reader-content-v2 p {
           /* Two paragraph modes: western (gap, no indent) and traditional
