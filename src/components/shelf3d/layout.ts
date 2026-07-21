@@ -680,3 +680,32 @@ export function resolveDropTarget(
     bookUuids: bay.bookUuids,
   };
 }
+
+/**
+ * The book the user touched last — the one that gets the ribbon bookmark
+ * and sits slightly pulled out of its row. `last_read_at` is a SQLite
+ * CURRENT_TIMESTAMP string ("YYYY-MM-DD HH:MM:SS"), which orders correctly
+ * under plain string comparison; ties break toward the smaller uuid so the
+ * pick is deterministic. Books still importing can't have been read.
+ */
+export function pickMostRecentRead(
+  books: ReadonlyArray<{ uuid: string; status: string | null }>,
+  progress: ReadonlyMap<string, { last_read_at: string | null }>
+): string | null {
+  let bestUuid: string | null = null;
+  let bestAt = '';
+  for (const book of books) {
+    if (book.status === 'processing') continue;
+    const at = progress.get(book.uuid)?.last_read_at;
+    if (!at) continue;
+    if (
+      bestUuid === null ||
+      at > bestAt ||
+      (at === bestAt && book.uuid < bestUuid)
+    ) {
+      bestUuid = book.uuid;
+      bestAt = at;
+    }
+  }
+  return bestUuid;
+}
