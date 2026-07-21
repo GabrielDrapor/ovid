@@ -30,6 +30,7 @@ import {
   ShelfLayout,
   clampSpineRatio,
   layoutBooks,
+  pickMostRecentRead,
   resolveDropTarget,
   rowYCenters,
 } from './layout';
@@ -82,6 +83,8 @@ function isBookImportPending(book: Book): boolean {
 
 const ROOM = '#171210';
 const CLOTH_FALLBACK = '#3a3026';
+/** Ribbon bookmark on the last-read book. */
+const RIBBON_RED = '#a63d2b';
 
 const MIN_ZOOM = 2.5;
 const SHELF_LABEL_HEIGHT = 0.084;
@@ -351,6 +354,8 @@ interface BookMeshProps {
   onSpineRatio: (uuid: string, ratio: number) => void;
   onArtReady: (uuid: string) => void;
   processingProgress: number;
+  /** Most recently read book: ribbon bookmark + sits pulled out a little. */
+  isRecent: boolean;
   /** Accumulated touch-drag distance; large values suppress the tap-click. */
   dragDist: React.MutableRefObject<number>;
   /** Owned books off public shelves can be dragged; everything else can't. */
@@ -377,6 +382,7 @@ function BookMesh({
   onSpineRatio,
   onArtReady,
   processingProgress,
+  isRecent,
   dragDist,
   draggable,
   layout,
@@ -404,6 +410,18 @@ function BookMesh({
   const bookHeight = BOOK_HEIGHT * jitter.heightScale;
   // Keep the bottom edge on the board regardless of height.
   const shelfY = position[1] - (BOOK_HEIGHT - bookHeight) / 2;
+  // The last-read book sits half-pulled out of the row and floats a touch
+  // above the board — clearly proud of the jitter range (±0.03) but short
+  // of the hover tip-out (0.42). The emphasis exists to be noticed once:
+  // the first hover (or open) dismisses it for the rest of the visit and
+  // the book settles back into the row like any other. The ribbon stays.
+  const [noticed, setNoticed] = useState(false);
+  useEffect(() => {
+    if (isRecent && (hovered || selected)) setNoticed(true);
+  }, [isRecent, hovered, selected]);
+  const emphasized = isRecent && !noticed;
+  const restZ = position[2] + jitter.pushIn + (emphasized ? 0.3 : 0);
+  const restY = shelfY + (emphasized ? 0.07 : 0);
 
   // Cloth color (back cover, page rims) sampled from the spine art.
   const [cloth, setCloth] = useState(CLOTH_FALLBACK);
@@ -630,6 +648,16 @@ function BookMesh({
   // Fade-in: books with image URLs start transparent, fade to opaque once loaded.
   const reveal = useRef(artReady ? 1 : 0);
 
+  // Ribbon bookmark for the last-read book: one material shared by both
+  // segments so the dim/reveal loop below can tint it in step with the book.
+  const ribbonMat = useMemo(
+    () =>
+      new THREE.MeshStandardMaterial({ color: RIBBON_RED, roughness: 0.55 }),
+    []
+  );
+  useEffect(() => () => ribbonMat.dispose(), [ribbonMat]);
+  const ribbonBase = useMemo(() => new THREE.Color(RIBBON_RED), []);
+
   useEffect(() => {
     document.body.style.cursor = hovered ? 'pointer' : '';
     return () => {
@@ -640,11 +668,7 @@ function BookMesh({
   // Place the book at its shelf spot on first render so it doesn't fly in
   // from the origin.
   useEffect(() => {
-    group.current?.position.set(
-      position[0],
-      shelfY,
-      position[2] + jitter.pushIn
-    );
+    group.current?.position.set(position[0], restY, restZ);
   }, []);
 
   useFrame((state, delta) => {
@@ -655,8 +679,8 @@ function BookMesh({
     const k = 1 - Math.exp(-delta * (isDragging ? 20 : 7));
 
     let tx = position[0];
-    let ty = shelfY;
-    let tz = position[2] + jitter.pushIn;
+    let ty = restY;
+    let tz = restZ;
     let ry = 0;
     let rz = jitter.lean;
     let ts = 1;
@@ -708,6 +732,9 @@ function BookMesh({
       tx = position[0] + dragShift.current.amount;
     } else if (hovered && !anySelected && !processing) {
       // Tip the book out of the row and yaw it so the cover peeks out.
+      // This replaces the last-read emphasis too: the book settles back
+      // onto the board and follows the ordinary hover animation.
+      ty = shelfY;
       tz = position[2] + 0.42;
       ry = -0.3;
     }
@@ -751,6 +778,11 @@ function BookMesh({
         const base = baseColors[i] ?? baseColors[0];
         mats[i].color.setRGB(base.r * bright, base.g * bright, base.b * bright);
       }
+      ribbonMat.color.setRGB(
+        ribbonBase.r * bright,
+        ribbonBase.g * bright,
+        ribbonBase.b * bright
+      );
     }
   });
 
@@ -830,6 +862,24 @@ function BookMesh({
           roughness={0.9}
         />
       </mesh>
+      {/* Ribbon bookmark on the last-read book: a band out of the page
+          block, over the top edge, hanging a short way down the spine. */}
+      {isRecent && !processing && (
+        <group>
+          <mesh
+            material={ribbonMat}
+            position={[0, bookHeight / 2 + 0.004, BOOK_DEPTH / 2 - 0.045]}
+          >
+            <boxGeometry args={[Math.min(0.026, width * 0.55), 0.008, 0.09]} />
+          </mesh>
+          <mesh
+            material={ribbonMat}
+            position={[0, bookHeight / 2 - 0.058, BOOK_DEPTH / 2 + 0.006]}
+          >
+            <boxGeometry args={[Math.min(0.026, width * 0.55), 0.12, 0.006]} />
+          </mesh>
+        </group>
+      )}
     </group>
   );
 }
@@ -1436,6 +1486,12 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
     () => layoutBooks(books, spineRatios, undefined, undefined, shelfSlots),
     [books, spineRatios, shelfSlots]
   );
+  // Ribbon + pull-out marker for the book the user last read. progressMap is
+  // empty for signed-out visitors, so the shelf stays unmarked for them.
+  const recentUuid = useMemo(
+    () => pickMostRecentRead(books, progressMap),
+    [books, progressMap]
+  );
   const {
     placements,
     slotLabels,
@@ -1597,6 +1653,7 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
               onSpineRatio={handleSpineRatio}
               onArtReady={handleArtReady}
               processingProgress={processingProgress}
+              isRecent={p.uuid === recentUuid}
               dragDist={dragDist}
               draggable={
                 currentUserId != null &&
