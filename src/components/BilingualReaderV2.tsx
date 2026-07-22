@@ -260,6 +260,31 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
   const [searchLoading, setSearchLoading] = useState(false);
   // Query string the current results answer — '' means "nothing searched yet"
   const [searchedFor, setSearchedFor] = useState('');
+  // Guards the results list's scroll handler against parallel page fetches
+  const searchLoadingMoreRef = useRef(false);
+  // When a search-result jump lands, force the target paragraph to show the
+  // language the match was found in. Keyed by xpath so a stale entry can't
+  // affect an unrelated later jump (footnotes etc.).
+  const pendingLandingShowRef = useRef<{
+    xpath: string;
+    field: 'original' | 'translated';
+  } | null>(null);
+
+  const fetchSearchPage = useCallback(
+    async (q: string, offset: number, signal?: AbortSignal) => {
+      const res = await fetch(
+        `/api/book/${bookUuid}/search?q=${encodeURIComponent(q)}&offset=${offset}`,
+        { signal }
+      );
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return (await res.json()) as {
+        query: string;
+        results: SearchResult[];
+        hasMore: boolean;
+      };
+    },
+    [bookUuid]
+  );
 
   useEffect(() => {
     if (!isSearchOpen || !bookUuid) return;
@@ -275,16 +300,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
     const controller = new AbortController();
     const timer = setTimeout(async () => {
       try {
-        const res = await fetch(
-          `/api/book/${bookUuid}/search?q=${encodeURIComponent(q)}`,
-          { signal: controller.signal }
-        );
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = (await res.json()) as {
-          query: string;
-          results: SearchResult[];
-          hasMore: boolean;
-        };
+        const data = await fetchSearchPage(q, 0, controller.signal);
         setSearchResults(data.results);
         setSearchHasMore(data.hasMore);
         setSearchedFor(q);
@@ -302,7 +318,28 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
       clearTimeout(timer);
       controller.abort();
     };
-  }, [isSearchOpen, searchQuery, bookUuid]);
+  }, [isSearchOpen, searchQuery, bookUuid, fetchSearchPage]);
+
+  // Lazy-load the next page when the results list scrolls near its bottom
+  const handleSearchListScroll = useCallback(
+    async (e: React.UIEvent<HTMLDivElement>) => {
+      const el = e.currentTarget;
+      if (el.scrollTop + el.clientHeight < el.scrollHeight - 200) return;
+      if (!searchHasMore || searchLoadingMoreRef.current || !searchedFor)
+        return;
+      searchLoadingMoreRef.current = true;
+      try {
+        const data = await fetchSearchPage(searchedFor, searchResults.length);
+        setSearchResults((prev) => [...prev, ...data.results]);
+        setSearchHasMore(data.hasMore);
+      } catch (err) {
+        console.error('Search load-more failed:', err);
+      } finally {
+        searchLoadingMoreRef.current = false;
+      }
+    },
+    [searchHasMore, searchedFor, searchResults.length, fetchSearchPage]
+  );
 
   useEffect(() => {
     try {
@@ -1020,6 +1057,17 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
     const data = elementsRef.current.get(initialXpath);
     if (!data?.element) return;
 
+    // A search-result jump specifies which language the match was found in;
+    // make sure the landing paragraph shows that language.
+    const pending = pendingLandingShowRef.current;
+    if (pending && pending.xpath === initialXpath) {
+      pendingLandingShowRef.current = null;
+      const wantOriginal = pending.field === 'original';
+      if (data.showingOriginal !== wantOriginal) {
+        toggleElement(initialXpath);
+      }
+    }
+
     const el = data.element;
     const doScroll = () => {
       el.scrollIntoView({ behavior: 'auto', block: 'start' });
@@ -1037,7 +1085,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
     // Briefly highlight the target so jumps (footnotes, cross-references)
     // land with a visible anchor point
     el.classList.add('ov-jump-flash');
-    const t3 = setTimeout(() => el.classList.remove('ov-jump-flash'), 2200);
+    const t3 = setTimeout(() => el.classList.remove('ov-jump-flash'), 3700);
     return () => {
       clearTimeout(t1);
       clearTimeout(t2);
@@ -1874,7 +1922,10 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
                   onChange={(e) => setSearchQuery(e.target.value)}
                 />
               </div>
-              <div className="chapters-list search-results">
+              <div
+                className="chapters-list search-results"
+                onScroll={handleSearchListScroll}
+              >
                 {searchLoading && (
                   <div className="search-status">{t.reader.searching}</div>
                 )}
@@ -1891,6 +1942,10 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
                     className="search-result-item"
                     onClick={() => {
                       setIsSearchOpen(false);
+                      pendingLandingShowRef.current = {
+                        xpath: r.xpath,
+                        field: r.field,
+                      };
                       onNavigateInternal?.(r.chapter, r.xpath);
                     }}
                   >
@@ -1903,7 +1958,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
                   </button>
                 ))}
                 {searchHasMore && (
-                  <div className="search-status">{t.reader.searchHasMore}</div>
+                  <div className="search-status">{t.reader.searching}</div>
                 )}
               </div>
             </div>

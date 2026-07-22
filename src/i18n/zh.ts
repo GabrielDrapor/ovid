@@ -168,7 +168,6 @@ export const zh: Messages = {
     searchPlaceholder: '搜索原文与译文…',
     searching: '搜索中…',
     searchNoResults: '未找到匹配内容',
-    searchHasMore: '仅显示前 50 条结果——试试更精确的关键词',
   },
 
   book: {

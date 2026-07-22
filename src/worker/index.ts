@@ -881,8 +881,12 @@ export default {
               });
             }
             const LIMIT = 50;
+            const offset = Math.max(
+              0,
+              parseInt(url.searchParams.get('offset') || '0', 10) || 0
+            );
             const pattern = `%${escapeLikePattern(query)}%`;
-            const rows = (await searchBookV2(env.DB, bookUuid, pattern, LIMIT)) as Array<{
+            const rows = (await searchBookV2(env.DB, bookUuid, pattern, LIMIT, offset)) as Array<{
               chapter_number: number;
               chapter_title: string;
               xpath: string;

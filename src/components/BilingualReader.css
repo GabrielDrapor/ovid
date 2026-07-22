@@ -964,7 +964,7 @@ sup:hover {
 }
 
 .epub-content .ov-jump-flash {
-  animation: ov-jump-flash 2s ease-out both;
+  animation: ov-jump-flash 3.5s ease-out both;
 }
 
 @media (prefers-reduced-motion: reduce) {

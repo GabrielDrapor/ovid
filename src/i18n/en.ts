@@ -170,7 +170,6 @@ export const en = {
     searchPlaceholder: 'Search original & translation…',
     searching: 'Searching…',
     searchNoResults: 'No matches found',
-    searchHasMore: 'Showing the first 50 matches — refine your search',
   },
 
   book: {

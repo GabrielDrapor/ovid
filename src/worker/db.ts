@@ -448,7 +448,8 @@ export async function searchBookV2(
   db: D1Database,
   bookUuid: string,
   pattern: string,
-  limit: number
+  limit: number,
+  offset = 0
 ) {
   const book = await db
     .prepare('SELECT id FROM books_v2 WHERE uuid = ?')
@@ -479,9 +480,9 @@ export async function searchBookV2(
            AND (t.original_text LIKE ? ESCAPE '\\'
                 OR t.translated_text LIKE ? ESCAPE '\\')
          ORDER BY c.order_index ASC, t.order_index ASC
-         LIMIT ?`
+         LIMIT ? OFFSET ?`
       )
-      .bind(book.id, pattern, pattern, limit + 1)
+      .bind(book.id, pattern, pattern, limit + 1, offset)
       .all();
 
     return rows.results;
@@ -502,9 +503,9 @@ export async function searchBookV2(
          AND json_extract(je.value, '$.text') LIKE ? ESCAPE '\\'
        ORDER BY c.order_index ASC,
                 CAST(json_extract(je.value, '$.orderIndex') AS INTEGER) ASC
-       LIMIT ?`
+       LIMIT ? OFFSET ?`
     )
-    .bind(book.id, pattern, limit + 1)
+    .bind(book.id, pattern, limit + 1, offset)
     .all();
 
   return rows.results;
