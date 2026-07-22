@@ -6,6 +6,7 @@ import { ApiError, fetchApi } from './utils/api';
 import {
   getLocalProgress,
   mergeProgress,
+  computeReadingProgress,
   PROGRESS_KEY,
   type ReadingProgress,
   type CloudProgress,
@@ -19,6 +20,7 @@ interface Chapter {
   title: string;
   original_title: string;
   order_index: number;
+  text_length?: number | null;
 }
 
 interface Translation {
@@ -121,18 +123,14 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
   );
   const { user } = useUser();
 
-  // Calculate reading progress percentage (chapter-granular + intra-chapter fraction)
+  // Calculate reading progress percentage — chapters weighted by text length,
+  // plus the intra-chapter fraction through the current chapter
   const calculateProgress = useCallback(
     (fraction?: number) => {
-      if (chapters.length === 0) return 0;
       const f = fraction ?? chapterFractionRef.current;
-      // completedChapters + fraction through current chapter, divided by total
-      return Math.min(
-        100,
-        Math.round(((currentChapter - 1 + f) / chapters.length) * 100)
-      );
+      return computeReadingProgress(chapters, currentChapter, f);
     },
-    [currentChapter, chapters.length]
+    [currentChapter, chapters]
   );
 
   // Mark book as complete/incomplete and update progress
@@ -383,9 +381,10 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
       // When entering a chapter, fraction is 0 (top of chapter)
       chapterFractionRef.current = 0;
       if (chapters.length > 0) {
-        const progressPercent = Math.min(
-          100,
-          Math.round(((chapterNumber - 1) / chapters.length) * 100)
+        const progressPercent = computeReadingProgress(
+          chapters,
+          chapterNumber,
+          0
         );
         fetch(`/api/book/${bookUuid}/progress`, {
           method: 'PUT',
@@ -456,17 +455,11 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
         saveProgress(currentChapter, currentXpathRef.current);
 
         // Also flush to backend using sendBeacon for reliability
-        const progressPercent =
-          chapters.length > 0
-            ? Math.min(
-                100,
-                Math.round(
-                  ((currentChapter - 1 + chapterFractionRef.current) /
-                    chapters.length) *
-                    100
-                )
-              )
-            : 0;
+        const progressPercent = computeReadingProgress(
+          chapters,
+          currentChapter,
+          chapterFractionRef.current
+        );
         const payload = JSON.stringify({
           readingProgress: progressPercent,
           chapterNumber: currentChapter,
@@ -496,7 +489,7 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
         clearTimeout(progressTimerRef.current);
       }
     };
-  }, [currentChapter, saveProgress, bookUuid, chapters.length]);
+  }, [currentChapter, saveProgress, bookUuid, chapters]);
 
   const isOwner = !!(user && bookOwnerId && user.id === bookOwnerId);
 
