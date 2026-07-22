@@ -1055,7 +1055,12 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
       return;
 
     const data = elementsRef.current.get(initialXpath);
-    if (!data?.element) return;
+    // A cross-chapter jump can run this effect once with the OLD chapter's
+    // element map (generic xpaths like /body[1]/p[3] exist in most chapters,
+    // but those elements are already detached). Bail without consuming the
+    // pending landing state — the effect re-runs when the new chapter's
+    // translations are applied.
+    if (!data?.element || !document.contains(data.element)) return;
 
     // A search-result jump specifies which language the match was found in;
     // make sure the landing paragraph shows that language.
