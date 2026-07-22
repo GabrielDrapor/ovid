@@ -26,6 +26,7 @@ import {
   updateShelfSlotLabel,
   getBookChaptersV2,
   getChapterContentV2,
+  searchBookV2,
   deleteBookV2,
   moveBookToSlot,
   getBookStatus,
@@ -40,6 +41,7 @@ import {
   revokeShareToken,
   getBookByShareToken,
 } from './db';
+import { buildSnippet, escapeLikePattern } from '../utils/search-snippet';
 import {
   handleBookUpload,
   handleBookEstimate,
@@ -861,7 +863,7 @@ export default {
           const endpoint = apiMatch[2];
 
           // Access check for book data endpoints
-          if (endpoint === 'chapters' || endpoint.startsWith('chapter/')) {
+          if (endpoint === 'chapters' || endpoint.startsWith('chapter/') || endpoint === 'search') {
             const user = await getCurrentUser(env.DB, request);
             const access = await checkBookAccess(env.DB, bookUuid, user?.id);
             if (!access.accessible) {
@@ -869,6 +871,41 @@ export default {
                 status: 404, headers: { 'Content-Type': 'application/json' },
               });
             }
+          }
+
+          if (endpoint === 'search') {
+            const query = (url.searchParams.get('q') || '').trim();
+            if (!query) {
+              return new Response(JSON.stringify({ query, results: [], hasMore: false }), {
+                headers: { 'Content-Type': 'application/json' },
+              });
+            }
+            const LIMIT = 50;
+            const pattern = `%${escapeLikePattern(query)}%`;
+            const rows = (await searchBookV2(env.DB, bookUuid, pattern, LIMIT)) as Array<{
+              chapter_number: number;
+              chapter_title: string;
+              xpath: string;
+              original_text: string | null;
+              translated_text: string | null;
+            }>;
+            const hasMore = rows.length > LIMIT;
+            const results = rows.slice(0, LIMIT).map((r) => {
+              // Prefer the field that actually contains the match; when both
+              // do, show the original (what bilingual readers usually quote).
+              const fromOriginal = buildSnippet(r.original_text || '', query);
+              const snippet = fromOriginal ?? buildSnippet(r.translated_text || '', query);
+              return {
+                chapter: r.chapter_number,
+                chapterTitle: r.chapter_title,
+                xpath: r.xpath,
+                field: fromOriginal !== null ? 'original' : 'translated',
+                snippet: snippet ?? '',
+              };
+            });
+            return new Response(JSON.stringify({ query, results, hasMore }), {
+              headers: { 'Content-Type': 'application/json' },
+            });
           }
 
           if (endpoint === 'chapters') {

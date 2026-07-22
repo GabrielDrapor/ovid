@@ -57,6 +57,33 @@ interface BilingualReaderV2Props {
   ) => Promise<{ translations: Translation[] } | null>;
 }
 
+interface SearchResult {
+  chapter: number;
+  chapterTitle: string;
+  xpath: string;
+  field: 'original' | 'translated';
+  snippet: string;
+}
+
+/** Wrap every case-insensitive occurrence of `query` in <mark>. */
+export function renderHighlightedSnippet(
+  snippet: string,
+  query: string
+): React.ReactNode[] {
+  if (!query) return [snippet];
+  const nodes: React.ReactNode[] = [];
+  const lower = snippet.toLowerCase();
+  const q = query.toLowerCase();
+  let pos = 0;
+  for (let i = lower.indexOf(q); i !== -1; i = lower.indexOf(q, pos)) {
+    if (i > pos) nodes.push(snippet.slice(pos, i));
+    nodes.push(<mark key={i}>{snippet.slice(i, i + query.length)}</mark>);
+    pos = i + query.length;
+  }
+  if (pos < snippet.length) nodes.push(snippet.slice(pos));
+  return nodes;
+}
+
 interface NotePopoverState {
   label: string;
   chapter: number;
@@ -224,6 +251,58 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
   );
   const [isTypographyOpen, setIsTypographyOpen] = useState(false);
   const [isSharing, setIsSharing] = useState(false);
+
+  // In-book full-text search (original + translation)
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [searchHasMore, setSearchHasMore] = useState(false);
+  const [searchLoading, setSearchLoading] = useState(false);
+  // Query string the current results answer — '' means "nothing searched yet"
+  const [searchedFor, setSearchedFor] = useState('');
+
+  useEffect(() => {
+    if (!isSearchOpen || !bookUuid) return;
+    const q = searchQuery.trim();
+    if (!q) {
+      setSearchResults([]);
+      setSearchHasMore(false);
+      setSearchedFor('');
+      setSearchLoading(false);
+      return;
+    }
+    setSearchLoading(true);
+    const controller = new AbortController();
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(
+          `/api/book/${bookUuid}/search?q=${encodeURIComponent(q)}`,
+          { signal: controller.signal }
+        );
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = (await res.json()) as {
+          query: string;
+          results: SearchResult[];
+          hasMore: boolean;
+        };
+        setSearchResults(data.results);
+        setSearchHasMore(data.hasMore);
+        setSearchedFor(q);
+        setSearchLoading(false);
+      } catch (err) {
+        // Aborted requests are expected when typing continues; anything else
+        // ends the loading state so the user isn't stuck on a spinner.
+        if (!(err instanceof DOMException && err.name === 'AbortError')) {
+          console.error('Search failed:', err);
+          setSearchLoading(false);
+        }
+      }
+    }, 350);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [isSearchOpen, searchQuery, bookUuid]);
 
   useEffect(() => {
     try {
@@ -1428,6 +1507,17 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
             >
               {t.reader.chapters}
             </button>
+            {bookUuid && onNavigateInternal && (
+              <button
+                className="fab-menu-item"
+                onClick={() => {
+                  setIsSearchOpen(true);
+                  setIsMenuOpen(false);
+                }}
+              >
+                {t.reader.search}
+              </button>
+            )}
             {onMarkComplete && (
               <button
                 className={`fab-menu-item ${isCompleted ? 'fab-menu-item-completed' : ''}`}
@@ -1758,6 +1848,68 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
             <div
               className="chapters-backdrop"
               onClick={() => setIsChaptersOpen(false)}
+            />
+          </div>
+        )}
+
+        {isSearchOpen && (
+          <div className="chapters-modal">
+            <div className="chapters-content">
+              <div className="chapters-header">
+                <h3>{t.reader.search}</h3>
+                <button
+                  className="chapters-close"
+                  onClick={() => setIsSearchOpen(false)}
+                >
+                  X
+                </button>
+              </div>
+              <div className="search-input-row">
+                <input
+                  type="search"
+                  className="search-input"
+                  value={searchQuery}
+                  placeholder={t.reader.searchPlaceholder}
+                  autoFocus
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
+              </div>
+              <div className="chapters-list search-results">
+                {searchLoading && (
+                  <div className="search-status">{t.reader.searching}</div>
+                )}
+                {!searchLoading &&
+                  searchedFor &&
+                  searchResults.length === 0 && (
+                    <div className="search-status">
+                      {t.reader.searchNoResults}
+                    </div>
+                  )}
+                {searchResults.map((r, i) => (
+                  <button
+                    key={`${r.chapter}-${r.xpath}-${i}`}
+                    className="search-result-item"
+                    onClick={() => {
+                      setIsSearchOpen(false);
+                      onNavigateInternal?.(r.chapter, r.xpath);
+                    }}
+                  >
+                    <div className="search-result-chapter">
+                      {r.chapterTitle || `#${r.chapter}`}
+                    </div>
+                    <div className="search-result-snippet">
+                      {renderHighlightedSnippet(r.snippet, searchedFor)}
+                    </div>
+                  </button>
+                ))}
+                {searchHasMore && (
+                  <div className="search-status">{t.reader.searchHasMore}</div>
+                )}
+              </div>
+            </div>
+            <div
+              className="chapters-backdrop"
+              onClick={() => setIsSearchOpen(false)}
             />
           </div>
         )}
