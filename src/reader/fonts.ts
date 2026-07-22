@@ -1,14 +1,16 @@
 // Reader font families.
 //
 // A font option is pure data: an id plus the CSS font-family stack applied to
-// the reading column. CJK webfonts (LXGW Neo ZhiSong / LXGW WenKai, declared
-// in public/index.html) are restricted to CJK codepoints via unicode-range,
-// so Latin text falls through to the Latin fonts later in the stack and the
-// browser only downloads a CJK font once a stack that uses it is selected.
+// the reading column. The bundled webfonts (LXGW Neo ZhiSong / LXGW WenKai,
+// declared in public/index.html) are scoped via unicode-range and only
+// download once a stack that uses them is selected. All options are free to
+// use: Neo ZhiSong is IPA Font License, WenKai and Literata are SIL OFL,
+// and the sans stack is pure system fonts.
 //
-// - song: the original serif pairing (LXGW Neo ZhiSong + Literata) — default.
-// - kai: 楷体 running-hand style, the classic Chinese "book reading" font
-//   (LXGW WenKai Screen, with system kai fonts as fallback).
+// Every option restyles BOTH scripts:
+// - song: LXGW Neo ZhiSong for CJK + Literata for Latin (default pairing).
+// - kai: LXGW WenKai for CJK AND Basic Latin — its handwritten Latin glyphs
+//   are part of the kai look (system kai fonts as fallback).
 // - sans: system sans-serif (SF/Segoe/Roboto for Latin, PingFang/YaHei/Noto
 //   for CJK) — no webfont download at all.
 

@@ -81,9 +81,13 @@
         font-weight: normal;
         font-style: normal;
         font-display: swap;
+        /* Unlike ZhiSong (CJK-only, Latin falls through to Literata), WenKai
+           also claims Basic Latin: its handwritten Latin glyphs are part of
+           the kai look, so English text changes style with it too. */
         unicode-range:
-          U+4E00-9FFF, U+3400-4DBF, U+2B740-2B81F, U+F900-FAFF, U+2F800-2FA1F,
-          U+3000-303F, U+FF00-FFEF, U+2000-206F, U+20000-2A6DF, U+2A700-2B73F;
+          U+0020-007E, U+00A0-00FF, U+0100-017F, U+4E00-9FFF, U+3400-4DBF,
+          U+2B740-2B81F, U+F900-FAFF, U+2F800-2FA1F, U+3000-303F, U+FF00-FFEF,
+          U+2000-206F, U+20000-2A6DF, U+2A700-2B73F;
       }
     </style>
     <title>Ovid</title>
