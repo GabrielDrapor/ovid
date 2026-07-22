@@ -3,6 +3,7 @@ import {
   parseCloudTimestamp,
   getLocalProgress,
   mergeProgress,
+  computeReadingProgress,
   PROGRESS_KEY,
   type ReadingProgress,
   type CloudProgress,
@@ -64,7 +65,11 @@ describe('reading-progress', () => {
     });
 
     it('reads new format from localStorage', () => {
-      const saved: ReadingProgress = { chapter: 5, xpath: '/body[1]/p[3]', timestamp: 1000 };
+      const saved: ReadingProgress = {
+        chapter: 5,
+        xpath: '/body[1]/p[3]',
+        timestamp: 1000,
+      };
       localStorage.setItem(PROGRESS_KEY(uuid), JSON.stringify(saved));
 
       const progress = getLocalProgress(uuid);
@@ -81,7 +86,10 @@ describe('reading-progress', () => {
     });
 
     it('prefers new format over old format', () => {
-      localStorage.setItem(PROGRESS_KEY(uuid), JSON.stringify({ chapter: 5, timestamp: 1000 }));
+      localStorage.setItem(
+        PROGRESS_KEY(uuid),
+        JSON.stringify({ chapter: 5, timestamp: 1000 })
+      );
       localStorage.setItem(`ovid_progress_${uuid}`, '3');
 
       const progress = getLocalProgress(uuid);
@@ -96,7 +104,10 @@ describe('reading-progress', () => {
     });
 
     it('ignores chapter < 1', () => {
-      localStorage.setItem(PROGRESS_KEY(uuid), JSON.stringify({ chapter: 0, timestamp: 1000 }));
+      localStorage.setItem(
+        PROGRESS_KEY(uuid),
+        JSON.stringify({ chapter: 0, timestamp: 1000 })
+      );
 
       const progress = getLocalProgress(uuid);
       expect(progress.chapter).toBe(1);
@@ -104,7 +115,11 @@ describe('reading-progress', () => {
   });
 
   describe('mergeProgress', () => {
-    const makeLocal = (chapter: number, timestamp: number, xpath?: string): ReadingProgress => ({
+    const makeLocal = (
+      chapter: number,
+      timestamp: number,
+      xpath?: string
+    ): ReadingProgress => ({
       chapter,
       timestamp,
       xpath,
@@ -244,6 +259,59 @@ describe('reading-progress', () => {
       const { merged, source } = mergeProgress(local, cloud);
       expect(source).toBe('local');
       expect(merged.chapter).toBe(4);
+    });
+  });
+
+  describe('computeReadingProgress', () => {
+    const ch = (text_length: number | null | undefined) => ({ text_length });
+
+    it('returns 0 for an empty chapter list', () => {
+      expect(computeReadingProgress([], 1, 0.5)).toBe(0);
+    });
+
+    it('weights chapters by text length', () => {
+      // Chapter 2 holds 80% of the book
+      const chapters = [ch(100), ch(800), ch(100)];
+      expect(computeReadingProgress(chapters, 2, 0)).toBe(10);
+      expect(computeReadingProgress(chapters, 2, 0.5)).toBe(50);
+      expect(computeReadingProgress(chapters, 2, 1)).toBe(90);
+      expect(computeReadingProgress(chapters, 3, 0)).toBe(90);
+    });
+
+    it('gives tiny front-matter chapters proportionally tiny weight', () => {
+      const chapters = [ch(10), ch(10), ch(980)];
+      expect(computeReadingProgress(chapters, 3, 0)).toBe(2);
+      expect(computeReadingProgress(chapters, 3, 0.5)).toBe(51);
+    });
+
+    it('falls back to equal weighting when lengths are missing', () => {
+      const chapters = [ch(undefined), ch(null), ch(undefined), ch(null)];
+      expect(computeReadingProgress(chapters, 3, 0)).toBe(50);
+      expect(computeReadingProgress(chapters, 3, 0.5)).toBe(63);
+    });
+
+    it('falls back to equal weighting when all lengths are zero', () => {
+      const chapters = [ch(0), ch(0)];
+      expect(computeReadingProgress(chapters, 2, 0)).toBe(50);
+    });
+
+    it('treats a zero-length chapter as zero width among sized ones', () => {
+      const chapters = [ch(500), ch(0), ch(500)];
+      expect(computeReadingProgress(chapters, 2, 0)).toBe(50);
+      expect(computeReadingProgress(chapters, 2, 1)).toBe(50);
+    });
+
+    it('clamps fraction and chapter number to valid ranges', () => {
+      const chapters = [ch(100), ch(100)];
+      expect(computeReadingProgress(chapters, 1, -0.5)).toBe(0);
+      expect(computeReadingProgress(chapters, 2, 1.5)).toBe(100);
+      expect(computeReadingProgress(chapters, 0, 0.5)).toBe(25);
+      expect(computeReadingProgress(chapters, 99, 0)).toBe(50);
+    });
+
+    it('caps at 100', () => {
+      const chapters = [ch(1), ch(1)];
+      expect(computeReadingProgress(chapters, 2, 1)).toBe(100);
     });
   });
 });

@@ -71,6 +71,36 @@ export function getLocalProgress(uuid: string): ReadingProgress {
 }
 
 /**
+ * Compute whole-book reading progress (0-100) with chapters weighted by
+ * text length, so a long chapter advances the bar proportionally to how
+ * much of the book it actually contains.
+ *
+ * `fraction` is how far through the current chapter the reader is (0-1).
+ * When length data is missing or all-zero (older API responses, books
+ * without translations yet), falls back to equal per-chapter weighting.
+ */
+export function computeReadingProgress(
+  chapters: ReadonlyArray<{ text_length?: number | null }>,
+  currentChapter: number,
+  fraction: number
+): number {
+  const n = chapters.length;
+  if (n === 0) return 0;
+  const idx = Math.min(n, Math.max(1, currentChapter)) - 1;
+  const f = Math.min(1, Math.max(0, fraction));
+
+  const lengths = chapters.map((c) => c.text_length ?? 0);
+  const total = lengths.reduce((a, b) => a + b, 0);
+  if (total <= 0) {
+    return Math.min(100, Math.round(((idx + f) / n) * 100));
+  }
+
+  let before = 0;
+  for (let i = 0; i < idx; i++) before += lengths[i];
+  return Math.min(100, Math.round(((before + f * lengths[idx]) / total) * 100));
+}
+
+/**
  * Merge local and cloud progress — the more recent one wins.
  *
  * Pure function (no side effects) for testability. The caller is responsible
@@ -91,7 +121,8 @@ export function mergeProgress(
       merged: {
         chapter: cloud.chapter_number,
         xpath: cloud.paragraph_xpath || undefined,
-        showOriginal: cloud.show_original === null ? undefined : cloud.show_original === 1,
+        showOriginal:
+          cloud.show_original === null ? undefined : cloud.show_original === 1,
         timestamp: cloudTimestamp,
       },
       source: 'cloud',

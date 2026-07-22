@@ -425,10 +425,12 @@ export async function getBookChaptersV2(db: D1Database, bookUuid: string) {
 
   const chapters = await db
     .prepare(
-      `SELECT id, chapter_number, title, original_title, order_index
-       FROM chapters_v2
-       WHERE book_id = ?
-       ORDER BY order_index ASC`
+      `SELECT c.id, c.chapter_number, c.title, c.original_title, c.order_index,
+         (SELECT COALESCE(SUM(LENGTH(t.original_text)), 0)
+          FROM translations_v2 t WHERE t.chapter_id = c.id) AS text_length
+       FROM chapters_v2 c
+       WHERE c.book_id = ?
+       ORDER BY c.order_index ASC`
     )
     .bind(book.id)
     .all();
