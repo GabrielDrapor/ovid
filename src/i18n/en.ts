@@ -152,6 +152,12 @@ export const en = {
     } as Record<string, string>,
     firstLineIndent: 'First-line Indent',
     typography: 'Typography',
+    font: 'Font',
+    fontNames: {
+      song: 'Song',
+      kai: 'Kai',
+      sans: 'Sans',
+    } as Record<string, string>,
     fontSize: 'Font Size',
     paragraphGap: 'Paragraph Gap',
     lineHeight: 'Line Height',

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { getMessages, useI18n } from '../i18n';
 import { READER_THEMES, themeCssVars } from '../reader/themes';
+import { READER_FONTS, DEFAULT_FONT_ID, fontStack } from '../reader/fonts';
 import { useReaderTheme } from '../reader/useReaderTheme';
 import './BilingualReader.css';
 
@@ -121,7 +122,18 @@ export function scopeEpubStyles(css: string): string {
 
 export const TYPOGRAPHY_KEY = 'ovid_typography';
 
-export function loadTypographyDefaults(): Record<string, number> {
+export interface TypographySettings {
+  paragraphSpacing?: number;
+  lineHeight?: number;
+  letterSpacing?: number;
+  wordSpacing?: number;
+  fontWeight?: number;
+  fontSize?: number;
+  indentParagraphs?: number;
+  fontFamily?: string;
+}
+
+export function loadTypographyDefaults(): TypographySettings {
   try {
     const saved = localStorage.getItem(TYPOGRAPHY_KEY);
     if (saved) return JSON.parse(saved);
@@ -198,6 +210,9 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
     typographyDefaults.fontWeight ?? 450
   );
   const [fontSize, setFontSize] = useState(typographyDefaults.fontSize ?? 19);
+  const [fontFamily, setFontFamily] = useState(
+    typographyDefaults.fontFamily ?? DEFAULT_FONT_ID
+  );
   // Traditional CJK paragraph mode: 2em first-line indent, no gap (stored as
   // 0/1 alongside the numeric typography settings).
   const [indentParagraphs, setIndentParagraphs] = useState(
@@ -222,6 +237,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
           fontWeight,
           fontSize,
           indentParagraphs: indentParagraphs ? 1 : 0,
+          fontFamily,
         })
       );
     } catch {}
@@ -233,6 +249,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
     wordSpacing,
     fontWeight,
     fontSize,
+    fontFamily,
   ]);
   const [shareCopied, setShareCopied] = useState(false);
   const [showOnboardingTooltip, setShowOnboardingTooltip] = useState(false);
@@ -984,6 +1001,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
     setWordSpacing(0);
     setFontWeight(450);
     setIndentParagraphs(false);
+    setFontFamily(DEFAULT_FONT_ID);
   };
 
   // View-transition wrapper: crossfades chapters using the browser's View
@@ -1097,7 +1115,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
           __html: `
         .reader-content-v2,
         .reader-content-v2 * {
-          font-family: "LXGW Neo ZhiSong Screen", "Literata", "New York", ui-serif, "Times New Roman", Times, serif !important;
+          font-family: ${fontStack(fontFamily)} !important;
           -webkit-font-smoothing: antialiased;
           -moz-osx-font-smoothing: grayscale;
           text-rendering: optimizeLegibility;
@@ -1543,6 +1561,25 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
 
             {isTypographyOpen && (
               <div className="fab-typography-panel">
+                <div className="fab-typo-row">
+                  <span className="fab-typo-label">{t.reader.font}</span>
+                  <div className="fab-font-options">
+                    {READER_FONTS.map((f) => (
+                      <button
+                        type="button"
+                        key={f.id}
+                        className={`fab-font-btn ${
+                          fontFamily === f.id ? 'active' : ''
+                        }`}
+                        style={{ fontFamily: f.stack }}
+                        aria-pressed={fontFamily === f.id}
+                        onClick={() => setFontFamily(f.id)}
+                      >
+                        {t.reader.fontNames[f.id] || f.id}
+                      </button>
+                    ))}
+                  </div>
+                </div>
                 <div className="fab-typo-row">
                   <span className="fab-typo-label">{t.reader.fontSize}</span>
                   <div className="fab-menu-controls">
