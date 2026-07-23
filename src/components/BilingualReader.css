@@ -271,6 +271,35 @@
   font-size: 14px;
 }
 
+/* Font family options */
+.fab-font-options {
+  display: flex;
+  gap: 6px;
+}
+
+.fab-font-btn {
+  padding: 3px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--rt-border, #e6dfcc);
+  background: transparent;
+  color: var(--rt-text, #2f2a21);
+  font-size: 13px;
+  line-height: 1.4;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.fab-font-btn:hover {
+  background: var(--rt-surface-alt, #f2edde);
+}
+
+.fab-font-btn.active {
+  box-shadow: 0 0 0 2px var(--rt-accent, #8b5a2b);
+  background: var(--rt-accent-soft, rgba(139, 90, 43, 0.12));
+}
+
 /* First-line indent switch */
 .fab-switch {
   position: relative;

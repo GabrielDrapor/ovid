@@ -150,6 +150,12 @@ export const zh: Messages = {
     } as Record<string, string>,
     firstLineIndent: '首行缩进',
     typography: '排版',
+    font: '字体',
+    fontNames: {
+      song: '宋体',
+      kai: '楷体',
+      sans: '黑体',
+    } as Record<string, string>,
     fontSize: '字号',
     paragraphGap: '段间距',
     lineHeight: '行高',
