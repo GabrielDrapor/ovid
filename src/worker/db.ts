@@ -438,6 +438,79 @@ export async function getBookChaptersV2(db: D1Database, bookUuid: string) {
   return chapters.results;
 }
 
+/**
+ * Full-text search across a book's paragraphs — both the original text and
+ * the translation. Plain LIKE matching (case-insensitive for ASCII, literal
+ * for CJK), capped at `limit` rows; callers detect "more available" via the
+ * limit+1 row.
+ */
+export async function searchBookV2(
+  db: D1Database,
+  bookUuid: string,
+  pattern: string,
+  limit: number,
+  offset = 0
+) {
+  const book = await db
+    .prepare('SELECT id FROM books_v2 WHERE uuid = ?')
+    .bind(bookUuid)
+    .first();
+
+  if (!book) {
+    throw new Error('Book not found');
+  }
+
+  const hasTranslations = await db
+    .prepare(
+      `SELECT 1 FROM translations_v2 t
+       JOIN chapters_v2 c ON c.id = t.chapter_id
+       WHERE c.book_id = ? LIMIT 1`
+    )
+    .bind(book.id)
+    .first();
+
+  if (hasTranslations) {
+    const rows = await db
+      .prepare(
+        `SELECT c.chapter_number, c.title AS chapter_title, t.xpath,
+                t.original_text, t.translated_text
+         FROM translations_v2 t
+         JOIN chapters_v2 c ON c.id = t.chapter_id
+         WHERE c.book_id = ?
+           AND (t.original_text LIKE ? ESCAPE '\\'
+                OR t.translated_text LIKE ? ESCAPE '\\')
+         ORDER BY c.order_index ASC, t.order_index ASC
+         LIMIT ? OFFSET ?`
+      )
+      .bind(book.id, pattern, pattern, limit + 1, offset)
+      .all();
+
+    return rows.results;
+  }
+
+  // Original-only imports (language_pair *-none) have no translations_v2
+  // rows — search the parsed text nodes instead. They carry the same xpath
+  // coordinates the reader renders, so result jumps work identically.
+  const rows = await db
+    .prepare(
+      `SELECT c.chapter_number, c.title AS chapter_title,
+              json_extract(je.value, '$.xpath') AS xpath,
+              json_extract(je.value, '$.text') AS original_text,
+              NULL AS translated_text
+       FROM chapters_v2 c, json_each(c.text_nodes_json) je
+       WHERE c.book_id = ?
+         AND c.text_nodes_json IS NOT NULL
+         AND json_extract(je.value, '$.text') LIKE ? ESCAPE '\\'
+       ORDER BY c.order_index ASC,
+                CAST(json_extract(je.value, '$.orderIndex') AS INTEGER) ASC
+       LIMIT ? OFFSET ?`
+    )
+    .bind(book.id, pattern, limit + 1, offset)
+    .all();
+
+  return rows.results;
+}
+
 export async function getChapterContentV2(
   db: D1Database,
   chapterNumber: number,

@@ -166,6 +166,10 @@ export const en = {
     fontWeight: 'Font Weight',
     resetToDefault: 'Reset to Default',
     contents: 'Contents',
+    search: 'Search',
+    searchPlaceholder: 'Search original & translation…',
+    searching: 'Searching…',
+    searchNoResults: 'No matches found',
   },
 
   book: {

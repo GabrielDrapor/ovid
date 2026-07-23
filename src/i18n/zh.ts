@@ -164,6 +164,10 @@ export const zh: Messages = {
     fontWeight: '字重',
     resetToDefault: '恢复默认',
     contents: '目录',
+    search: '搜索',
+    searchPlaceholder: '搜索原文与译文…',
+    searching: '搜索中…',
+    searchNoResults: '未找到匹配内容',
   },
 
   book: {
