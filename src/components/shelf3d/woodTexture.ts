@@ -120,6 +120,46 @@ export function makeWoodCanvas(
 }
 
 /**
+ * Convert a canvas to a bright neutral (grayscale) version whose mean
+ * luminance is `targetMean`, preserving relative grain contrast. Multiplying
+ * the result by a material color tint then reproduces the original look for
+ * wood tones — and unlocks painted/metal finishes from the same grain.
+ */
+export function neutralizeCanvas(
+  canvas: HTMLCanvasElement,
+  targetMean = 235
+): HTMLCanvasElement {
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return canvas;
+  const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const d = img.data;
+  let sum = 0;
+  for (let i = 0; i < d.length; i += 4) {
+    sum += 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+  }
+  const mean = sum / (d.length / 4) || 1;
+  const scale = targetMean / mean;
+  for (let i = 0; i < d.length; i += 4) {
+    const lum = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+    const v = Math.max(0, Math.min(255, lum * scale));
+    d[i] = v;
+    d[i + 1] = v;
+    d[i + 2] = v;
+  }
+  ctx.putImageData(img, 0, 0);
+  return canvas;
+}
+
+/** Neutral (tintable) variant of the plank texture. */
+export function makeNeutralWoodCanvas(
+  seed = 'ovid-wood',
+  width = 1024,
+  height = 512
+): HTMLCanvasElement {
+  return neutralizeCanvas(makeWoodCanvas(seed, width, height));
+}
+
+/**
  * Wall paneling: wood grain running vertically with V-groove panel seams.
  * One canvas tile covers ~4 world units, i.e. each 128px panel ≈ 0.5 units.
  */
@@ -154,6 +194,11 @@ export function makePanelCanvas(seed = 'ovid-panel'): HTMLCanvasElement {
     ctx.fillRect(x + 1, 0, 1, size);
   }
   return canvas;
+}
+
+/** Neutral (tintable) variant of the back paneling. */
+export function makeNeutralPanelCanvas(seed = 'ovid-panel'): HTMLCanvasElement {
+  return neutralizeCanvas(makePanelCanvas(seed));
 }
 
 /**
