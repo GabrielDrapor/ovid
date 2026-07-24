@@ -1620,13 +1620,26 @@ function CameraRig({
 // ambient light and read too dark, most visibly on phones where the camera
 // sits far back. decay=2 keeps the light local to the book: the wall behind
 // is far enough away that it stays effectively untouched.
-function SelectionLight({ active }: { active: boolean }) {
+function SelectionLight({
+  active,
+  themeId,
+}: {
+  active: boolean;
+  themeId: string;
+}) {
   const ref = useRef<THREE.PointLight>(null);
+  // Follow the theme's key-light temperature so a presented book isn't lit
+  // warm amber inside the cool steel showroom.
+  const tint = useMemo(
+    () => new THREE.Color(getShelfTheme(themeId).lights.key.color),
+    [themeId]
+  );
   useFrame((state, delta) => {
     const l = ref.current;
     if (!l) return;
     const k = 1 - Math.exp(-delta * 7);
     l.intensity += ((active ? 2.1 : 0) - l.intensity) * k;
+    l.color.lerp(tint, 1 - Math.exp(-delta * 3.5));
     const cam = state.camera;
     l.position.set(cam.position.x, cam.position.y + 0.55, cam.position.z - 1.0);
   });
@@ -1932,7 +1945,7 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
         <color attach="background" args={[initialRoom.current]} />
         <ThemeBackdrop room={getShelfTheme(shelfTheme).room} />
         <ThemeLights themeId={shelfTheme} caseTop={caseTop} />
-        <SelectionLight active={!!selectedUuid} />
+        <SelectionLight active={!!selectedUuid} themeId={shelfTheme} />
 
         {totalRows > 0 && (
           <Bookcase
