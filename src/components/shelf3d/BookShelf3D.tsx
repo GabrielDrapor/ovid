@@ -1117,15 +1117,36 @@ function Bookcase({
   // created once with the initial theme and eased toward the current one in
   // useFrame, so a theme switch crossfades instead of snapping.
   const initialThemeRef = useRef(getShelfTheme(themeId));
+  // Shared shader uniform: fades the grain map toward flat white so steel's
+  // powder-coated panels lose the wood texture without a map swap.
+  const grainUniform = useRef({
+    value: initialThemeRef.current.structure.grain,
+  });
   const caseMats = useMemo(() => {
     const init = initialThemeRef.current;
-    const make = (s: ShelfSurface, map: THREE.Texture) =>
-      new THREE.MeshStandardMaterial({
+    const make = (s: ShelfSurface, map: THREE.Texture) => {
+      const mat = new THREE.MeshStandardMaterial({
         map,
         color: s.color,
         roughness: s.roughness,
         metalness: s.metalness,
       });
+      mat.onBeforeCompile = (shader) => {
+        shader.uniforms.uGrainMix = grainUniform.current;
+        shader.fragmentShader =
+          'uniform float uGrainMix;\n' +
+          shader.fragmentShader.replace(
+            '#include <map_fragment>',
+            `#ifdef USE_MAP
+              vec4 sampledDiffuseColor = texture2D( map, vMapUv );
+              sampledDiffuseColor.rgb = mix( vec3(1.0), sampledDiffuseColor.rgb, uGrainMix );
+              diffuseColor *= sampledDiffuseColor;
+            #endif`
+          );
+      };
+      mat.customProgramCacheKey = () => 'ovid-grain-mix';
+      return mat;
+    };
     return {
       board: make(init.board, boardTex),
       side: make(init.side, sideTex),
@@ -1186,6 +1207,8 @@ function Bookcase({
     s.sideScale += (st.sideScale - s.sideScale) * k;
     s.chrome += (st.chrome - s.chrome) * k;
     s.plainBack += (st.plainBack - s.plainBack) * k;
+    s.grain += (st.grain - s.grain) * k;
+    grainUniform.current.value = s.grain;
     caseMats.plainBack.opacity = s.plainBack;
     caseMats.chrome.opacity = s.chrome;
     if (chromeGroup.current) {

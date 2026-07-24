@@ -31,6 +31,25 @@ describe('shelf themes', () => {
     }
   });
 
+  it('structure params stay in sensible ranges', () => {
+    for (const th of SHELF_THEMES) {
+      const s = th.structure;
+      for (const v of [s.chrome, s.plainBack, s.grain]) {
+        expect(v).toBeGreaterThanOrEqual(0);
+        expect(v).toBeLessThanOrEqual(1);
+      }
+      expect(s.boardScale).toBeGreaterThan(0.2);
+      expect(s.boardScale).toBeLessThanOrEqual(1);
+      expect(s.sideScale).toBeGreaterThan(0.2);
+      expect(s.sideScale).toBeLessThanOrEqual(1);
+    }
+    // Steel is the structural outlier: thin panels, chrome on, no grain.
+    const steel = getShelfTheme('steel').structure;
+    expect(steel.chrome).toBe(1);
+    expect(steel.grain).toBe(0);
+    expect(steel.boardScale).toBeLessThan(0.5);
+  });
+
   it('resolves unknown ids to the default theme', () => {
     expect(getShelfTheme('nope').id).toBe(DEFAULT_SHELF_THEME_ID);
     expect(getShelfTheme(null).id).toBe(DEFAULT_SHELF_THEME_ID);
