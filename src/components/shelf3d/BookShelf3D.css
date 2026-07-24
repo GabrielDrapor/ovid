@@ -629,3 +629,49 @@
     padding-right: 24px;
   }
 }
+
+/* ---- Shelf color switcher ---- */
+
+.closet3d-theme-switch {
+  position: absolute;
+  left: 14px;
+  bottom: 14px;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 7px;
+  border-radius: 999px;
+  background: rgba(20, 16, 12, 0.35);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.closet3d-theme-swatch {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 244, 228, 0.35);
+  cursor: pointer;
+  padding: 0;
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.closet3d-theme-swatch:hover {
+  transform: scale(1.15);
+}
+
+.closet3d-theme-swatch.active {
+  box-shadow:
+    0 0 0 2px rgba(20, 16, 12, 0.55),
+    0 0 0 3.5px rgba(255, 244, 228, 0.85);
+}
+
+@media (max-width: 768px) {
+  .closet3d-theme-switch {
+    left: 10px;
+    bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+  }
+}

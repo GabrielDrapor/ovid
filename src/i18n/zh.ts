@@ -65,6 +65,12 @@ export const zh: Messages = {
     translating: '翻译中…',
     preparingArtwork: '正在生成封面与书脊…',
     completedStamp: '已读完',
+    shelfTheme: '书架配色',
+    shelfThemeNames: {
+      walnut: '胡桃木',
+      white: '白漆做旧',
+      steel: '钢架',
+    } as Record<string, string>,
   },
 
   upload: {

@@ -66,6 +66,12 @@ export const en = {
     translating: 'Translating…',
     preparingArtwork: 'Preparing cover and spine…',
     completedStamp: 'Completed',
+    shelfTheme: 'Shelf color',
+    shelfThemeNames: {
+      walnut: 'Walnut',
+      white: 'Whitewash',
+      steel: 'Steel',
+    } as Record<string, string>,
   },
 
   upload: {

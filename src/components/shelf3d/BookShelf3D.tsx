@@ -45,10 +45,17 @@ import {
 } from './fallbackTextures';
 import {
   makeCavityShadeCanvas,
-  makePanelCanvas,
-  makeWoodCanvas,
+  makeNeutralPanelCanvas,
+  makeNeutralWoodCanvas,
   seededRandom,
 } from './woodTexture';
+import {
+  SHELF_THEMES,
+  getShelfTheme,
+  loadShelfThemePref,
+  saveShelfThemePref,
+  type ShelfSurface,
+} from './shelfThemes';
 import './BookShelf3D.css';
 
 interface BookShelf3DProps {
@@ -81,7 +88,6 @@ function isBookImportPending(book: Book): boolean {
   return book.status === 'processing';
 }
 
-const ROOM = '#171210';
 const CLOTH_FALLBACK = '#3a3026';
 /** Ribbon bookmark on the last-read book. */
 const RIBBON_RED = '#a63d2b';
@@ -1023,6 +1029,18 @@ function UploadPlaceholder({
   );
 }
 
+/** Ease a live material toward a theme surface definition. */
+function lerpSurface(
+  mat: THREE.MeshStandardMaterial,
+  target: ShelfSurface,
+  targetColor: THREE.Color,
+  k: number
+) {
+  mat.color.lerp(targetColor, k);
+  mat.roughness += (target.roughness - mat.roughness) * k;
+  mat.metalness += (target.metalness - mat.metalness) * k;
+}
+
 /** Built-in wall unit: a uniform grid of bays, floor to ceiling. */
 function Bookcase({
   totalRows,
@@ -1031,6 +1049,7 @@ function Bookcase({
   onEditLabel,
   labelsHidden,
   dragDist,
+  themeId,
 }: {
   totalRows: number;
   totalCols: number;
@@ -1038,6 +1057,7 @@ function Bookcase({
   onEditLabel?: (label: PlacedShelfLabel) => void;
   labelsHidden: boolean;
   dragDist: React.MutableRefObject<number>;
+  themeId: string;
 }) {
   const rows = rowYCenters(totalRows);
   const width = totalCols * BAY_PITCH + DIVIDER_T;
@@ -1058,7 +1078,7 @@ function Bookcase({
   }, [totalCols]);
 
   const boardTex = useMemo(() => {
-    const t = new THREE.CanvasTexture(makeWoodCanvas('ovid-boards'));
+    const t = new THREE.CanvasTexture(makeNeutralWoodCanvas('ovid-boards'));
     t.colorSpace = THREE.SRGBColorSpace;
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
     t.anisotropy = 8;
@@ -1067,7 +1087,7 @@ function Bookcase({
     return t;
   }, []);
   const sideTex = useMemo(() => {
-    const t = new THREE.CanvasTexture(makeWoodCanvas('ovid-sides'));
+    const t = new THREE.CanvasTexture(makeNeutralWoodCanvas('ovid-sides'));
     t.colorSpace = THREE.SRGBColorSpace;
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
     t.anisotropy = 8;
@@ -1079,7 +1099,7 @@ function Bookcase({
   // The exposed back of the case: vertical planks with seams, like the
   // veneer back panels of real wall units.
   const backTex = useMemo(() => {
-    const t = new THREE.CanvasTexture(makePanelCanvas('ovid-back'));
+    const t = new THREE.CanvasTexture(makeNeutralPanelCanvas('ovid-back'));
     t.colorSpace = THREE.SRGBColorSpace;
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
     t.anisotropy = 8;
@@ -1092,22 +1112,63 @@ function Bookcase({
     () => new THREE.CanvasTexture(makeCavityShadeCanvas()),
     []
   );
+  // Grain textures are neutral; the active theme tints them. Materials are
+  // created once with the initial theme and eased toward the current one in
+  // useFrame, so a theme switch crossfades instead of snapping.
+  const initialThemeRef = useRef(getShelfTheme(themeId));
+  const caseMats = useMemo(() => {
+    const init = initialThemeRef.current;
+    const make = (s: ShelfSurface, map: THREE.Texture) =>
+      new THREE.MeshStandardMaterial({
+        map,
+        color: s.color,
+        roughness: s.roughness,
+        metalness: s.metalness,
+      });
+    return {
+      board: make(init.board, boardTex),
+      side: make(init.side, sideTex),
+      back: make(init.back, backTex),
+    };
+  }, [boardTex, sideTex, backTex]);
+  const themeTargets = useMemo(() => {
+    const th = getShelfTheme(themeId);
+    return {
+      theme: th,
+      board: new THREE.Color(th.board.color),
+      side: new THREE.Color(th.side.color),
+      back: new THREE.Color(th.back.color),
+    };
+  }, [themeId]);
+  useFrame((state, delta) => {
+    const k = 1 - Math.exp(-delta * 3.5);
+    const { theme } = themeTargets;
+    lerpSurface(caseMats.board, theme.board, themeTargets.board, k);
+    lerpSurface(caseMats.side, theme.side, themeTargets.side, k);
+    lerpSurface(caseMats.back, theme.back, themeTargets.back, k);
+  });
   useEffect(
     () => () => {
       boardTex.dispose();
       sideTex.dispose();
       backTex.dispose();
       cavityTex.dispose();
+      caseMats.board.dispose();
+      caseMats.side.dispose();
+      caseMats.back.dispose();
     },
-    [boardTex, sideTex, backTex, cavityTex]
+    [boardTex, sideTex, backTex, cavityTex, caseMats]
   );
 
   return (
     <group>
       {/* back panel — the case's own back, covering the wall behind it */}
-      <mesh position={[0, midY, -BOOK_DEPTH / 2 - 0.09]} receiveShadow>
+      <mesh
+        position={[0, midY, -BOOK_DEPTH / 2 - 0.09]}
+        receiveShadow
+        material={caseMats.back}
+      >
         <boxGeometry args={[width, height + boardT, 0.06]} />
-        <meshStandardMaterial map={backTex} color="#a2907e" roughness={0.88} />
       </mesh>
       {/* end stiles flush against the side walls */}
       {[-1, 1].map((side) => (
@@ -1116,9 +1177,9 @@ function Bookcase({
           position={[side * (width / 2 - 0.09), midY + boardT / 2, -0.02]}
           castShadow
           receiveShadow
+          material={caseMats.side}
         >
           <boxGeometry args={[0.18, height + boardT, depth]} />
-          <meshStandardMaterial map={sideTex} roughness={0.8} />
         </mesh>
       ))}
       {/* vertical dividers between bays */}
@@ -1128,15 +1189,19 @@ function Bookcase({
           position={[x, midY + boardT / 2, -0.03]}
           castShadow
           receiveShadow
+          material={caseMats.side}
         >
           <boxGeometry args={[DIVIDER_T, height + boardT, depth - 0.06]} />
-          <meshStandardMaterial map={sideTex} roughness={0.8} />
         </mesh>
       ))}
       {/* top cap meets the ceiling */}
-      <mesh position={[0, topY + boardT / 2, -0.02]} castShadow receiveShadow>
+      <mesh
+        position={[0, topY + boardT / 2, -0.02]}
+        castShadow
+        receiveShadow
+        material={caseMats.board}
+      >
         <boxGeometry args={[width, boardT, depth]} />
-        <meshStandardMaterial map={boardTex} roughness={0.8} />
       </mesh>
       {/* a board under every row */}
       {rows.map((y, i) => (
@@ -1145,9 +1210,9 @@ function Bookcase({
           position={[0, y - BOOK_HEIGHT / 2 - boardT / 2, -0.02]}
           castShadow
           receiveShadow
+          material={caseMats.board}
         >
           <boxGeometry args={[width, boardT, depth]} />
-          <meshStandardMaterial map={boardTex} roughness={0.8} />
         </mesh>
       ))}
       {slotLabels.map((label) => {
@@ -1393,6 +1458,18 @@ function SelectionLight({ active }: { active: boolean }) {
   return <pointLight ref={ref} intensity={0} decay={2} color="#f2e6d2" />;
 }
 
+/** Ease the scene background toward the active theme's room color. */
+function ThemeBackdrop({ room }: { room: string }) {
+  const target = useMemo(() => new THREE.Color(room), [room]);
+  useFrame((state, delta) => {
+    const bg = state.scene.background;
+    if (bg instanceof THREE.Color) {
+      bg.lerp(target, 1 - Math.exp(-delta * 3.5));
+    }
+  });
+  return null;
+}
+
 const BookShelf3D: React.FC<BookShelf3DProps> = ({
   books,
   shelfSlots,
@@ -1412,6 +1489,13 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
     new Map()
   );
   const [selectedUuid, setSelectedUuid] = useState<string | null>(null);
+  // Shelf color theme — persisted per browser, crossfaded in the scene.
+  const [shelfTheme, setShelfTheme] = useState(loadShelfThemePref);
+  const initialRoom = useRef(getShelfTheme(loadShelfThemePref()).room);
+  const handleShelfTheme = useCallback((id: string) => {
+    setShelfTheme(id);
+    saveShelfThemePref(id);
+  }, []);
   // Shelf-label editing (click a label / empty label strip to open).
   const [editingLabel, setEditingLabel] = useState<PlacedShelfLabel | null>(
     null
@@ -1589,7 +1673,8 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
           if (dragDist.current <= 12) setSelectedUuid(null);
         }}
       >
-        <color attach="background" args={[ROOM]} />
+        <color attach="background" args={[initialRoom.current]} />
+        <ThemeBackdrop room={getShelfTheme(shelfTheme).room} />
         <ambientLight intensity={0.62} color="#f4ede3" />
         {/* key light just below the ceiling, the only shadow caster */}
         <spotLight
@@ -1629,6 +1714,7 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
             }
             labelsHidden={selectedUuid !== null}
             dragDist={dragDist}
+            themeId={shelfTheme}
           />
         )}
 
@@ -1696,6 +1782,29 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
           dragPointerId={dragPointerId}
         />
       </Canvas>
+
+      {revealed && (
+        <div
+          className="closet3d-theme-switch"
+          role="radiogroup"
+          aria-label={t.closet.shelfTheme}
+        >
+          {SHELF_THEMES.map((th) => (
+            <button
+              key={th.id}
+              type="button"
+              className={`closet3d-theme-swatch ${
+                shelfTheme === th.id ? 'active' : ''
+              }`}
+              style={{ background: th.swatch }}
+              title={t.closet.shelfThemeNames[th.id] || th.id}
+              aria-label={t.closet.shelfThemeNames[th.id] || th.id}
+              aria-pressed={shelfTheme === th.id}
+              onClick={() => handleShelfTheme(th.id)}
+            />
+          ))}
+        </div>
+      )}
 
       {editingLabel && (
         <div
