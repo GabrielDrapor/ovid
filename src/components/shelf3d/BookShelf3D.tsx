@@ -55,6 +55,7 @@ import {
   loadShelfThemePref,
   saveShelfThemePref,
   type ShelfSurface,
+  type ShelfStructure,
 } from './shelfThemes';
 import './BookShelf3D.css';
 
@@ -1129,6 +1130,24 @@ function Bookcase({
       board: make(init.board, boardTex),
       side: make(init.side, sideTex),
       back: make(init.back, backTex),
+      // Smooth cover over the planked back — faded in by themes whose back
+      // shouldn't show plank seams (paint, steel panels).
+      plainBack: new THREE.MeshStandardMaterial({
+        color: init.back.color,
+        roughness: init.back.roughness,
+        metalness: init.back.metalness,
+        transparent: true,
+        opacity: init.structure.plainBack,
+        depthWrite: false,
+      }),
+      // USM-style chromed tube-and-ball frame, steel theme only.
+      chrome: new THREE.MeshStandardMaterial({
+        color: '#e3e7ed',
+        roughness: 0.24,
+        metalness: 0.85,
+        transparent: true,
+        opacity: init.structure.chrome,
+      }),
     };
   }, [boardTex, sideTex, backTex]);
   const themeTargets = useMemo(() => {
@@ -1140,12 +1159,55 @@ function Bookcase({
       back: new THREE.Color(th.back.color),
     };
   }, [themeId]);
+  // Structure (board/stile thickness, chrome + plain-back presence) is
+  // animated as plain numbers and applied to mesh scales/positions per frame.
+  const structRef = useRef<ShelfStructure>({
+    ...initialThemeRef.current.structure,
+  });
+  const boardMeshes = useRef<THREE.Mesh[]>([]);
+  const sideMeshes = useRef<THREE.Mesh[]>([]);
+  const chromeGroup = useRef<THREE.Group>(null);
+  boardMeshes.current = [];
+  sideMeshes.current = [];
   useFrame((state, delta) => {
     const k = 1 - Math.exp(-delta * 3.5);
     const { theme } = themeTargets;
     lerpSurface(caseMats.board, theme.board, themeTargets.board, k);
     lerpSurface(caseMats.side, theme.side, themeTargets.side, k);
     lerpSurface(caseMats.back, theme.back, themeTargets.back, k);
+    // The smooth back tracks the back surface's tint, fading per structure.
+    caseMats.plainBack.color.copy(caseMats.back.color);
+    caseMats.plainBack.roughness = caseMats.back.roughness;
+    caseMats.plainBack.metalness = caseMats.back.metalness;
+
+    const s = structRef.current;
+    const st = theme.structure;
+    s.boardScale += (st.boardScale - s.boardScale) * k;
+    s.sideScale += (st.sideScale - s.sideScale) * k;
+    s.chrome += (st.chrome - s.chrome) * k;
+    s.plainBack += (st.plainBack - s.plainBack) * k;
+    caseMats.plainBack.opacity = s.plainBack;
+    caseMats.chrome.opacity = s.chrome;
+    if (chromeGroup.current) {
+      chromeGroup.current.visible = s.chrome > 0.02;
+    }
+    // Boards thin around their anchored face so books stay seated on top.
+    const half = (boardT * s.boardScale) / 2;
+    for (const m of boardMeshes.current) {
+      m.scale.y = s.boardScale;
+      m.position.y =
+        m.userData.anchor === 'bottom'
+          ? m.userData.anchorY + half
+          : m.userData.anchorY - half;
+    }
+    for (const m of sideMeshes.current) {
+      m.scale.x = s.sideScale;
+      if (m.userData.sideSign) {
+        // End stiles stay flush against the case edge as they thin.
+        m.position.x =
+          m.userData.sideSign * (width / 2 - (0.18 * s.sideScale) / 2);
+      }
+    }
   });
   useEffect(
     () => () => {
@@ -1156,9 +1218,23 @@ function Bookcase({
       caseMats.board.dispose();
       caseMats.side.dispose();
       caseMats.back.dispose();
+      caseMats.plainBack.dispose();
+      caseMats.chrome.dispose();
     },
     [boardTex, sideTex, backTex, cavityTex, caseMats]
   );
+  // Chrome frame geometry: verticals at every divider line, horizontals at
+  // every board line, balls on the crossings — positioned for the steel
+  // state (it's only visible there) at the front edge of the case.
+  const chromeFrame = useMemo(() => {
+    const steel = getShelfTheme('steel');
+    const xs = [-(width / 2 - 0.09), ...dividerXs, width / 2 - 0.09];
+    const ys = rows.map(
+      (y) => y - BOOK_HEIGHT / 2 - (boardT * steel.structure.boardScale) / 2
+    );
+    ys.unshift(topY + (boardT * steel.structure.boardScale) / 2);
+    return { xs, ys, frontZ: depth / 2 - 0.02 };
+  }, [dividerXs, rows, topY, depth, width, boardT]);
 
   return (
     <group>
@@ -1170,10 +1246,23 @@ function Bookcase({
       >
         <boxGeometry args={[width, height + boardT, 0.06]} />
       </mesh>
+      {/* smooth cover that hides the plank seams on paint/steel themes */}
+      <mesh
+        position={[0, midY, -BOOK_DEPTH / 2 - 0.055]}
+        material={caseMats.plainBack}
+      >
+        <planeGeometry args={[width, height + boardT]} />
+      </mesh>
       {/* end stiles flush against the side walls */}
       {[-1, 1].map((side) => (
         <mesh
           key={side}
+          ref={(m) => {
+            if (m) {
+              m.userData.sideSign = side;
+              sideMeshes.current.push(m);
+            }
+          }}
           position={[side * (width / 2 - 0.09), midY + boardT / 2, -0.02]}
           castShadow
           receiveShadow
@@ -1186,6 +1275,9 @@ function Bookcase({
       {dividerXs.map((x) => (
         <mesh
           key={`div-${x.toFixed(3)}`}
+          ref={(m) => {
+            if (m) sideMeshes.current.push(m);
+          }}
           position={[x, midY + boardT / 2, -0.03]}
           castShadow
           receiveShadow
@@ -1196,6 +1288,13 @@ function Bookcase({
       ))}
       {/* top cap meets the ceiling */}
       <mesh
+        ref={(m) => {
+          if (m) {
+            m.userData.anchor = 'bottom';
+            m.userData.anchorY = topY;
+            boardMeshes.current.push(m);
+          }
+        }}
         position={[0, topY + boardT / 2, -0.02]}
         castShadow
         receiveShadow
@@ -1207,6 +1306,13 @@ function Bookcase({
       {rows.map((y, i) => (
         <mesh
           key={i}
+          ref={(m) => {
+            if (m) {
+              m.userData.anchor = 'top';
+              m.userData.anchorY = y - BOOK_HEIGHT / 2;
+              boardMeshes.current.push(m);
+            }
+          }}
           position={[0, y - BOOK_HEIGHT / 2 - boardT / 2, -0.02]}
           castShadow
           receiveShadow
@@ -1215,6 +1321,39 @@ function Bookcase({
           <boxGeometry args={[width, boardT, depth]} />
         </mesh>
       ))}
+      {/* chromed tube-and-ball frame (steel theme) */}
+      <group ref={chromeGroup} visible={false}>
+        {chromeFrame.ys.map((y, i) => (
+          <mesh
+            key={`ct-h-${i}`}
+            position={[0, y, chromeFrame.frontZ]}
+            rotation={[0, 0, Math.PI / 2]}
+            material={caseMats.chrome}
+          >
+            <cylinderGeometry args={[0.018, 0.018, width - 0.06, 12]} />
+          </mesh>
+        ))}
+        {chromeFrame.xs.map((x, i) => (
+          <mesh
+            key={`ct-v-${i}`}
+            position={[x, midY + boardT / 2, chromeFrame.frontZ]}
+            material={caseMats.chrome}
+          >
+            <cylinderGeometry args={[0.018, 0.018, height + boardT, 12]} />
+          </mesh>
+        ))}
+        {chromeFrame.xs.flatMap((x, xi) =>
+          chromeFrame.ys.map((y, yi) => (
+            <mesh
+              key={`cb-${xi}-${yi}`}
+              position={[x, y, chromeFrame.frontZ]}
+              material={caseMats.chrome}
+            >
+              <sphereGeometry args={[0.032, 16, 12]} />
+            </mesh>
+          ))
+        )}
+      </group>
       {slotLabels.map((label) => {
         const editable =
           !!onEditLabel && !label.isPublic && label.slotId !== null;
