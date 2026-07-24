@@ -11,6 +11,17 @@ export interface ShelfSurface {
   metalness: number;
 }
 
+export interface ShelfStructure {
+  /** Shelf-board thickness as a fraction of the walnut baseline */
+  boardScale: number;
+  /** Stile/divider thickness as a fraction of the walnut baseline */
+  sideScale: number;
+  /** 1 = show the chromed tube-and-ball frame (USM look), 0 = hidden */
+  chrome: number;
+  /** 1 = cover the planked back with a smooth panel, 0 = show planks */
+  plainBack: number;
+}
+
 export interface ShelfTheme {
   id: string;
   /** Color shown on the theme-switch swatch button */
@@ -23,6 +34,8 @@ export interface ShelfTheme {
   back: ShelfSurface;
   /** Scene background (the void around the wall unit) */
   room: string;
+  /** Geometry treatment — lerped alongside the colors on switch */
+  structure: ShelfStructure;
 }
 
 export const SHELF_THEMES: ShelfTheme[] = [
@@ -35,6 +48,7 @@ export const SHELF_THEMES: ShelfTheme[] = [
     side: { color: '#5e4230', roughness: 0.8, metalness: 0 },
     back: { color: '#3f2a1a', roughness: 0.88, metalness: 0 },
     room: '#171210',
+    structure: { boardScale: 1, sideScale: 1, chrome: 0, plainBack: 0 },
   },
   {
     // Whitewashed cafe bookcase: matte off-white paint with the wood grain
@@ -43,8 +57,10 @@ export const SHELF_THEMES: ShelfTheme[] = [
     swatch: '#e9e4da',
     board: { color: '#eae5dc', roughness: 0.92, metalness: 0 },
     side: { color: '#e4dfd5', roughness: 0.92, metalness: 0 },
-    back: { color: '#dcd6ca', roughness: 0.94, metalness: 0 },
+    // Smooth plaster-white back — the planked veneer reads wrong on paint.
+    back: { color: '#e7e2d8', roughness: 0.94, metalness: 0 },
     room: '#a9a29a',
+    structure: { boardScale: 1, sideScale: 1, chrome: 0, plainBack: 1 },
   },
   {
     // USM-style steel unit: cool light panels with a soft metallic sheen,
@@ -53,10 +69,12 @@ export const SHELF_THEMES: ShelfTheme[] = [
     swatch: '#c7c9cd',
     // Metalness stays modest — with no environment map, high metalness just
     // reads as flat gray. The sheen comes from low roughness instead.
-    board: { color: '#e7e9ec', roughness: 0.4, metalness: 0.35 },
-    side: { color: '#d9dce0', roughness: 0.34, metalness: 0.45 },
-    back: { color: '#f0ede8', roughness: 0.62, metalness: 0.1 },
+    // Thin powder-coated panels on a chromed tube-and-ball frame (USM look).
+    board: { color: '#eceef1', roughness: 0.42, metalness: 0.25 },
+    side: { color: '#dde0e4', roughness: 0.36, metalness: 0.35 },
+    back: { color: '#f1eeea', roughness: 0.62, metalness: 0.08 },
     room: '#93897b',
+    structure: { boardScale: 0.36, sideScale: 0.4, chrome: 1, plainBack: 1 },
   },
 ];
 
