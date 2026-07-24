@@ -20,6 +20,9 @@ export interface ShelfStructure {
   chrome: number;
   /** 1 = cover the planked back with a smooth panel, 0 = show planks */
   plainBack: number;
+  /** Grain-texture strength on boards/stiles: 1 = full wood grain,
+      0 = smooth (powder-coated steel panels have none) */
+  grain: number;
 }
 
 export interface ShelfTheme {
@@ -48,7 +51,13 @@ export const SHELF_THEMES: ShelfTheme[] = [
     side: { color: '#5e4230', roughness: 0.8, metalness: 0 },
     back: { color: '#3f2a1a', roughness: 0.88, metalness: 0 },
     room: '#171210',
-    structure: { boardScale: 1, sideScale: 1, chrome: 0, plainBack: 0 },
+    structure: {
+      boardScale: 1,
+      sideScale: 1,
+      chrome: 0,
+      plainBack: 0,
+      grain: 1,
+    },
   },
   {
     // Whitewashed cafe bookcase: matte off-white paint with the wood grain
@@ -60,7 +69,13 @@ export const SHELF_THEMES: ShelfTheme[] = [
     // Smooth plaster-white back — the planked veneer reads wrong on paint.
     back: { color: '#e7e2d8', roughness: 0.94, metalness: 0 },
     room: '#a9a29a',
-    structure: { boardScale: 1, sideScale: 1, chrome: 0, plainBack: 1 },
+    structure: {
+      boardScale: 1,
+      sideScale: 1,
+      chrome: 0,
+      plainBack: 1,
+      grain: 1,
+    },
   },
   {
     // USM-style steel unit: cool light panels with a soft metallic sheen,
@@ -74,7 +89,13 @@ export const SHELF_THEMES: ShelfTheme[] = [
     side: { color: '#dde0e4', roughness: 0.36, metalness: 0.35 },
     back: { color: '#f1eeea', roughness: 0.62, metalness: 0.08 },
     room: '#93897b',
-    structure: { boardScale: 0.36, sideScale: 0.4, chrome: 1, plainBack: 1 },
+    structure: {
+      boardScale: 0.36,
+      sideScale: 0.4,
+      chrome: 1,
+      plainBack: 1,
+      grain: 0,
+    },
   },
 ];
 
