@@ -25,6 +25,22 @@ export interface ShelfStructure {
   grain: number;
 }
 
+export interface ShelfLight {
+  color: string;
+  intensity: number;
+}
+
+export interface ShelfLights {
+  /** Overall room bounce */
+  ambient: ShelfLight;
+  /** Ceiling key spotlight (the only shadow caster) */
+  key: ShelfLight;
+  /** Cool directional fill from the side */
+  fill: ShelfLight;
+  /** Low warm bounce point light */
+  bounce: ShelfLight;
+}
+
 export interface ShelfTheme {
   id: string;
   /** Color shown on the theme-switch swatch button */
@@ -39,6 +55,10 @@ export interface ShelfTheme {
   room: string;
   /** Geometry treatment — lerped alongside the colors on switch */
   structure: ShelfStructure;
+  /** Upload-slot ghost (plus glyph + hover fill) — must contrast the case */
+  ghost: string;
+  /** Light rig tuning — color temperature and level to match the finish */
+  lights: ShelfLights;
 }
 
 export const SHELF_THEMES: ShelfTheme[] = [
@@ -51,12 +71,20 @@ export const SHELF_THEMES: ShelfTheme[] = [
     side: { color: '#5e4230', roughness: 0.8, metalness: 0 },
     back: { color: '#3f2a1a', roughness: 0.88, metalness: 0 },
     room: '#171210',
+    ghost: '#fff6e2',
     structure: {
       boardScale: 1,
       sideScale: 1,
       chrome: 0,
       plainBack: 0,
       grain: 1,
+    },
+    // The original warm evening-lamp rig.
+    lights: {
+      ambient: { color: '#f4ede3', intensity: 0.62 },
+      key: { color: '#f4e7d3', intensity: 1.55 },
+      fill: { color: '#ccd4e8', intensity: 0.26 },
+      bounce: { color: '#ece1cf', intensity: 0.15 },
     },
   },
   {
@@ -69,12 +97,22 @@ export const SHELF_THEMES: ShelfTheme[] = [
     // Smooth plaster-white back — the planked veneer reads wrong on paint.
     back: { color: '#e7e2d8', roughness: 0.94, metalness: 0 },
     room: '#a9a29a',
+    ghost: '#7a6f5e',
     structure: {
       boardScale: 1,
       sideScale: 1,
       chrome: 0,
       plainBack: 1,
       grain: 1,
+    },
+    // Bright, airy cafe daylight: lifted ambient, near-white key with a
+    // cool window fill (warm/cool contrast keeps it from reading
+    // fluorescent).
+    lights: {
+      ambient: { color: '#f6f3ee', intensity: 0.8 },
+      key: { color: '#fdf7ea', intensity: 1.62 },
+      fill: { color: '#d3dbea', intensity: 0.35 },
+      bounce: { color: '#f0ebe2', intensity: 0.18 },
     },
   },
   {
@@ -89,12 +127,21 @@ export const SHELF_THEMES: ShelfTheme[] = [
     side: { color: '#dde0e4', roughness: 0.36, metalness: 0.35 },
     back: { color: '#f1eeea', roughness: 0.62, metalness: 0.08 },
     room: '#93897b',
+    ghost: '#5d636d',
     structure: {
       boardScale: 0.36,
       sideScale: 0.4,
       chrome: 1,
       plainBack: 1,
       grain: 0,
+    },
+    // Neutral showroom light: cooler key and fill flatter the chrome and
+    // powder-coat without the walnut rig's amber cast.
+    lights: {
+      ambient: { color: '#eef0f2', intensity: 0.72 },
+      key: { color: '#f4f4f1', intensity: 1.58 },
+      fill: { color: '#c9d3e4', intensity: 0.38 },
+      bounce: { color: '#e8e9ec', intensity: 0.16 },
     },
   },
 ];

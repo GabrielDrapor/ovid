@@ -21,6 +21,7 @@ describe('shelf themes', () => {
     for (const th of SHELF_THEMES) {
       expect(th.swatch).toMatch(HEX);
       expect(th.room).toMatch(HEX);
+      expect(th.ghost).toMatch(HEX);
       for (const s of [th.board, th.side, th.back]) {
         expect(s.color).toMatch(HEX);
         expect(s.roughness).toBeGreaterThanOrEqual(0);
@@ -48,6 +49,21 @@ describe('shelf themes', () => {
     expect(steel.chrome).toBe(1);
     expect(steel.grain).toBe(0);
     expect(steel.boardScale).toBeLessThan(0.5);
+  });
+
+  it('light rigs have valid colors and sane intensities', () => {
+    for (const th of SHELF_THEMES) {
+      for (const l of [
+        th.lights.ambient,
+        th.lights.key,
+        th.lights.fill,
+        th.lights.bounce,
+      ]) {
+        expect(l.color).toMatch(HEX);
+        expect(l.intensity).toBeGreaterThan(0);
+        expect(l.intensity).toBeLessThan(3);
+      }
+    }
   });
 
   it('resolves unknown ids to the default theme', () => {
