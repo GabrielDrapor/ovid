@@ -105,7 +105,9 @@ export function makeUploadGhostCanvas(): HTMLCanvasElement {
   const cx = canvas.width / 2;
   const cy = canvas.height / 2;
   const arm = 16;
-  ctx.strokeStyle = 'rgba(255, 246, 226, 0.9)';
+  // Pure white: the mesh material's color tints this per shelf theme (cream
+  // on walnut, darkened on the light themes where white would vanish).
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.92)';
   ctx.lineWidth = 6;
   ctx.lineCap = 'round';
   ctx.beginPath();

@@ -904,6 +904,7 @@ interface UploadPlaceholderProps {
   };
   y: number;
   hidden: boolean;
+  themeId: string;
   onUpload: (target: ShelfUploadTarget) => void;
   dragDist: React.MutableRefObject<number>;
 }
@@ -914,11 +915,17 @@ function UploadPlaceholder({
   hidden,
   onUpload,
   dragDist,
+  themeId,
 }: UploadPlaceholderProps) {
   const [hovered, setHovered] = useState(false);
   const bookRef = useRef<THREE.Group>(null);
   const spineRef = useRef<THREE.MeshBasicMaterial>(null);
   const bodyRef = useRef<THREE.MeshStandardMaterial>(null);
+  const initGhost = useRef(getShelfTheme(loadShelfThemePref()).ghost);
+  const ghostTint = useMemo(
+    () => new THREE.Color(getShelfTheme(themeId).ghost),
+    [themeId]
+  );
   const bookHeight = BOOK_HEIGHT * 0.94;
   const shelfY = y - (BOOK_HEIGHT - bookHeight) / 2;
 
@@ -954,7 +961,12 @@ function UploadPlaceholder({
     const spine = spineRef.current;
     if (!group || !body || !spine) return;
     const k = 1 - Math.exp(-delta * 9);
-    // Body: barely-there cream volume behind the ghost, hover only.
+    // Ghost + fill tint follows the shelf theme (cream would vanish on the
+    // light finishes).
+    const kt = 1 - Math.exp(-delta * 3.5);
+    spine.color.lerp(ghostTint, kt);
+    body.color.lerp(ghostTint, kt);
+    // Body: barely-there fill volume behind the ghost, hover only.
     const bodyTarget = !hidden && hovered ? 0.14 : 0;
     body.opacity += (bodyTarget - body.opacity) * k;
     // Plus glyph: hover only — idle slots stay clean so the wall doesn't
@@ -1007,7 +1019,7 @@ function UploadPlaceholder({
         >
           <meshStandardMaterial
             ref={bodyRef}
-            color="#efe3cf"
+            color={initGhost.current}
             roughness={0.78}
             transparent
             opacity={0}
@@ -1019,6 +1031,7 @@ function UploadPlaceholder({
           <meshBasicMaterial
             ref={spineRef}
             map={ghostTex}
+            color={initGhost.current}
             transparent
             opacity={0}
             depthWrite={false}
@@ -1620,6 +1633,87 @@ function SelectionLight({ active }: { active: boolean }) {
   return <pointLight ref={ref} intensity={0} decay={2} color="#f2e6d2" />;
 }
 
+/**
+ * The light rig, tuned per shelf theme: walnut keeps the warm evening-lamp
+ * look, white gets bright cafe daylight, steel a neutral showroom. Colors
+ * and intensities ease toward the active theme alongside the materials.
+ */
+function ThemeLights({
+  themeId,
+  caseTop,
+}: {
+  themeId: string;
+  caseTop: number;
+}) {
+  const ambientRef = useRef<THREE.AmbientLight>(null);
+  const keyRef = useRef<THREE.SpotLight>(null);
+  const fillRef = useRef<THREE.DirectionalLight>(null);
+  const bounceRef = useRef<THREE.PointLight>(null);
+  const init = useRef(getShelfTheme(loadShelfThemePref()).lights);
+  const targets = useMemo(() => {
+    const l = getShelfTheme(themeId).lights;
+    return {
+      l,
+      ambient: new THREE.Color(l.ambient.color),
+      key: new THREE.Color(l.key.color),
+      fill: new THREE.Color(l.fill.color),
+      bounce: new THREE.Color(l.bounce.color),
+    };
+  }, [themeId]);
+  useFrame((state, delta) => {
+    const k = 1 - Math.exp(-delta * 3.5);
+    const ease = (
+      light: THREE.Light | null,
+      target: { intensity: number },
+      color: THREE.Color
+    ) => {
+      if (!light) return;
+      light.color.lerp(color, k);
+      light.intensity += (target.intensity - light.intensity) * k;
+    };
+    ease(ambientRef.current, targets.l.ambient, targets.ambient);
+    ease(keyRef.current, targets.l.key, targets.key);
+    ease(fillRef.current, targets.l.fill, targets.fill);
+    ease(bounceRef.current, targets.l.bounce, targets.bounce);
+  });
+  return (
+    <>
+      <ambientLight
+        ref={ambientRef}
+        intensity={init.current.ambient.intensity}
+        color={init.current.ambient.color}
+      />
+      {/* key light just below the ceiling, the only shadow caster */}
+      <spotLight
+        ref={keyRef}
+        position={[1.3, caseTop - 0.25, 5.4]}
+        angle={1.15}
+        penumbra={0.9}
+        decay={0}
+        intensity={init.current.key.intensity}
+        color={init.current.key.color}
+        castShadow
+        shadow-mapSize={[2048, 2048]}
+        shadow-bias={-0.0004}
+      />
+      {/* soft fills so shadowed sides don't go black */}
+      <directionalLight
+        ref={fillRef}
+        position={[-4, 1.2, 3.5]}
+        intensity={init.current.fill.intensity}
+        color={init.current.fill.color}
+      />
+      <pointLight
+        ref={bounceRef}
+        position={[0, -0.4, 4.5]}
+        decay={0}
+        intensity={init.current.bounce.intensity}
+        color={init.current.bounce.color}
+      />
+    </>
+  );
+}
+
 /** Ease the scene background toward the active theme's room color. */
 function ThemeBackdrop({ room }: { room: string }) {
   const target = useMemo(() => new THREE.Color(room), [room]);
@@ -1837,31 +1931,7 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
       >
         <color attach="background" args={[initialRoom.current]} />
         <ThemeBackdrop room={getShelfTheme(shelfTheme).room} />
-        <ambientLight intensity={0.62} color="#f4ede3" />
-        {/* key light just below the ceiling, the only shadow caster */}
-        <spotLight
-          position={[1.3, caseTop - 0.25, 5.4]}
-          angle={1.15}
-          penumbra={0.9}
-          decay={0}
-          intensity={1.55}
-          color="#f4e7d3"
-          castShadow
-          shadow-mapSize={[2048, 2048]}
-          shadow-bias={-0.0004}
-        />
-        {/* soft fills so shadowed sides don't go black */}
-        <directionalLight
-          position={[-4, 1.2, 3.5]}
-          intensity={0.26}
-          color="#ccd4e8"
-        />
-        <pointLight
-          position={[0, -0.4, 4.5]}
-          decay={0}
-          intensity={0.15}
-          color="#ece1cf"
-        />
+        <ThemeLights themeId={shelfTheme} caseTop={caseTop} />
         <SelectionLight active={!!selectedUuid} />
 
         {totalRows > 0 && (
@@ -1927,6 +1997,7 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
                 target={target}
                 y={y}
                 hidden={loading || selectedUuid !== null}
+                themeId={shelfTheme}
                 onUpload={onUploadToSlot}
                 dragDist={dragDist}
               />
