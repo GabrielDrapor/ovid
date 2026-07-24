@@ -7,6 +7,7 @@ import React, {
 } from 'react';
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { Canvas, useFrame, useThree, ThreeEvent } from '@react-three/fiber';
 import { useI18n } from '../../i18n';
 import {
@@ -1135,6 +1136,17 @@ function Bookcase({
   const grainUniform = useRef({
     value: initialThemeRef.current.structure.grain,
   });
+  // Studio-style environment map: without one, metals have nothing to
+  // reflect and chrome reads as dull gray. Generated procedurally
+  // (RoomEnvironment) — no external assets. Applied to the chrome at full
+  // strength and to the steel panels faintly (faded with the theme).
+  const gl = useThree((s) => s.gl);
+  const envMap = useMemo(() => {
+    const pmrem = new THREE.PMREMGenerator(gl);
+    const tex = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    pmrem.dispose();
+    return tex;
+  }, [gl]);
   const caseMats = useMemo(() => {
     const init = initialThemeRef.current;
     const make = (s: ShelfSurface, map: THREE.Texture) => {
@@ -1143,6 +1155,8 @@ function Bookcase({
         color: s.color,
         roughness: s.roughness,
         metalness: s.metalness,
+        envMap,
+        envMapIntensity: init.structure.chrome * 0.5,
       });
       mat.onBeforeCompile = (shader) => {
         shader.uniforms.uGrainMix = grainUniform.current;
@@ -1176,14 +1190,16 @@ function Bookcase({
       }),
       // USM-style chromed tube-and-ball frame, steel theme only.
       chrome: new THREE.MeshStandardMaterial({
-        color: '#e3e7ed',
-        roughness: 0.24,
-        metalness: 0.85,
+        color: '#eef2f6',
+        roughness: 0.16,
+        metalness: 0.92,
+        envMap,
+        envMapIntensity: 1.1,
         transparent: true,
         opacity: init.structure.chrome,
       }),
     };
-  }, [boardTex, sideTex, backTex]);
+  }, [boardTex, sideTex, backTex, envMap]);
   const themeTargets = useMemo(() => {
     const th = getShelfTheme(themeId);
     return {
@@ -1224,6 +1240,8 @@ function Bookcase({
     grainUniform.current.value = s.grain;
     caseMats.plainBack.opacity = s.plainBack;
     caseMats.chrome.opacity = s.chrome;
+    caseMats.board.envMapIntensity = s.chrome * 0.5;
+    caseMats.side.envMapIntensity = s.chrome * 0.5;
     if (chromeGroup.current) {
       chromeGroup.current.visible = s.chrome > 0.02;
     }
@@ -1256,8 +1274,9 @@ function Bookcase({
       caseMats.back.dispose();
       caseMats.plainBack.dispose();
       caseMats.chrome.dispose();
+      envMap.dispose();
     },
-    [boardTex, sideTex, backTex, cavityTex, caseMats]
+    [boardTex, sideTex, backTex, cavityTex, caseMats, envMap]
   );
   // Chrome frame geometry: verticals at every divider line, horizontals at
   // every board line, balls on the crossings — positioned for the steel
