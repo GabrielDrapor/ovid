@@ -109,10 +109,10 @@ export const SHELF_THEMES: ShelfTheme[] = [
     // cool window fill (warm/cool contrast keeps it from reading
     // fluorescent).
     lights: {
-      ambient: { color: '#f6f3ee', intensity: 0.8 },
-      key: { color: '#fdf7ea', intensity: 1.62 },
-      fill: { color: '#d3dbea', intensity: 0.35 },
-      bounce: { color: '#f0ebe2', intensity: 0.18 },
+      ambient: { color: '#f6f3ee', intensity: 0.92 },
+      key: { color: '#fdf7ea', intensity: 1.78 },
+      fill: { color: '#d3dbea', intensity: 0.4 },
+      bounce: { color: '#f0ebe2', intensity: 0.22 },
     },
   },
   {
@@ -138,10 +138,10 @@ export const SHELF_THEMES: ShelfTheme[] = [
     // Neutral showroom light: cooler key and fill flatter the chrome and
     // powder-coat without the walnut rig's amber cast.
     lights: {
-      ambient: { color: '#eef0f2', intensity: 0.72 },
-      key: { color: '#f4f4f1', intensity: 1.58 },
-      fill: { color: '#c9d3e4', intensity: 0.38 },
-      bounce: { color: '#e8e9ec', intensity: 0.16 },
+      ambient: { color: '#edf0f3', intensity: 0.8 },
+      key: { color: '#f0f2f5', intensity: 1.68 },
+      fill: { color: '#c9d3e4', intensity: 0.42 },
+      bounce: { color: '#e8e9ec', intensity: 0.18 },
     },
   },
 ];
