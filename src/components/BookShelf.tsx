@@ -17,6 +17,12 @@ import {
   ShelfUploadTarget,
   UserBookProgress,
 } from './shelf3d/types';
+import {
+  SHELF_THEMES,
+  getShelfTheme,
+  loadShelfThemePref,
+  saveShelfThemePref,
+} from './shelf3d/shelfThemes';
 import './BookShelf.css';
 
 const BookShelf3D = React.lazy(() => import('./shelf3d/BookShelf3D'));
@@ -87,9 +93,18 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
   );
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
   const [webglOk] = useState(isWebGLAvailable);
-  const [showUserMenu, setShowUserMenu] = useState(false);
-  const [showHelpMenu, setShowHelpMenu] = useState(false);
-  const helpRef = useRef<HTMLDivElement>(null);
+  // One dock menu open at a time — opening another closes the previous.
+  const [openDockMenu, setOpenDockMenu] = useState<
+    'user' | 'help' | 'theme' | null
+  >(null);
+  const dockRef = useRef<HTMLDivElement>(null);
+  // Shelf color theme (3D closet) — owned here so the dock can switch it.
+  const [shelfTheme, setShelfTheme] = useState(loadShelfThemePref);
+  const handleShelfTheme = useCallback((id: string) => {
+    setShelfTheme(id);
+    saveShelfThemePref(id);
+    setOpenDockMenu(null);
+  }, []);
   const wallRef = useRef<HTMLDivElement>(null);
   const [shelfPos, setShelfPos] = useState({
     row1Bottom: '52%',
@@ -374,16 +389,22 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
   }, [goPage, use3D]);
 
   useEffect(() => {
+    if (!openDockMenu) return;
     const handleClickOutside = (e: MouseEvent) => {
-      if (helpRef.current && !helpRef.current.contains(e.target as Node)) {
-        setShowHelpMenu(false);
+      if (dockRef.current && !dockRef.current.contains(e.target as Node)) {
+        setOpenDockMenu(null);
       }
     };
-    if (showHelpMenu) {
-      document.addEventListener('mousedown', handleClickOutside);
-    }
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showHelpMenu]);
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpenDockMenu(null);
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleKey);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleKey);
+    };
+  }, [openDockMenu]);
 
   // Position the upload callout in viewport coords so it can escape
   // .books-grid's overflow:hidden. Recompute on resize and any scroll
@@ -1143,6 +1164,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                   <BookShelf3D
                     books={safeBooks}
                     shelfSlots={shelfSlots}
+                    shelfTheme={shelfTheme}
                     loading={loading}
                     showProgress={!!user}
                     progressMap={bookProgressMap}
@@ -1166,6 +1188,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                 </div>
               )}
               <div
+                ref={dockRef}
                 className={`shelf-actions${use3D ? ' shelf-actions--floating' : ''}`}
                 style={
                   use3D
@@ -1174,10 +1197,12 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                 }
               >
                 {userLoading ? null : user ? (
-                  <>
+                  <div className="shelf-menu-wrapper">
                     <button
                       className="shelf-avatar-btn"
-                      onClick={() => setShowUserMenu(!showUserMenu)}
+                      onClick={() =>
+                        setOpenDockMenu(openDockMenu === 'user' ? null : 'user')
+                      }
                     >
                       {user.picture ? (
                         <img
@@ -1191,12 +1216,13 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                         </div>
                       )}
                     </button>
-                    {showUserMenu && (
-                      <div className="shelf-user-dropdown">
+                    {openDockMenu === 'user' && (
+                      <div className="shelf-user-dropdown dock-menu">
                         <div className="user-info">
                           <span className="user-name">{user.name}</span>
                           <span className="user-email">{user.email}</span>
                         </div>
+                        <div className="dock-menu-divider" />
                         <div className="user-credits">
                           <span className="credits-label">
                             {t.shelf.credits}
@@ -1208,18 +1234,19 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                         <button
                           className="buy-credits-btn"
                           onClick={() => {
-                            setShowUserMenu(false);
+                            setOpenDockMenu(null);
                             setShowCreditsModal(true);
                           }}
                         >
                           {t.shelf.buyCredits}
                         </button>
+                        <div className="dock-menu-divider" />
                         <button className="logout-btn" onClick={logout}>
                           {t.shelf.logout}
                         </button>
                       </div>
                     )}
-                  </>
+                  </div>
                 ) : (
                   <button className="shelf-signin-btn" onClick={login}>
                     <svg
@@ -1248,10 +1275,12 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                     <span>{t.shelf.signIn}</span>
                   </button>
                 )}
-                <div className="shelf-help-wrapper" ref={helpRef}>
+                <div className="shelf-help-wrapper shelf-menu-wrapper">
                   <button
                     className="shelf-help-btn"
-                    onClick={() => setShowHelpMenu(!showHelpMenu)}
+                    onClick={() =>
+                      setOpenDockMenu(openDockMenu === 'help' ? null : 'help')
+                    }
                     title={t.shelf.help}
                   >
                     <svg
@@ -1263,14 +1292,14 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                       <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25z" />
                     </svg>
                   </button>
-                  {showHelpMenu && (
-                    <div className="shelf-help-dropdown">
+                  {openDockMenu === 'help' && (
+                    <div className="shelf-help-dropdown dock-menu">
                       <a
                         href="https://github.com/GabrielDrapor/ovid"
                         target="_blank"
                         rel="noopener noreferrer"
                         className="shelf-help-item"
-                        onClick={() => setShowHelpMenu(false)}
+                        onClick={() => setOpenDockMenu(null)}
                       >
                         <svg
                           viewBox="0 0 24 24"
@@ -1287,7 +1316,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                         target="_blank"
                         rel="noopener noreferrer"
                         className="shelf-help-item"
-                        onClick={() => setShowHelpMenu(false)}
+                        onClick={() => setOpenDockMenu(null)}
                       >
                         <svg
                           viewBox="0 0 24 24"
@@ -1304,7 +1333,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                         className="shelf-help-item shelf-help-item-btn"
                         onClick={() => {
                           setLocale(locale === 'en' ? 'zh' : 'en');
-                          setShowHelpMenu(false);
+                          setOpenDockMenu(null);
                         }}
                       >
                         <svg
@@ -1320,6 +1349,49 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                     </div>
                   )}
                 </div>
+                {use3D && (
+                  <div className="shelf-menu-wrapper">
+                    <button
+                      className="shelf-theme-btn"
+                      title={t.closet.shelfTheme}
+                      aria-label={t.closet.shelfTheme}
+                      onClick={() =>
+                        setOpenDockMenu(
+                          openDockMenu === 'theme' ? null : 'theme'
+                        )
+                      }
+                    >
+                      <span
+                        className="shelf-theme-dot"
+                        style={{
+                          background: getShelfTheme(shelfTheme).swatch,
+                        }}
+                      />
+                    </button>
+                    {openDockMenu === 'theme' && (
+                      <div className="shelf-theme-dropdown dock-menu">
+                        {SHELF_THEMES.map((th) => (
+                          <button
+                            key={th.id}
+                            type="button"
+                            className={`shelf-theme-option ${
+                              shelfTheme === th.id ? 'active' : ''
+                            }`}
+                            onClick={() => handleShelfTheme(th.id)}
+                          >
+                            <span
+                              className="shelf-theme-dot"
+                              style={{ background: th.swatch }}
+                            />
+                            <span>
+                              {t.closet.shelfThemeNames[th.id] || th.id}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
                 {use3D && (
                   <span className="closet-dock-hint">{t.shelf.dockHint}</span>
                 )}

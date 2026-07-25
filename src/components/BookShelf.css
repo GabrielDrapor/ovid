@@ -1143,17 +1143,25 @@
 .shelf-help-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  color: rgba(255, 255, 255, 0.9);
+  gap: 10px;
+  padding: 9px 12px;
+  color: rgba(255, 250, 240, 0.88);
   text-decoration: none;
-  font-size: 13px;
-  border-radius: 6px;
-  transition: background 0.15s ease;
+  font-size: 13.5px;
+  border-radius: 9px;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
 }
 
 .shelf-help-item:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 244, 228, 0.1);
+  color: #fff;
+}
+
+.shelf-help-item svg {
+  opacity: 0.75;
+  flex-shrink: 0;
 }
 
 /* Language toggle uses the same look as the link items, on a <button>. */
@@ -1166,82 +1174,185 @@
   text-align: left;
 }
 
-.shelf-user-dropdown {
+/* Shared card for every dock popover (user / help / theme). */
+.shelf-menu-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.dock-menu {
   position: absolute;
-  bottom: 40px;
-  left: 0;
-  background: rgba(30, 30, 30, 0.95);
-  backdrop-filter: blur(10px);
-  border-radius: 12px;
-  padding: 16px;
-  min-width: 200px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  bottom: calc(100% + 14px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(24, 21, 17, 0.94);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 244, 228, 0.09);
+  border-radius: 14px;
+  padding: 6px;
+  box-shadow:
+    0 18px 44px rgba(0, 0, 0, 0.45),
+    0 2px 8px rgba(0, 0, 0, 0.3);
   z-index: 100;
+  animation: dock-menu-in 0.16s ease both;
+}
+
+@keyframes dock-menu-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(6px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0) scale(1);
+  }
+}
+
+.dock-menu-divider {
+  height: 1px;
+  background: rgba(255, 244, 228, 0.09);
+  margin: 6px 8px;
+}
+
+.shelf-help-dropdown.dock-menu {
+  min-width: 150px;
+}
+
+.shelf-user-dropdown {
+  min-width: 216px;
 }
 
 .shelf-user-dropdown .user-info {
   display: flex;
   flex-direction: column;
-  margin-bottom: 12px;
+  gap: 2px;
+  padding: 10px 12px 8px;
 }
 
 .shelf-user-dropdown .user-name {
-  color: white;
+  color: #fff;
   font-weight: 600;
   font-size: 14px;
 }
 
 .shelf-user-dropdown .user-email {
-  color: rgba(255, 255, 255, 0.6);
+  color: rgba(255, 250, 240, 0.55);
   font-size: 12px;
 }
 
 .shelf-user-dropdown .user-credits {
   display: flex;
   justify-content: space-between;
-  padding: 8px 0;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
-  margin-bottom: 8px;
+  align-items: baseline;
+  padding: 8px 12px;
 }
 
 .shelf-user-dropdown .credits-label {
-  color: rgba(255, 255, 255, 0.7);
+  color: rgba(255, 250, 240, 0.6);
   font-size: 13px;
 }
 
 .shelf-user-dropdown .credits-amount {
-  color: white;
+  color: #fff;
   font-weight: 600;
-  font-size: 13px;
+  font-size: 13.5px;
+  font-variant-numeric: tabular-nums;
 }
 
 .shelf-user-dropdown .buy-credits-btn,
 .shelf-user-dropdown .logout-btn {
   width: 100%;
-  padding: 8px;
+  padding: 9px 12px;
   border: none;
-  border-radius: 8px;
+  border-radius: 9px;
   cursor: pointer;
-  font-size: 13px;
-  margin-bottom: 4px;
+  font-size: 13.5px;
+  font-family: inherit;
+  text-align: left;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
 }
 
 .shelf-user-dropdown .buy-credits-btn {
-  background: rgba(255, 255, 255, 0.15);
-  color: white;
+  background: rgba(255, 244, 228, 0.12);
+  color: #fff;
 }
 
 .shelf-user-dropdown .buy-credits-btn:hover {
-  background: rgba(255, 255, 255, 0.25);
+  background: rgba(255, 244, 228, 0.2);
 }
 
 .shelf-user-dropdown .logout-btn {
   background: none;
-  color: rgba(255, 255, 255, 0.6);
+  color: rgba(255, 250, 240, 0.55);
 }
 
 .shelf-user-dropdown .logout-btn:hover {
-  color: white;
+  background: rgba(255, 244, 228, 0.08);
+  color: #fff;
+}
+
+/* Shelf theme switcher in the dock */
+.shelf-theme-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255, 244, 228, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.15s ease;
+}
+
+.shelf-theme-btn:hover {
+  background: rgba(255, 244, 228, 0.16);
+}
+
+.shelf-theme-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 244, 228, 0.4);
+  flex-shrink: 0;
+}
+
+.shelf-theme-dropdown {
+  min-width: 150px;
+}
+
+.shelf-theme-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 12px;
+  border: none;
+  border-radius: 9px;
+  background: none;
+  color: rgba(255, 250, 240, 0.88);
+  font-size: 13.5px;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.shelf-theme-option:hover {
+  background: rgba(255, 244, 228, 0.1);
+  color: #fff;
+}
+
+.shelf-theme-option.active {
+  background: rgba(255, 244, 228, 0.14);
+  color: #fff;
 }
 
 /* Individual Book Spine */
@@ -1770,10 +1881,12 @@
   }
 
   .shelf-user-dropdown {
-    right: 0;
-    left: auto;
-    top: 36px;
-    bottom: auto;
+    left: 0;
+    transform: none;
+  }
+
+  .shelf-user-dropdown.dock-menu {
+    animation: none;
   }
 
   .books-grid {

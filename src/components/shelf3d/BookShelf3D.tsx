@@ -51,10 +51,8 @@ import {
   seededRandom,
 } from './woodTexture';
 import {
-  SHELF_THEMES,
   getShelfTheme,
   loadShelfThemePref,
-  saveShelfThemePref,
   type ShelfSurface,
   type ShelfStructure,
 } from './shelfThemes';
@@ -77,6 +75,8 @@ function getStudioEnvMap(gl: THREE.WebGLRenderer): THREE.Texture {
 interface BookShelf3DProps {
   books: Book[];
   shelfSlots: ShelfSlot[];
+  /** Active shelf color theme id (owned by the dock in BookShelf) */
+  shelfTheme?: string;
   loading: boolean;
   showProgress: boolean;
   progressMap: Map<string, UserBookProgress>;
@@ -1805,6 +1805,7 @@ function ThemeBackdrop({ room }: { room: string }) {
 const BookShelf3D: React.FC<BookShelf3DProps> = ({
   books,
   shelfSlots,
+  shelfTheme: shelfThemeProp,
   loading,
   showProgress,
   progressMap,
@@ -1821,13 +1822,10 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
     new Map()
   );
   const [selectedUuid, setSelectedUuid] = useState<string | null>(null);
-  // Shelf color theme — persisted per browser, crossfaded in the scene.
-  const [shelfTheme, setShelfTheme] = useState(loadShelfThemePref);
+  // Shelf color theme — owned by the dock (BookShelf); falls back to the
+  // stored preference when rendered standalone.
+  const shelfTheme = shelfThemeProp ?? loadShelfThemePref();
   const initialRoom = useRef(getShelfTheme(loadShelfThemePref()).room);
-  const handleShelfTheme = useCallback((id: string) => {
-    setShelfTheme(id);
-    saveShelfThemePref(id);
-  }, []);
   // Shelf-label editing (click a label / empty label strip to open).
   const [editingLabel, setEditingLabel] = useState<PlacedShelfLabel | null>(
     null
@@ -2092,29 +2090,6 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
           dragPointerId={dragPointerId}
         />
       </Canvas>
-
-      {revealed && (
-        <div
-          className="closet3d-theme-switch"
-          role="radiogroup"
-          aria-label={t.closet.shelfTheme}
-        >
-          {SHELF_THEMES.map((th) => (
-            <button
-              key={th.id}
-              type="button"
-              className={`closet3d-theme-swatch ${
-                shelfTheme === th.id ? 'active' : ''
-              }`}
-              style={{ background: th.swatch }}
-              title={t.closet.shelfThemeNames[th.id] || th.id}
-              aria-label={t.closet.shelfThemeNames[th.id] || th.id}
-              aria-pressed={shelfTheme === th.id}
-              onClick={() => handleShelfTheme(th.id)}
-            />
-          ))}
-        </div>
-      )}
 
       {editingLabel && (
         <div
