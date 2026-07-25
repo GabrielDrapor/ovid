@@ -60,6 +60,20 @@ import {
 } from './shelfThemes';
 import './BookShelf3D.css';
 
+// Studio-style environment map shared by chrome, steel panels and book
+// sheen. Cached per renderer; lives for the renderer's lifetime.
+const studioEnvCache = new WeakMap<THREE.WebGLRenderer, THREE.Texture>();
+function getStudioEnvMap(gl: THREE.WebGLRenderer): THREE.Texture {
+  let tex = studioEnvCache.get(gl);
+  if (!tex) {
+    const pmrem = new THREE.PMREMGenerator(gl);
+    tex = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    pmrem.dispose();
+    studioEnvCache.set(gl, tex);
+  }
+  return tex;
+}
+
 interface BookShelf3DProps {
   books: Book[];
   shelfSlots: ShelfSlot[];
@@ -364,6 +378,7 @@ interface BookMeshProps {
   processingProgress: number;
   /** Most recently read book: ribbon bookmark + sits pulled out a little. */
   isRecent: boolean;
+  themeId: string;
   /** Accumulated touch-drag distance; large values suppress the tap-click. */
   dragDist: React.MutableRefObject<number>;
   /** Owned books off public shelves can be dragged; everything else can't. */
@@ -391,6 +406,7 @@ function BookMesh({
   onArtReady,
   processingProgress,
   isRecent,
+  themeId,
   dragDist,
   draggable,
   layout,
@@ -666,6 +682,19 @@ function BookMesh({
   useEffect(() => () => ribbonMat.dispose(), [ribbonMat]);
   const ribbonBase = useMemo(() => new THREE.Color(RIBBON_RED), []);
 
+  // Per-theme book response: tint/lift shift the cover colors with the room,
+  // sheen adds environment reflection (glossy covers under showroom light).
+  const glRef = useThree((s) => s.gl);
+  const bookEnvMap = useMemo(() => getStudioEnvMap(glRef), [glRef]);
+  const initBook = useRef(getShelfTheme(loadShelfThemePref()).book);
+  const bookTint = useRef(new THREE.Color(initBook.current.tint));
+  const bookLift = useRef(initBook.current.lift);
+  const bookSheen = useRef(initBook.current.sheen);
+  const bookTargets = useMemo(() => {
+    const b = getShelfTheme(themeId).book;
+    return { b, tint: new THREE.Color(b.tint) };
+  }, [themeId]);
+
   useEffect(() => {
     document.body.style.cursor = hovered ? 'pointer' : '';
     return () => {
@@ -782,9 +811,24 @@ function BookMesh({
         bright *= reveal.current;
       }
 
+      const kt = 1 - Math.exp(-delta * 3.5);
+      bookTint.current.lerp(bookTargets.tint, kt);
+      bookLift.current += (bookTargets.b.lift - bookLift.current) * kt;
+      bookSheen.current += (bookTargets.b.sheen - bookSheen.current) * kt;
+      const tint = bookTint.current;
+      const lift = bookLift.current;
       for (let i = 0; i < mats.length; i++) {
         const base = baseColors[i] ?? baseColors[0];
-        mats[i].color.setRGB(base.r * bright, base.g * bright, base.b * bright);
+        mats[i].color.setRGB(
+          base.r * bright * tint.r * lift,
+          base.g * bright * tint.g * lift,
+          base.b * bright * tint.b * lift
+        );
+        // Sheen only on cover (0), back cover (1) and spine (4) — the page
+        // block stays matte.
+        if (i === 0 || i === 1 || i === 4) {
+          mats[i].envMapIntensity = bookSheen.current;
+        }
       }
       ribbonMat.color.setRGB(
         ribbonBase.r * bright,
@@ -840,12 +884,16 @@ function BookMesh({
           attach="material-0"
           map={effectiveCoverTex}
           roughness={processing ? 0.9 - processingClarity * 0.2 : 0.62}
+          envMap={bookEnvMap}
+          envMapIntensity={initBook.current.sheen}
         />
         {/* -x: back cover, cloth colored to match the spine art */}
         <meshStandardMaterial
           attach="material-1"
           color={cloth}
           roughness={0.68}
+          envMap={bookEnvMap}
+          envMapIntensity={initBook.current.sheen}
         />
         {/* +y / -y: page block with striations and a cloth rim */}
         <meshStandardMaterial
@@ -863,6 +911,8 @@ function BookMesh({
           attach="material-4"
           map={effectiveSpineTex}
           roughness={processing ? 0.9 - processingClarity * 0.2 : 0.62}
+          envMap={bookEnvMap}
+          envMapIntensity={initBook.current.sheen}
         />
         <meshStandardMaterial
           attach="material-5"
@@ -1141,12 +1191,7 @@ function Bookcase({
   // (RoomEnvironment) — no external assets. Applied to the chrome at full
   // strength and to the steel panels faintly (faded with the theme).
   const gl = useThree((s) => s.gl);
-  const envMap = useMemo(() => {
-    const pmrem = new THREE.PMREMGenerator(gl);
-    const tex = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-    pmrem.dispose();
-    return tex;
-  }, [gl]);
+  const envMap = useMemo(() => getStudioEnvMap(gl), [gl]);
   const caseMats = useMemo(() => {
     const init = initialThemeRef.current;
     const make = (s: ShelfSurface, map: THREE.Texture) => {
@@ -1274,9 +1319,8 @@ function Bookcase({
       caseMats.back.dispose();
       caseMats.plainBack.dispose();
       caseMats.chrome.dispose();
-      envMap.dispose();
     },
-    [boardTex, sideTex, backTex, cavityTex, caseMats, envMap]
+    [boardTex, sideTex, backTex, cavityTex, caseMats]
   );
   // Chrome frame geometry: verticals at every divider line, horizontals at
   // every board line, balls on the crossings — positioned for the steel
@@ -2004,6 +2048,7 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
               onArtReady={handleArtReady}
               processingProgress={processingProgress}
               isRecent={p.uuid === recentUuid}
+              themeId={shelfTheme}
               dragDist={dragDist}
               draggable={
                 currentUserId != null &&

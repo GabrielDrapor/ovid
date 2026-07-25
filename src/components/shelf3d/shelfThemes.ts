@@ -59,6 +59,15 @@ export interface ShelfTheme {
   ghost: string;
   /** Light rig tuning — color temperature and level to match the finish */
   lights: ShelfLights;
+  /** How the books themselves respond to the setting */
+  book: {
+    /** Multiplied into every book material color (white = untouched) */
+    tint: string;
+    /** Overall brightness multiplier on top of the tint */
+    lift: number;
+    /** Cover/spine envMapIntensity — glossy sheen under showroom light */
+    sheen: number;
+  };
 }
 
 export const SHELF_THEMES: ShelfTheme[] = [
@@ -86,6 +95,9 @@ export const SHELF_THEMES: ShelfTheme[] = [
       fill: { color: '#ccd4e8', intensity: 0.26 },
       bounce: { color: '#ece1cf', intensity: 0.15 },
     },
+
+    // Books keep the exact production look in walnut.
+    book: { tint: '#ffffff', lift: 1, sheen: 0 },
   },
   {
     // Whitewashed cafe bookcase: matte off-white paint with the wood grain
@@ -114,6 +126,9 @@ export const SHELF_THEMES: ShelfTheme[] = [
       fill: { color: '#d3dbea', intensity: 0.4 },
       bounce: { color: '#f0ebe2', intensity: 0.22 },
     },
+
+    // Daylight lifts the covers; a whisper of sheen from the bright room.
+    book: { tint: '#fffdf7', lift: 1.08, sheen: 0.15 },
   },
   {
     // USM-style steel unit: cool light panels with a soft metallic sheen,
@@ -143,6 +158,9 @@ export const SHELF_THEMES: ShelfTheme[] = [
       fill: { color: '#c9d3e4', intensity: 0.42 },
       bounce: { color: '#e8e9ec', intensity: 0.18 },
     },
+
+    // Cool cast plus a clear glossy sheen — covers read like a showroom.
+    book: { tint: '#f0f5fc', lift: 1.04, sheen: 0.45 },
   },
 ];
 
