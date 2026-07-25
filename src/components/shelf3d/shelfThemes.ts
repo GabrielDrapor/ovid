@@ -67,9 +67,9 @@ export const SHELF_THEMES: ShelfTheme[] = [
     // pre-theme procedural walnut canvases.
     id: 'walnut',
     swatch: '#5e4130',
-    board: { color: '#63452f', roughness: 0.8, metalness: 0 },
-    side: { color: '#5e4230', roughness: 0.8, metalness: 0 },
-    back: { color: '#3f2a1a', roughness: 0.88, metalness: 0 },
+    board: { color: '#62402f', roughness: 0.8, metalness: 0 },
+    side: { color: '#5a3f31', roughness: 0.8, metalness: 0 },
+    back: { color: '#392115', roughness: 0.88, metalness: 0 },
     room: '#171210',
     ghost: '#fff6e2',
     structure: {
