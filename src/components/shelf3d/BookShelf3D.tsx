@@ -7,6 +7,7 @@ import React, {
 } from 'react';
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { Canvas, useFrame, useThree, ThreeEvent } from '@react-three/fiber';
 import { useI18n } from '../../i18n';
 import {
@@ -45,15 +46,37 @@ import {
 } from './fallbackTextures';
 import {
   makeCavityShadeCanvas,
-  makePanelCanvas,
-  makeWoodCanvas,
+  makeNeutralPanelCanvas,
+  makeNeutralWoodCanvas,
   seededRandom,
 } from './woodTexture';
+import {
+  getShelfTheme,
+  loadShelfThemePref,
+  type ShelfSurface,
+  type ShelfStructure,
+} from './shelfThemes';
 import './BookShelf3D.css';
+
+// Studio-style environment map shared by chrome, steel panels and book
+// sheen. Cached per renderer; lives for the renderer's lifetime.
+const studioEnvCache = new WeakMap<THREE.WebGLRenderer, THREE.Texture>();
+function getStudioEnvMap(gl: THREE.WebGLRenderer): THREE.Texture {
+  let tex = studioEnvCache.get(gl);
+  if (!tex) {
+    const pmrem = new THREE.PMREMGenerator(gl);
+    tex = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    pmrem.dispose();
+    studioEnvCache.set(gl, tex);
+  }
+  return tex;
+}
 
 interface BookShelf3DProps {
   books: Book[];
   shelfSlots: ShelfSlot[];
+  /** Active shelf color theme id (owned by the dock in BookShelf) */
+  shelfTheme?: string;
   loading: boolean;
   showProgress: boolean;
   progressMap: Map<string, UserBookProgress>;
@@ -81,7 +104,6 @@ function isBookImportPending(book: Book): boolean {
   return book.status === 'processing';
 }
 
-const ROOM = '#171210';
 const CLOTH_FALLBACK = '#3a3026';
 /** Ribbon bookmark on the last-read book. */
 const RIBBON_RED = '#a63d2b';
@@ -356,6 +378,7 @@ interface BookMeshProps {
   processingProgress: number;
   /** Most recently read book: ribbon bookmark + sits pulled out a little. */
   isRecent: boolean;
+  themeId: string;
   /** Accumulated touch-drag distance; large values suppress the tap-click. */
   dragDist: React.MutableRefObject<number>;
   /** Owned books off public shelves can be dragged; everything else can't. */
@@ -383,6 +406,7 @@ function BookMesh({
   onArtReady,
   processingProgress,
   isRecent,
+  themeId,
   dragDist,
   draggable,
   layout,
@@ -658,6 +682,19 @@ function BookMesh({
   useEffect(() => () => ribbonMat.dispose(), [ribbonMat]);
   const ribbonBase = useMemo(() => new THREE.Color(RIBBON_RED), []);
 
+  // Per-theme book response: tint/lift shift the cover colors with the room,
+  // sheen adds environment reflection (glossy covers under showroom light).
+  const glRef = useThree((s) => s.gl);
+  const bookEnvMap = useMemo(() => getStudioEnvMap(glRef), [glRef]);
+  const initBook = useRef(getShelfTheme(loadShelfThemePref()).book);
+  const bookTint = useRef(new THREE.Color(initBook.current.tint));
+  const bookLift = useRef(initBook.current.lift);
+  const bookSheen = useRef(initBook.current.sheen);
+  const bookTargets = useMemo(() => {
+    const b = getShelfTheme(themeId).book;
+    return { b, tint: new THREE.Color(b.tint) };
+  }, [themeId]);
+
   useEffect(() => {
     document.body.style.cursor = hovered ? 'pointer' : '';
     return () => {
@@ -774,9 +811,24 @@ function BookMesh({
         bright *= reveal.current;
       }
 
+      const kt = 1 - Math.exp(-delta * 3.5);
+      bookTint.current.lerp(bookTargets.tint, kt);
+      bookLift.current += (bookTargets.b.lift - bookLift.current) * kt;
+      bookSheen.current += (bookTargets.b.sheen - bookSheen.current) * kt;
+      const tint = bookTint.current;
+      const lift = bookLift.current;
       for (let i = 0; i < mats.length; i++) {
         const base = baseColors[i] ?? baseColors[0];
-        mats[i].color.setRGB(base.r * bright, base.g * bright, base.b * bright);
+        mats[i].color.setRGB(
+          base.r * bright * tint.r * lift,
+          base.g * bright * tint.g * lift,
+          base.b * bright * tint.b * lift
+        );
+        // Sheen only on cover (0), back cover (1) and spine (4) — the page
+        // block stays matte.
+        if (i === 0 || i === 1 || i === 4) {
+          mats[i].envMapIntensity = bookSheen.current;
+        }
       }
       ribbonMat.color.setRGB(
         ribbonBase.r * bright,
@@ -832,12 +884,16 @@ function BookMesh({
           attach="material-0"
           map={effectiveCoverTex}
           roughness={processing ? 0.9 - processingClarity * 0.2 : 0.62}
+          envMap={bookEnvMap}
+          envMapIntensity={initBook.current.sheen}
         />
         {/* -x: back cover, cloth colored to match the spine art */}
         <meshStandardMaterial
           attach="material-1"
           color={cloth}
           roughness={0.68}
+          envMap={bookEnvMap}
+          envMapIntensity={initBook.current.sheen}
         />
         {/* +y / -y: page block with striations and a cloth rim */}
         <meshStandardMaterial
@@ -855,6 +911,8 @@ function BookMesh({
           attach="material-4"
           map={effectiveSpineTex}
           roughness={processing ? 0.9 - processingClarity * 0.2 : 0.62}
+          envMap={bookEnvMap}
+          envMapIntensity={initBook.current.sheen}
         />
         <meshStandardMaterial
           attach="material-5"
@@ -897,6 +955,7 @@ interface UploadPlaceholderProps {
   };
   y: number;
   hidden: boolean;
+  themeId: string;
   onUpload: (target: ShelfUploadTarget) => void;
   dragDist: React.MutableRefObject<number>;
 }
@@ -907,11 +966,17 @@ function UploadPlaceholder({
   hidden,
   onUpload,
   dragDist,
+  themeId,
 }: UploadPlaceholderProps) {
   const [hovered, setHovered] = useState(false);
   const bookRef = useRef<THREE.Group>(null);
   const spineRef = useRef<THREE.MeshBasicMaterial>(null);
   const bodyRef = useRef<THREE.MeshStandardMaterial>(null);
+  const initGhost = useRef(getShelfTheme(loadShelfThemePref()).ghost);
+  const ghostTint = useMemo(
+    () => new THREE.Color(getShelfTheme(themeId).ghost),
+    [themeId]
+  );
   const bookHeight = BOOK_HEIGHT * 0.94;
   const shelfY = y - (BOOK_HEIGHT - bookHeight) / 2;
 
@@ -947,7 +1012,12 @@ function UploadPlaceholder({
     const spine = spineRef.current;
     if (!group || !body || !spine) return;
     const k = 1 - Math.exp(-delta * 9);
-    // Body: barely-there cream volume behind the ghost, hover only.
+    // Ghost + fill tint follows the shelf theme (cream would vanish on the
+    // light finishes).
+    const kt = 1 - Math.exp(-delta * 3.5);
+    spine.color.lerp(ghostTint, kt);
+    body.color.lerp(ghostTint, kt);
+    // Body: barely-there fill volume behind the ghost, hover only.
     const bodyTarget = !hidden && hovered ? 0.14 : 0;
     body.opacity += (bodyTarget - body.opacity) * k;
     // Plus glyph: hover only — idle slots stay clean so the wall doesn't
@@ -1000,7 +1070,7 @@ function UploadPlaceholder({
         >
           <meshStandardMaterial
             ref={bodyRef}
-            color="#efe3cf"
+            color={initGhost.current}
             roughness={0.78}
             transparent
             opacity={0}
@@ -1012,6 +1082,7 @@ function UploadPlaceholder({
           <meshBasicMaterial
             ref={spineRef}
             map={ghostTex}
+            color={initGhost.current}
             transparent
             opacity={0}
             depthWrite={false}
@@ -1023,6 +1094,18 @@ function UploadPlaceholder({
   );
 }
 
+/** Ease a live material toward a theme surface definition. */
+function lerpSurface(
+  mat: THREE.MeshStandardMaterial,
+  target: ShelfSurface,
+  targetColor: THREE.Color,
+  k: number
+) {
+  mat.color.lerp(targetColor, k);
+  mat.roughness += (target.roughness - mat.roughness) * k;
+  mat.metalness += (target.metalness - mat.metalness) * k;
+}
+
 /** Built-in wall unit: a uniform grid of bays, floor to ceiling. */
 function Bookcase({
   totalRows,
@@ -1031,6 +1114,7 @@ function Bookcase({
   onEditLabel,
   labelsHidden,
   dragDist,
+  themeId,
 }: {
   totalRows: number;
   totalCols: number;
@@ -1038,6 +1122,7 @@ function Bookcase({
   onEditLabel?: (label: PlacedShelfLabel) => void;
   labelsHidden: boolean;
   dragDist: React.MutableRefObject<number>;
+  themeId: string;
 }) {
   const rows = rowYCenters(totalRows);
   const width = totalCols * BAY_PITCH + DIVIDER_T;
@@ -1058,7 +1143,7 @@ function Bookcase({
   }, [totalCols]);
 
   const boardTex = useMemo(() => {
-    const t = new THREE.CanvasTexture(makeWoodCanvas('ovid-boards'));
+    const t = new THREE.CanvasTexture(makeNeutralWoodCanvas('ovid-boards'));
     t.colorSpace = THREE.SRGBColorSpace;
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
     t.anisotropy = 8;
@@ -1067,7 +1152,7 @@ function Bookcase({
     return t;
   }, []);
   const sideTex = useMemo(() => {
-    const t = new THREE.CanvasTexture(makeWoodCanvas('ovid-sides'));
+    const t = new THREE.CanvasTexture(makeNeutralWoodCanvas('ovid-sides'));
     t.colorSpace = THREE.SRGBColorSpace;
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
     t.anisotropy = 8;
@@ -1079,7 +1164,7 @@ function Bookcase({
   // The exposed back of the case: vertical planks with seams, like the
   // veneer back panels of real wall units.
   const backTex = useMemo(() => {
-    const t = new THREE.CanvasTexture(makePanelCanvas('ovid-back'));
+    const t = new THREE.CanvasTexture(makeNeutralPanelCanvas('ovid-back'));
     t.colorSpace = THREE.SRGBColorSpace;
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
     t.anisotropy = 8;
@@ -1092,64 +1177,282 @@ function Bookcase({
     () => new THREE.CanvasTexture(makeCavityShadeCanvas()),
     []
   );
+  // Grain textures are neutral; the active theme tints them. Materials are
+  // created once with the initial theme and eased toward the current one in
+  // useFrame, so a theme switch crossfades instead of snapping.
+  const initialThemeRef = useRef(getShelfTheme(themeId));
+  // Shared shader uniform: fades the grain map toward flat white so steel's
+  // powder-coated panels lose the wood texture without a map swap.
+  const grainUniform = useRef({
+    value: initialThemeRef.current.structure.grain,
+  });
+  // Studio-style environment map: without one, metals have nothing to
+  // reflect and chrome reads as dull gray. Generated procedurally
+  // (RoomEnvironment) — no external assets. Applied to the chrome at full
+  // strength and to the steel panels faintly (faded with the theme).
+  const gl = useThree((s) => s.gl);
+  const envMap = useMemo(() => getStudioEnvMap(gl), [gl]);
+  const caseMats = useMemo(() => {
+    const init = initialThemeRef.current;
+    const make = (s: ShelfSurface, map: THREE.Texture) => {
+      const mat = new THREE.MeshStandardMaterial({
+        map,
+        color: s.color,
+        roughness: s.roughness,
+        metalness: s.metalness,
+        envMap,
+        envMapIntensity: init.structure.chrome * 0.5,
+      });
+      mat.onBeforeCompile = (shader) => {
+        shader.uniforms.uGrainMix = grainUniform.current;
+        shader.fragmentShader =
+          'uniform float uGrainMix;\n' +
+          shader.fragmentShader.replace(
+            '#include <map_fragment>',
+            `#ifdef USE_MAP
+              vec4 sampledDiffuseColor = texture2D( map, vMapUv );
+              sampledDiffuseColor.rgb = mix( vec3(1.0), sampledDiffuseColor.rgb, uGrainMix );
+              diffuseColor *= sampledDiffuseColor;
+            #endif`
+          );
+      };
+      mat.customProgramCacheKey = () => 'ovid-grain-mix';
+      return mat;
+    };
+    return {
+      board: make(init.board, boardTex),
+      side: make(init.side, sideTex),
+      back: make(init.back, backTex),
+      // Smooth cover over the planked back — faded in by themes whose back
+      // shouldn't show plank seams (paint, steel panels).
+      plainBack: new THREE.MeshStandardMaterial({
+        color: init.back.color,
+        roughness: init.back.roughness,
+        metalness: init.back.metalness,
+        transparent: true,
+        opacity: init.structure.plainBack,
+        depthWrite: false,
+      }),
+      // USM-style chromed tube-and-ball frame, steel theme only.
+      chrome: new THREE.MeshStandardMaterial({
+        color: '#eef2f6',
+        roughness: 0.16,
+        metalness: 0.92,
+        envMap,
+        envMapIntensity: 1.1,
+        transparent: true,
+        opacity: init.structure.chrome,
+      }),
+    };
+  }, [boardTex, sideTex, backTex, envMap]);
+  const themeTargets = useMemo(() => {
+    const th = getShelfTheme(themeId);
+    return {
+      theme: th,
+      board: new THREE.Color(th.board.color),
+      side: new THREE.Color(th.side.color),
+      back: new THREE.Color(th.back.color),
+    };
+  }, [themeId]);
+  // Structure (board/stile thickness, chrome + plain-back presence) is
+  // animated as plain numbers and applied to mesh scales/positions per frame.
+  const structRef = useRef<ShelfStructure>({
+    ...initialThemeRef.current.structure,
+  });
+  const boardMeshes = useRef<THREE.Mesh[]>([]);
+  const sideMeshes = useRef<THREE.Mesh[]>([]);
+  const chromeGroup = useRef<THREE.Group>(null);
+  boardMeshes.current = [];
+  sideMeshes.current = [];
+  useFrame((state, delta) => {
+    const k = 1 - Math.exp(-delta * 3.5);
+    const { theme } = themeTargets;
+    lerpSurface(caseMats.board, theme.board, themeTargets.board, k);
+    lerpSurface(caseMats.side, theme.side, themeTargets.side, k);
+    lerpSurface(caseMats.back, theme.back, themeTargets.back, k);
+    // The smooth back tracks the back surface's tint, fading per structure.
+    caseMats.plainBack.color.copy(caseMats.back.color);
+    caseMats.plainBack.roughness = caseMats.back.roughness;
+    caseMats.plainBack.metalness = caseMats.back.metalness;
+
+    const s = structRef.current;
+    const st = theme.structure;
+    s.boardScale += (st.boardScale - s.boardScale) * k;
+    s.sideScale += (st.sideScale - s.sideScale) * k;
+    s.chrome += (st.chrome - s.chrome) * k;
+    s.plainBack += (st.plainBack - s.plainBack) * k;
+    s.grain += (st.grain - s.grain) * k;
+    grainUniform.current.value = s.grain;
+    caseMats.plainBack.opacity = s.plainBack;
+    caseMats.chrome.opacity = s.chrome;
+    caseMats.board.envMapIntensity = s.chrome * 0.5;
+    caseMats.side.envMapIntensity = s.chrome * 0.5;
+    if (chromeGroup.current) {
+      chromeGroup.current.visible = s.chrome > 0.02;
+    }
+    // Boards thin around their anchored face so books stay seated on top.
+    const half = (boardT * s.boardScale) / 2;
+    for (const m of boardMeshes.current) {
+      m.scale.y = s.boardScale;
+      m.position.y =
+        m.userData.anchor === 'bottom'
+          ? m.userData.anchorY + half
+          : m.userData.anchorY - half;
+    }
+    for (const m of sideMeshes.current) {
+      m.scale.x = s.sideScale;
+      if (m.userData.sideSign) {
+        // End stiles stay flush against the case edge as they thin.
+        m.position.x =
+          m.userData.sideSign * (width / 2 - (0.18 * s.sideScale) / 2);
+      }
+    }
+  });
   useEffect(
     () => () => {
       boardTex.dispose();
       sideTex.dispose();
       backTex.dispose();
       cavityTex.dispose();
+      caseMats.board.dispose();
+      caseMats.side.dispose();
+      caseMats.back.dispose();
+      caseMats.plainBack.dispose();
+      caseMats.chrome.dispose();
     },
-    [boardTex, sideTex, backTex, cavityTex]
+    [boardTex, sideTex, backTex, cavityTex, caseMats]
   );
+  // Chrome frame geometry: verticals at every divider line, horizontals at
+  // every board line, balls on the crossings — positioned for the steel
+  // state (it's only visible there) at the front edge of the case.
+  const chromeFrame = useMemo(() => {
+    const steel = getShelfTheme('steel');
+    const xs = [-(width / 2 - 0.09), ...dividerXs, width / 2 - 0.09];
+    const ys = rows.map(
+      (y) => y - BOOK_HEIGHT / 2 - (boardT * steel.structure.boardScale) / 2
+    );
+    ys.unshift(topY + (boardT * steel.structure.boardScale) / 2);
+    return { xs, ys, frontZ: depth / 2 - 0.02 };
+  }, [dividerXs, rows, topY, depth, width, boardT]);
 
   return (
     <group>
       {/* back panel — the case's own back, covering the wall behind it */}
-      <mesh position={[0, midY, -BOOK_DEPTH / 2 - 0.09]} receiveShadow>
+      <mesh
+        position={[0, midY, -BOOK_DEPTH / 2 - 0.09]}
+        receiveShadow
+        material={caseMats.back}
+      >
         <boxGeometry args={[width, height + boardT, 0.06]} />
-        <meshStandardMaterial map={backTex} color="#a2907e" roughness={0.88} />
+      </mesh>
+      {/* smooth cover that hides the plank seams on paint/steel themes */}
+      <mesh
+        position={[0, midY, -BOOK_DEPTH / 2 - 0.055]}
+        material={caseMats.plainBack}
+      >
+        <planeGeometry args={[width, height + boardT]} />
       </mesh>
       {/* end stiles flush against the side walls */}
       {[-1, 1].map((side) => (
         <mesh
           key={side}
+          ref={(m) => {
+            if (m) {
+              m.userData.sideSign = side;
+              sideMeshes.current.push(m);
+            }
+          }}
           position={[side * (width / 2 - 0.09), midY + boardT / 2, -0.02]}
           castShadow
           receiveShadow
+          material={caseMats.side}
         >
           <boxGeometry args={[0.18, height + boardT, depth]} />
-          <meshStandardMaterial map={sideTex} roughness={0.8} />
         </mesh>
       ))}
       {/* vertical dividers between bays */}
       {dividerXs.map((x) => (
         <mesh
           key={`div-${x.toFixed(3)}`}
+          ref={(m) => {
+            if (m) sideMeshes.current.push(m);
+          }}
           position={[x, midY + boardT / 2, -0.03]}
           castShadow
           receiveShadow
+          material={caseMats.side}
         >
           <boxGeometry args={[DIVIDER_T, height + boardT, depth - 0.06]} />
-          <meshStandardMaterial map={sideTex} roughness={0.8} />
         </mesh>
       ))}
       {/* top cap meets the ceiling */}
-      <mesh position={[0, topY + boardT / 2, -0.02]} castShadow receiveShadow>
+      <mesh
+        ref={(m) => {
+          if (m) {
+            m.userData.anchor = 'bottom';
+            m.userData.anchorY = topY;
+            boardMeshes.current.push(m);
+          }
+        }}
+        position={[0, topY + boardT / 2, -0.02]}
+        castShadow
+        receiveShadow
+        material={caseMats.board}
+      >
         <boxGeometry args={[width, boardT, depth]} />
-        <meshStandardMaterial map={boardTex} roughness={0.8} />
       </mesh>
       {/* a board under every row */}
       {rows.map((y, i) => (
         <mesh
           key={i}
+          ref={(m) => {
+            if (m) {
+              m.userData.anchor = 'top';
+              m.userData.anchorY = y - BOOK_HEIGHT / 2;
+              boardMeshes.current.push(m);
+            }
+          }}
           position={[0, y - BOOK_HEIGHT / 2 - boardT / 2, -0.02]}
           castShadow
           receiveShadow
+          material={caseMats.board}
         >
           <boxGeometry args={[width, boardT, depth]} />
-          <meshStandardMaterial map={boardTex} roughness={0.8} />
         </mesh>
       ))}
+      {/* chromed tube-and-ball frame (steel theme) */}
+      <group ref={chromeGroup} visible={false}>
+        {chromeFrame.ys.map((y, i) => (
+          <mesh
+            key={`ct-h-${i}`}
+            position={[0, y, chromeFrame.frontZ]}
+            rotation={[0, 0, Math.PI / 2]}
+            material={caseMats.chrome}
+          >
+            <cylinderGeometry args={[0.018, 0.018, width - 0.06, 12]} />
+          </mesh>
+        ))}
+        {chromeFrame.xs.map((x, i) => (
+          <mesh
+            key={`ct-v-${i}`}
+            position={[x, midY + boardT / 2, chromeFrame.frontZ]}
+            material={caseMats.chrome}
+          >
+            <cylinderGeometry args={[0.018, 0.018, height + boardT, 12]} />
+          </mesh>
+        ))}
+        {chromeFrame.xs.flatMap((x, xi) =>
+          chromeFrame.ys.map((y, yi) => (
+            <mesh
+              key={`cb-${xi}-${yi}`}
+              position={[x, y, chromeFrame.frontZ]}
+              material={caseMats.chrome}
+            >
+              <sphereGeometry args={[0.032, 16, 12]} />
+            </mesh>
+          ))
+        )}
+      </group>
       {slotLabels.map((label) => {
         const editable =
           !!onEditLabel && !label.isPublic && label.slotId !== null;
@@ -1380,22 +1683,129 @@ function CameraRig({
 // ambient light and read too dark, most visibly on phones where the camera
 // sits far back. decay=2 keeps the light local to the book: the wall behind
 // is far enough away that it stays effectively untouched.
-function SelectionLight({ active }: { active: boolean }) {
+function SelectionLight({
+  active,
+  themeId,
+}: {
+  active: boolean;
+  themeId: string;
+}) {
   const ref = useRef<THREE.PointLight>(null);
+  // Follow the theme's key-light temperature so a presented book isn't lit
+  // warm amber inside the cool steel showroom.
+  const tint = useMemo(
+    () => new THREE.Color(getShelfTheme(themeId).lights.key.color),
+    [themeId]
+  );
   useFrame((state, delta) => {
     const l = ref.current;
     if (!l) return;
     const k = 1 - Math.exp(-delta * 7);
     l.intensity += ((active ? 2.1 : 0) - l.intensity) * k;
+    l.color.lerp(tint, 1 - Math.exp(-delta * 3.5));
     const cam = state.camera;
     l.position.set(cam.position.x, cam.position.y + 0.55, cam.position.z - 1.0);
   });
   return <pointLight ref={ref} intensity={0} decay={2} color="#f2e6d2" />;
 }
 
+/**
+ * The light rig, tuned per shelf theme: walnut keeps the warm evening-lamp
+ * look, white gets bright cafe daylight, steel a neutral showroom. Colors
+ * and intensities ease toward the active theme alongside the materials.
+ */
+function ThemeLights({
+  themeId,
+  caseTop,
+}: {
+  themeId: string;
+  caseTop: number;
+}) {
+  const ambientRef = useRef<THREE.AmbientLight>(null);
+  const keyRef = useRef<THREE.SpotLight>(null);
+  const fillRef = useRef<THREE.DirectionalLight>(null);
+  const bounceRef = useRef<THREE.PointLight>(null);
+  const init = useRef(getShelfTheme(loadShelfThemePref()).lights);
+  const targets = useMemo(() => {
+    const l = getShelfTheme(themeId).lights;
+    return {
+      l,
+      ambient: new THREE.Color(l.ambient.color),
+      key: new THREE.Color(l.key.color),
+      fill: new THREE.Color(l.fill.color),
+      bounce: new THREE.Color(l.bounce.color),
+    };
+  }, [themeId]);
+  useFrame((state, delta) => {
+    const k = 1 - Math.exp(-delta * 3.5);
+    const ease = (
+      light: THREE.Light | null,
+      target: { intensity: number },
+      color: THREE.Color
+    ) => {
+      if (!light) return;
+      light.color.lerp(color, k);
+      light.intensity += (target.intensity - light.intensity) * k;
+    };
+    ease(ambientRef.current, targets.l.ambient, targets.ambient);
+    ease(keyRef.current, targets.l.key, targets.key);
+    ease(fillRef.current, targets.l.fill, targets.fill);
+    ease(bounceRef.current, targets.l.bounce, targets.bounce);
+  });
+  return (
+    <>
+      <ambientLight
+        ref={ambientRef}
+        intensity={init.current.ambient.intensity}
+        color={init.current.ambient.color}
+      />
+      {/* key light just below the ceiling, the only shadow caster */}
+      <spotLight
+        ref={keyRef}
+        position={[1.3, caseTop - 0.25, 5.4]}
+        angle={1.15}
+        penumbra={0.9}
+        decay={0}
+        intensity={init.current.key.intensity}
+        color={init.current.key.color}
+        castShadow
+        shadow-mapSize={[2048, 2048]}
+        shadow-bias={-0.0004}
+      />
+      {/* soft fills so shadowed sides don't go black */}
+      <directionalLight
+        ref={fillRef}
+        position={[-4, 1.2, 3.5]}
+        intensity={init.current.fill.intensity}
+        color={init.current.fill.color}
+      />
+      <pointLight
+        ref={bounceRef}
+        position={[0, -0.4, 4.5]}
+        decay={0}
+        intensity={init.current.bounce.intensity}
+        color={init.current.bounce.color}
+      />
+    </>
+  );
+}
+
+/** Ease the scene background toward the active theme's room color. */
+function ThemeBackdrop({ room }: { room: string }) {
+  const target = useMemo(() => new THREE.Color(room), [room]);
+  useFrame((state, delta) => {
+    const bg = state.scene.background;
+    if (bg instanceof THREE.Color) {
+      bg.lerp(target, 1 - Math.exp(-delta * 3.5));
+    }
+  });
+  return null;
+}
+
 const BookShelf3D: React.FC<BookShelf3DProps> = ({
   books,
   shelfSlots,
+  shelfTheme: shelfThemeProp,
   loading,
   showProgress,
   progressMap,
@@ -1412,6 +1822,10 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
     new Map()
   );
   const [selectedUuid, setSelectedUuid] = useState<string | null>(null);
+  // Shelf color theme — owned by the dock (BookShelf); falls back to the
+  // stored preference when rendered standalone.
+  const shelfTheme = shelfThemeProp ?? loadShelfThemePref();
+  const initialRoom = useRef(getShelfTheme(loadShelfThemePref()).room);
   // Shelf-label editing (click a label / empty label strip to open).
   const [editingLabel, setEditingLabel] = useState<PlacedShelfLabel | null>(
     null
@@ -1589,33 +2003,10 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
           if (dragDist.current <= 12) setSelectedUuid(null);
         }}
       >
-        <color attach="background" args={[ROOM]} />
-        <ambientLight intensity={0.62} color="#f4ede3" />
-        {/* key light just below the ceiling, the only shadow caster */}
-        <spotLight
-          position={[1.3, caseTop - 0.25, 5.4]}
-          angle={1.15}
-          penumbra={0.9}
-          decay={0}
-          intensity={1.55}
-          color="#f4e7d3"
-          castShadow
-          shadow-mapSize={[2048, 2048]}
-          shadow-bias={-0.0004}
-        />
-        {/* soft fills so shadowed sides don't go black */}
-        <directionalLight
-          position={[-4, 1.2, 3.5]}
-          intensity={0.26}
-          color="#ccd4e8"
-        />
-        <pointLight
-          position={[0, -0.4, 4.5]}
-          decay={0}
-          intensity={0.15}
-          color="#ece1cf"
-        />
-        <SelectionLight active={!!selectedUuid} />
+        <color attach="background" args={[initialRoom.current]} />
+        <ThemeBackdrop room={getShelfTheme(shelfTheme).room} />
+        <ThemeLights themeId={shelfTheme} caseTop={caseTop} />
+        <SelectionLight active={!!selectedUuid} themeId={shelfTheme} />
 
         {totalRows > 0 && (
           <Bookcase
@@ -1629,6 +2020,7 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
             }
             labelsHidden={selectedUuid !== null}
             dragDist={dragDist}
+            themeId={shelfTheme}
           />
         )}
 
@@ -1654,6 +2046,7 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
               onArtReady={handleArtReady}
               processingProgress={processingProgress}
               isRecent={p.uuid === recentUuid}
+              themeId={shelfTheme}
               dragDist={dragDist}
               draggable={
                 currentUserId != null &&
@@ -1679,6 +2072,7 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
                 target={target}
                 y={y}
                 hidden={loading || selectedUuid !== null}
+                themeId={shelfTheme}
                 onUpload={onUploadToSlot}
                 dragDist={dragDist}
               />
