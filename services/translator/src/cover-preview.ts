@@ -237,7 +237,7 @@ export const LOGIN_HTML = `<!DOCTYPE html>
 </head>
 <body>
 <div class="login">
-  <h1>🔒 Cover Preview</h1>
+  <h1>Cover Preview</h1>
   <input id="pw" type="password" placeholder="Password" autofocus
     onkeydown="if(event.key==='Enter')login()">
   <button onclick="login()">Enter</button>
@@ -325,7 +325,7 @@ export const PREVIEW_HTML = `<!DOCTYPE html>
 </style>
 </head>
 <body>
-<h1>📚 Cover Preview</h1>
+<h1>Cover Preview</h1>
 
 <div class="book-select">
   <select id="bookSelect" onchange="onBookSelect()">
@@ -427,13 +427,13 @@ async function generate() {
 
     if (data.error) {
       status.className = 'status error';
-      status.textContent = '❌ ' + data.error;
+      status.textContent = data.error;
       return;
     }
 
     lastResult = data;
     status.className = 'status success';
-    status.textContent = '✅ Generated in ' + elapsed + 's';
+    status.textContent = 'Generated in ' + elapsed + 's';
 
     if (data.description) {
       desc.className = 'description';
@@ -459,11 +459,11 @@ async function generate() {
     // Show save button if a book is selected
     if (selectedBookUuid) {
       saveArea.innerHTML =
-        '<button class="btn-save" onclick="saveToBook()">💾 Save to book</button>';
+        '<button class="btn-save" onclick="saveToBook()">Save to book</button>';
     }
   } catch (err) {
     status.className = 'status error';
-    status.textContent = '❌ ' + err.message;
+    status.textContent = err.message;
   } finally {
     btn.disabled = false;
     btn.textContent = 'Generate';
@@ -490,13 +490,13 @@ async function saveToBook() {
     const data = await resp.json();
     if (data.error) {
       status.className = 'status error';
-      status.textContent = '❌ Save failed: ' + data.error;
-      saveArea.innerHTML = '<button class="btn-save" onclick="saveToBook()">💾 Retry save</button>';
+      status.textContent = 'Save failed: ' + data.error;
+      saveArea.innerHTML = '<button class="btn-save" onclick="saveToBook()">Retry save</button>';
       return;
     }
     status.className = 'status success';
-    status.textContent = '✅ Saved! Cover: ' + data.coverUrl;
-    saveArea.innerHTML = '<button class="btn-save" disabled style="background:#666;">✅ Saved</button>';
+    status.textContent = 'Saved! Cover: ' + data.coverUrl;
+    saveArea.innerHTML = '<button class="btn-save" disabled style="background:#666;">Saved</button>';
 
     // Update the book in local list
     const book = books.find(b => b.uuid === selectedBookUuid);
@@ -506,8 +506,8 @@ async function saveToBook() {
     }
   } catch (err) {
     status.className = 'status error';
-    status.textContent = '❌ Save error: ' + err.message;
-    saveArea.innerHTML = '<button class="btn-save" onclick="saveToBook()">💾 Retry save</button>';
+    status.textContent = 'Save error: ' + err.message;
+    saveArea.innerHTML = '<button class="btn-save" onclick="saveToBook()">Retry save</button>';
   }
 }
 </script>
