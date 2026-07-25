@@ -612,7 +612,7 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
       />
       {returnStack.length > 0 && (
         <button className="return-chip" onClick={handleReturnToReading}>
-          ↩ {t.reader.returnToReading}
+          {t.reader.returnToReading}
         </button>
       )}
     </div>
