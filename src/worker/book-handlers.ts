@@ -807,9 +807,19 @@ export async function handleBookEstimate(
     if (!resp.ok) {
       const errText = await resp.text();
       console.error('Railway estimate error:', errText);
+      // Pass the translator's specific reason (e.g. "0 chapters — structure
+      // not supported") through to the client instead of a generic failure.
+      let message = 'Estimation failed';
+      try {
+        const parsed = JSON.parse(errText) as { error?: string };
+        if (parsed.error) message = parsed.error;
+      } catch {
+        /* not JSON — keep generic message */
+      }
+      const status = resp.status >= 400 && resp.status < 500 ? resp.status : 500;
       return new Response(
-        JSON.stringify({ error: 'Estimation failed', details: errText }),
-        { status: 500, headers: { 'Content-Type': 'application/json' } }
+        JSON.stringify({ error: message, details: errText }),
+        { status, headers: { 'Content-Type': 'application/json' } }
       );
     }
 

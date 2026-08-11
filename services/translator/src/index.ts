@@ -300,6 +300,15 @@ async function processUpload(req: UploadAndParseRequest): Promise<void> {
     console.log(
       `[upload] Parsed: "${bookData.title}" by ${bookData.author}, ${bookData.chapters.length} chapters`
     );
+
+    // A parse that yields zero chapters is a failure, not a book — marking it
+    // ready would give the reader a shell that 500s on open (see issue #162,
+    // a Calibre periodical EPUB). Surface it as an import error instead.
+    if (bookData.chapters.length === 0) {
+      throw new Error(
+        `Parsed 0 chapters from ${fileKey} ("${bookData.title}") — unsupported EPUB structure`
+      );
+    }
     const originalParsedTitle = bookData.title || 'Untitled';
     const sanitizedBookTitle = await sanitizeBookTitle(
       originalParsedTitle,
@@ -692,6 +701,22 @@ app.post('/estimate', async (c) => {
       for (const node of chapter.textNodes) {
         allTexts.push(node.text);
       }
+    }
+
+    // Reject unparseable files at estimate time — a 0-chapter "estimate"
+    // reads as a free upload and only fails after the user commits (#162).
+    if (chapterCount === 0) {
+      console.error(
+        `[estimate] Parsed 0 chapters from ${body.fileKey} ("${bookData.title}")`
+      );
+      // Keep the temp file for diagnosis; it lives under uploads/_estimate/.
+      return c.json(
+        {
+          error:
+            'Could not extract any chapters from this file — this EPUB structure is not supported yet',
+        },
+        422
+      );
     }
 
     const requiredCredits = calculateBookCredits(allTexts, body.targetLanguage);

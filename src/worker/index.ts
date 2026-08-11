@@ -821,7 +821,17 @@ export default {
 
           if (endpoint.startsWith('chapter/')) {
             const chapterNumber = parseInt(endpoint.split('/')[1] || '1');
-            const chapterData = await getChapterContentV2(env.DB, chapterNumber, sharedBook.uuid);
+            let chapterData;
+            try {
+              chapterData = await getChapterContentV2(env.DB, chapterNumber, sharedBook.uuid);
+            } catch (e) {
+              if (e instanceof Error && /not found/i.test(e.message)) {
+                return new Response(JSON.stringify({ error: e.message }), {
+                  status: 404, headers: { 'Content-Type': 'application/json' },
+                });
+              }
+              throw e;
+            }
 
             return new Response(JSON.stringify({
               uuid: chapterData.book.uuid,
@@ -921,7 +931,19 @@ export default {
 
           if (endpoint.startsWith('chapter/')) {
             const chapterNumber = parseInt(endpoint.split('/')[1] || '1');
-            const chapterData = await getChapterContentV2(env.DB, chapterNumber, bookUuid);
+            let chapterData;
+            try {
+              chapterData = await getChapterContentV2(env.DB, chapterNumber, bookUuid);
+            } catch (e) {
+              // A 'ready' book with no chapters (failed import) or an
+              // out-of-range chapter is a client-visible 404, not a 500.
+              if (e instanceof Error && /not found/i.test(e.message)) {
+                return new Response(JSON.stringify({ error: e.message }), {
+                  status: 404, headers: { 'Content-Type': 'application/json' },
+                });
+              }
+              throw e;
+            }
 
             return new Response(JSON.stringify({
               uuid: chapterData.book.uuid,
