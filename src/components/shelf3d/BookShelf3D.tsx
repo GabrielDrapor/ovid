@@ -768,24 +768,21 @@ function BookMesh({
       // gap at the insertion point. The lerp below animates the shuffle.
       tx = position[0] + dragShift.current.amount;
     } else if (hovered && !anySelected && !processing) {
-      // Tip the book out of the row and yaw it so the cover peeks out.
+      // Slide the book straight out of the row (with a slight lift), no yaw.
       // This replaces the last-read emphasis too: the book settles back
       // onto the board and follows the ordinary hover animation.
       //
-      // The yaw pivots around the trailing back corner instead of the
-      // book's center: a center pivot sweeps that corner sideways into
-      // the neighboring book (~0.1 units vs a 0.006 gap — visible
-      // clipping). With the corner pinned, the rest of the book swings
-      // forward-out in front of the row, which can't intersect anything.
-      const theta = -0.3;
-      const px = width / 2;
-      const pz = -BOOK_DEPTH / 2;
-      const offX = px - (px * Math.cos(theta) + pz * Math.sin(theta));
-      const offZ = pz - (-px * Math.sin(theta) + pz * Math.cos(theta));
-      ty = shelfY;
-      tx = position[0] + offX;
-      tz = position[2] + 0.46 + offZ;
-      ry = theta;
+      // Any yaw clips a neighbor: the row gap is 0.006 and the book is 0.7
+      // deep, so a rotated side face sweeps ~θ·depth sideways through the
+      // neighbor's volume no matter where the pivot sits (trailing-corner
+      // pivots fix one side but the leading face still cuts the other).
+      // Clearing it entirely would need a ~0.85 pull-out — the book fully
+      // off the shelf. A straight translation cannot intersect anything;
+      // the cover reveal stays with click-to-select, which flies the book
+      // clear of the row before turning it.
+      ty = shelfY + 0.04;
+      tz = position[2] + 0.46;
+      ry = 0;
     }
 
     g.position.x += (tx - g.position.x) * k;
