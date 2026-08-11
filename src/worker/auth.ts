@@ -30,6 +30,22 @@ export function createExpiredSessionCookie(): string {
   return 'ovid_session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0';
 }
 
+/** Create a 30-day session for the user and return the token. */
+export async function createSession(
+  db: D1Database,
+  userId: number
+): Promise<string> {
+  const sessionToken = generateSessionToken();
+  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+  await db
+    .prepare(
+      'INSERT INTO sessions (user_id, session_token, expires_at) VALUES (?, ?, ?)'
+    )
+    .bind(userId, sessionToken, expiresAt.toISOString())
+    .run();
+  return sessionToken;
+}
+
 export async function getCurrentUser(
   db: D1Database,
   request: Request
@@ -138,16 +154,35 @@ export async function handleGoogleCallback(
     picture: string;
   };
 
-  // Create or update user in database
+  // Find the user: by google identity first, then by verified email — a
+  // user who first signed in with an email code and now uses Google with
+  // the same address is the same person (both addresses are verified).
   let user = await env.DB.prepare('SELECT * FROM users WHERE google_id = ?')
     .bind(googleUser.id)
     .first();
+  if (!user) {
+    const identity = await env.DB.prepare(
+      `SELECT user_id FROM user_identities WHERE provider = 'google' AND provider_id = ?`
+    )
+      .bind(googleUser.id)
+      .first();
+    if (identity) {
+      user = await env.DB.prepare('SELECT * FROM users WHERE id = ?')
+        .bind(identity.user_id)
+        .first();
+    }
+  }
+  if (!user && googleUser.email) {
+    user = await env.DB.prepare('SELECT * FROM users WHERE email = ?')
+      .bind(googleUser.email.toLowerCase())
+      .first();
+  }
 
   if (user) {
     await env.DB.prepare(
-      `UPDATE users SET email = ?, name = ?, picture = ?, updated_at = datetime('now') WHERE google_id = ?`
+      `UPDATE users SET email = ?, name = ?, picture = ?, updated_at = datetime('now') WHERE id = ?`
     )
-      .bind(googleUser.email, googleUser.name, googleUser.picture, googleUser.id)
+      .bind(googleUser.email, googleUser.name, googleUser.picture, user.id)
       .run();
   } else {
     await env.DB.prepare(
@@ -170,15 +205,14 @@ export async function handleGoogleCallback(
     }
   }
 
-  // Create session
-  const sessionToken = generateSessionToken();
-  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-
+  // Keep the identity table authoritative (tolerates pre-migration users)
   await env.DB.prepare(
-    'INSERT INTO sessions (user_id, session_token, expires_at) VALUES (?, ?, ?)'
+    `INSERT OR IGNORE INTO user_identities (user_id, provider, provider_id) VALUES (?, 'google', ?)`
   )
-    .bind(user!.id, sessionToken, expiresAt.toISOString())
+    .bind(user!.id, googleUser.id)
     .run();
+
+  const sessionToken = await createSession(env.DB, user!.id as number);
 
   return new Response(null, {
     status: 302,

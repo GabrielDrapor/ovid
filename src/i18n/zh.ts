@@ -176,6 +176,18 @@ export const zh: Messages = {
     searchNoResults: '未找到匹配内容',
   },
 
+  auth: {
+    continueWithGoogle: '使用 Google 登录',
+    emailPlaceholder: 'you@example.com',
+    sendCode: '发送邮箱验证码',
+    codeSentTo: (email: string) => `验证码已发送至 ${email}`,
+    codePlaceholder: '6 位验证码',
+    verifyAndSignIn: '登录',
+    changeEmail: '换个邮箱',
+    sendCodeFailed: '验证码发送失败',
+    verifyFailed: '登录失败',
+  },
+
   book: {
     loadingContent: '正在加载书籍内容…',
     loadChapterFailed: '加载章节失败',

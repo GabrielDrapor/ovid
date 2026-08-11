@@ -2294,3 +2294,109 @@
     pointer-events: none;
   }
 }
+
+/* Email sign-in panel */
+.shelf-signin-dropdown {
+  min-width: 240px;
+  padding: 10px;
+}
+
+.signin-google-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 12px;
+  border: none;
+  border-radius: 9px;
+  background: rgba(255, 244, 228, 0.12);
+  color: #fff;
+  font-size: 13.5px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.signin-google-btn:hover {
+  background: rgba(255, 244, 228, 0.2);
+}
+
+.signin-email-step {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.signin-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 244, 228, 0.18);
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+  font-size: 13.5px;
+  font-family: inherit;
+  outline: none;
+}
+
+.signin-input:focus {
+  border-color: rgba(255, 244, 228, 0.45);
+}
+
+.signin-code-input {
+  letter-spacing: 0.35em;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.signin-code-hint {
+  font-size: 12px;
+  color: rgba(255, 250, 240, 0.6);
+  word-break: break-all;
+}
+
+.signin-submit-btn {
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 8px;
+  background: rgba(255, 244, 228, 0.16);
+  color: #fff;
+  font-size: 13.5px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.signin-submit-btn:hover:not(:disabled) {
+  background: rgba(255, 244, 228, 0.26);
+}
+
+.signin-submit-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.signin-back-btn {
+  width: 100%;
+  padding: 4px;
+  border: none;
+  background: none;
+  color: rgba(255, 250, 240, 0.55);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.signin-back-btn:hover {
+  color: #fff;
+}
+
+.signin-error {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #e08573;
+  word-break: break-word;
+}

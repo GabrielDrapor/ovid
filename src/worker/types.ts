@@ -20,6 +20,7 @@ export interface Env {
   TRANSLATOR_SECRET?: string;
   /** translate-book Workflow binding (Cloudflare Workflows translation backend) */
   TRANSLATE_WORKFLOW: Workflow;
+  RESEND_API_KEY?: string;
 }
 
 export interface User {
