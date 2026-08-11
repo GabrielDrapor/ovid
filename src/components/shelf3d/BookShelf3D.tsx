@@ -771,9 +771,21 @@ function BookMesh({
       // Tip the book out of the row and yaw it so the cover peeks out.
       // This replaces the last-read emphasis too: the book settles back
       // onto the board and follows the ordinary hover animation.
+      //
+      // The yaw pivots around the trailing back corner instead of the
+      // book's center: a center pivot sweeps that corner sideways into
+      // the neighboring book (~0.1 units vs a 0.006 gap — visible
+      // clipping). With the corner pinned, the rest of the book swings
+      // forward-out in front of the row, which can't intersect anything.
+      const theta = -0.3;
+      const px = width / 2;
+      const pz = -BOOK_DEPTH / 2;
+      const offX = px - (px * Math.cos(theta) + pz * Math.sin(theta));
+      const offZ = pz - (-px * Math.sin(theta) + pz * Math.cos(theta));
       ty = shelfY;
-      tz = position[2] + 0.42;
-      ry = -0.3;
+      tx = position[0] + offX;
+      tz = position[2] + 0.46 + offZ;
+      ry = theta;
     }
 
     g.position.x += (tx - g.position.x) * k;
