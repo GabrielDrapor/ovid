@@ -21,6 +21,12 @@ bucket_name = "ovid"
 [vars]
 APP_URL = "https://ovid.ink"
 
+# Workers Logs: persist console output + invocation metrics in the dashboard
+# (Observability → Logs). Full sampling — volume is well within plan limits.
+[observability]
+enabled = true
+head_sampling_rate = 1
+
 # Secrets (set via `wrangler secret put`):
 # - GOOGLE_OAUTH_CLIENT_ID
 # - GOOGLE_OAUTH_CLIENT_SECRET
@@ -41,3 +47,7 @@ bucket_name = "ovid"
 
 [env.staging.vars]
 APP_URL = "https://ovid-staging.drapor.workers.dev"
+
+[env.staging.observability]
+enabled = true
+head_sampling_rate = 1
