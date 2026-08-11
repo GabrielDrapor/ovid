@@ -1105,7 +1105,14 @@ export async function parseEPUB(
       }
 
       // HTML manifest
-      if (id && href && mediaType === 'application/xhtml+xml') {
+      // Accept text/html too: technically non-conforming, but Calibre
+      // periodical output and other real-world EPUBs use it, and rejecting
+      // it silently drops every chapter (issue #162).
+      if (
+        id &&
+        href &&
+        (mediaType === 'application/xhtml+xml' || mediaType === 'text/html')
+      ) {
         manifestMap.set(id, href);
       }
 
@@ -1235,7 +1242,18 @@ export async function parseEPUB(
   const prepared: PreparedFile[] = [];
 
   for (const htmlPath of htmlFiles) {
-    const file = zipContent.files[htmlPath];
+    // Exact spine href first; fall back to a URL-decoded, ./..-collapsed
+    // variant — real-world OPFs mix encodings and relative segments.
+    let file = zipContent.files[htmlPath];
+    if (!file) {
+      let alt = htmlPath;
+      try {
+        alt = decodeURIComponent(htmlPath);
+      } catch {
+        /* keep raw */
+      }
+      file = zipContent.files[normalizeZipPath(alt)];
+    }
     if (!file) continue;
 
     const htmlContent = await file.async('text');

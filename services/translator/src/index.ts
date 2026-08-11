@@ -300,6 +300,15 @@ async function processUpload(req: UploadAndParseRequest): Promise<void> {
     console.log(
       `[upload] Parsed: "${bookData.title}" by ${bookData.author}, ${bookData.chapters.length} chapters`
     );
+
+    // A parse that yields zero chapters is a failure, not a book — marking it
+    // ready would give the reader a shell that 500s on open (see issue #162,
+    // a Calibre periodical EPUB). Surface it as an import error instead.
+    if (bookData.chapters.length === 0) {
+      throw new Error(
+        `Parsed 0 chapters from ${fileKey} ("${bookData.title}") — unsupported EPUB structure`
+      );
+    }
     const originalParsedTitle = bookData.title || 'Untitled';
     const sanitizedBookTitle = await sanitizeBookTitle(
       originalParsedTitle,
