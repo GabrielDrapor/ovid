@@ -703,6 +703,22 @@ app.post('/estimate', async (c) => {
       }
     }
 
+    // Reject unparseable files at estimate time — a 0-chapter "estimate"
+    // reads as a free upload and only fails after the user commits (#162).
+    if (chapterCount === 0) {
+      console.error(
+        `[estimate] Parsed 0 chapters from ${body.fileKey} ("${bookData.title}")`
+      );
+      // Keep the temp file for diagnosis; it lives under uploads/_estimate/.
+      return c.json(
+        {
+          error:
+            'Could not extract any chapters from this file — this EPUB structure is not supported yet',
+        },
+        422
+      );
+    }
+
     const requiredCredits = calculateBookCredits(allTexts, body.targetLanguage);
     const totalCharacters = allTexts.reduce(
       (sum, text) => sum + text.length,
