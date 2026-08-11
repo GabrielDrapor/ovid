@@ -102,7 +102,7 @@ describe('BookProcessor: Calibre periodical EPUBs (issue #162)', () => {
     expect(titles).toContain('Business this week');
     // Body text survives into text nodes
     const allText = book.chapters
-      .flatMap((c) => c.contentItems.map((n) => n.text))
+      .flatMap((c) => c.textNodes.map((n) => n.text))
       .join(' ');
     expect(allText).toContain('World news happened');
   });
