@@ -208,6 +208,10 @@ export async function handleEmailStart(
 
   const sent = await sendCodeEmail(env, email, code);
   if (!sent) {
+    // Don't burn the user's issuance budget on a code they never received.
+    await env.DB.prepare('DELETE FROM login_codes WHERE code_hash = ?')
+      .bind(codeHash)
+      .run();
     return json({ error: 'Failed to send the code — try again later' }, 502);
   }
   // Same response whether or not the address has an account.
@@ -256,11 +260,21 @@ export async function handleEmailVerify(
   if (expected !== row.code_hash) {
     return json({ error: 'Incorrect code' }, 400);
   }
-  await env.DB.prepare(
-    `UPDATE login_codes SET consumed_at = datetime('now') WHERE id = ?`
+  // Atomic consumption: with two concurrent verifies only one UPDATE
+  // matches (consumed_at IS NULL), so only one request may create the
+  // account/session — the loser is told to re-request.
+  const consumed = await env.DB.prepare(
+    `UPDATE login_codes SET consumed_at = datetime('now')
+     WHERE id = ? AND consumed_at IS NULL`
   )
     .bind(row.id)
     .run();
+  if (!consumed.meta || (consumed.meta.changes ?? 0) < 1) {
+    return json(
+      { error: 'Code expired or not found — request a new one' },
+      400
+    );
+  }
 
   // Resolve the account: email identity → any user with this (verified)
   // email (e.g. an existing Google account) → create a fresh user.
