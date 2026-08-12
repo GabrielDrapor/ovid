@@ -68,9 +68,20 @@ describe('Book Handlers Reliability', () => {
       // Verify recovery mechanism exists
       expect(indexCode).toContain('recoverStalledJobs');
       expect(indexCode).toContain('startJobScanner');
-      expect(indexCode).toContain(
-        "status IN ('pending', 'translating', 'extracting_glossary')"
+      // Job selection (statuses + backend isolation) lives in job-scanner.ts
+      expect(indexCode).toContain('resumableJobsQuery');
+
+      const scannerPath = path.join(
+        path.dirname(translatorIndexPath),
+        'job-scanner.ts'
       );
+      const scannerCode = fs.readFileSync(scannerPath, 'utf-8');
+      expect(scannerCode).toContain(
+        "['pending', 'translating', 'extracting_glossary']"
+      );
+      // Railway must only ever resume jobs it owns — the CF Workflows
+      // backend writes the same tables and there is no UNIQUE constraint
+      expect(scannerCode).toContain("OWN_BACKEND = 'railway'");
     });
   });
 

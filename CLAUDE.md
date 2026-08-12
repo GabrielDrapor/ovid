@@ -123,7 +123,7 @@ Production runs the **v2 schema** (`database/schema_v2.sql` + `database/migratio
 - **books_v2** — `id, uuid, title, original_title, author, language_pair, styles, book_cover_img_url, book_spine_img_url, user_id, status, display_order, created_at, updated_at`
 - **chapters_v2** — `id, book_id, chapter_number, title, original_title, raw_html (original EPUB HTML), text_nodes_json, order_index`
 - **translations_v2** — `id, chapter_id, xpath, original_text, original_html, translated_text, order_index` (XPath-mapped onto the chapter's raw HTML)
-- **translation_jobs** — `book_uuid, source/target_language, total/completed_chapters, current_chapter, current_item_offset, glossary_json, glossary_extracted, translated_title, status, error_message` (checkpoint + progress state per book)
+- **translation_jobs** — `book_uuid, source/target_language, total/completed_chapters, current_chapter, current_item_offset, glossary_json, glossary_extracted, translated_title, status, error_message, backend` (checkpoint + progress state per book; `backend` — 'railway' or 'cf' — names the only service allowed to write the job, and the Railway stalled-job scanner filters on it)
 
 ### User Data
 - **user_book_progress** — `id, user_id, book_uuid, is_completed, completed_at, last_read_at, chapter_number, paragraph_xpath, show_original` (UNIQUE user_id + book_uuid)

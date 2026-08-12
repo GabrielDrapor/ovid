@@ -20,6 +20,7 @@ import { parseBook, type BookDataV2 } from './book-parser.js';
 import { settleCoverGeneration } from './upload-helpers.js';
 import { calculateBookCredits, TOKENS_PER_CREDIT } from './token-counter.js';
 import { detectLanguage } from './language-detect.js';
+import { resumableJobsQuery } from './job-scanner.js';
 
 const app = new Hono();
 
@@ -1090,10 +1091,7 @@ async function resumeJobs(
   const llmConfig = getLlmConfig();
 
   const jobs = await db.all<{ book_uuid: string; status: string }>(
-    `SELECT book_uuid, status FROM translation_jobs
-     WHERE status IN ('pending', 'translating', 'extracting_glossary')
-     ${extraWhere}
-     ORDER BY updated_at ASC`,
+    resumableJobsQuery(extraWhere),
     extraParams
   );
 
