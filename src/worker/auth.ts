@@ -10,7 +10,9 @@ export const WELCOME_BONUS_CREDITS = 5000;
 export function generateSessionToken(): string {
   const array = new Uint8Array(32);
   crypto.getRandomValues(array);
-  return Array.from(array, (byte) => byte.toString(16).padStart(2, '0')).join('');
+  return Array.from(array, (byte) => byte.toString(16).padStart(2, '0')).join(
+    ''
+  );
 }
 
 export function getSessionCookie(request: Request): string | null {
@@ -28,6 +30,22 @@ export function createSessionCookie(
 
 export function createExpiredSessionCookie(): string {
   return 'ovid_session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0';
+}
+
+/** Create a 30-day session for the user and return the token. */
+export async function createSession(
+  db: D1Database,
+  userId: number
+): Promise<string> {
+  const sessionToken = generateSessionToken();
+  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+  await db
+    .prepare(
+      'INSERT INTO sessions (user_id, session_token, expires_at) VALUES (?, ?, ?)'
+    )
+    .bind(userId, sessionToken, expiresAt.toISOString())
+    .run();
+  return sessionToken;
 }
 
 export async function getCurrentUser(
@@ -57,7 +75,10 @@ export async function getCurrentUser(
   };
 }
 
-export async function handleGoogleAuthStart(request: Request, env: Env): Promise<Response> {
+export async function handleGoogleAuthStart(
+  request: Request,
+  env: Env
+): Promise<Response> {
   const origin = new URL(request.url).origin;
   const redirectUri = `${origin}/api/auth/callback/google`;
   const scope = 'openid email profile';
@@ -113,7 +134,9 @@ export async function handleGoogleCallback(
   if (!tokenResponse.ok) {
     const errorText = await tokenResponse.text();
     console.error('Token exchange failed:', errorText);
-    return new Response('Failed to exchange authorization code', { status: 500 });
+    return new Response('Failed to exchange authorization code', {
+      status: 500,
+    });
   }
 
   const tokens = (await tokenResponse.json()) as {
@@ -137,23 +160,51 @@ export async function handleGoogleCallback(
     name: string;
     picture: string;
   };
+  // Normalize to match the email-OTP flow — a case mismatch here would
+  // split one person into two accounts.
+  googleUser.email = (googleUser.email || '').trim().toLowerCase();
 
-  // Create or update user in database
+  // Find the user: by google identity first, then by verified email — a
+  // user who first signed in with an email code and now uses Google with
+  // the same address is the same person (both addresses are verified).
   let user = await env.DB.prepare('SELECT * FROM users WHERE google_id = ?')
     .bind(googleUser.id)
     .first();
+  if (!user) {
+    const identity = await env.DB.prepare(
+      `SELECT user_id FROM user_identities WHERE provider = 'google' AND provider_id = ?`
+    )
+      .bind(googleUser.id)
+      .first();
+    if (identity) {
+      user = await env.DB.prepare('SELECT * FROM users WHERE id = ?')
+        .bind(identity.user_id)
+        .first();
+    }
+  }
+  if (!user && googleUser.email) {
+    user = await env.DB.prepare('SELECT * FROM users WHERE email = ?')
+      .bind(googleUser.email)
+      .first();
+  }
 
   if (user) {
     await env.DB.prepare(
-      `UPDATE users SET email = ?, name = ?, picture = ?, updated_at = datetime('now') WHERE google_id = ?`
+      `UPDATE users SET email = ?, name = ?, picture = ?, updated_at = datetime('now') WHERE id = ?`
     )
-      .bind(googleUser.email, googleUser.name, googleUser.picture, googleUser.id)
+      .bind(googleUser.email, googleUser.name, googleUser.picture, user.id)
       .run();
   } else {
     await env.DB.prepare(
       'INSERT INTO users (google_id, email, name, picture, credits) VALUES (?, ?, ?, ?, ?)'
     )
-      .bind(googleUser.id, googleUser.email, googleUser.name, googleUser.picture, WELCOME_BONUS_CREDITS)
+      .bind(
+        googleUser.id,
+        googleUser.email,
+        googleUser.name,
+        googleUser.picture,
+        WELCOME_BONUS_CREDITS
+      )
       .run();
     user = await env.DB.prepare('SELECT * FROM users WHERE google_id = ?')
       .bind(googleUser.id)
@@ -170,15 +221,14 @@ export async function handleGoogleCallback(
     }
   }
 
-  // Create session
-  const sessionToken = generateSessionToken();
-  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-
+  // Keep the identity table authoritative (tolerates pre-migration users)
   await env.DB.prepare(
-    'INSERT INTO sessions (user_id, session_token, expires_at) VALUES (?, ?, ?)'
+    `INSERT OR IGNORE INTO user_identities (user_id, provider, provider_id) VALUES (?, 'google', ?)`
   )
-    .bind(user!.id, sessionToken, expiresAt.toISOString())
+    .bind(user!.id, googleUser.id)
     .run();
+
+  const sessionToken = await createSession(env.DB, user!.id as number);
 
   return new Response(null, {
     status: 302,
@@ -214,7 +264,10 @@ export async function handleGetCurrentUser(
   );
 }
 
-export async function handleLogout(request: Request, env: Env): Promise<Response> {
+export async function handleLogout(
+  request: Request,
+  env: Env
+): Promise<Response> {
   const sessionToken = getSessionCookie(request);
 
   if (sessionToken) {
@@ -234,11 +287,15 @@ export async function handleLogout(request: Request, env: Env): Promise<Response
 // Config check helpers
 let oauthWarningLogged = false;
 
-export function checkOAuthConfig(env: Env): { configured: boolean; errors: string[] } {
+export function checkOAuthConfig(env: Env): {
+  configured: boolean;
+  errors: string[];
+} {
   const errors: string[] = [];
 
   if (!env.GOOGLE_OAUTH_CLIENT_ID) errors.push('GOOGLE_OAUTH_CLIENT_ID');
-  if (!env.GOOGLE_OAUTH_CLIENT_SECRET) errors.push('GOOGLE_OAUTH_CLIENT_SECRET');
+  if (!env.GOOGLE_OAUTH_CLIENT_SECRET)
+    errors.push('GOOGLE_OAUTH_CLIENT_SECRET');
   if (!env.APP_URL) errors.push('APP_URL');
 
   const configured = errors.length === 0;

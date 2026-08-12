@@ -12,6 +12,7 @@ import {
   handleLogout,
   checkOAuthConfig,
 } from './auth';
+import { handleEmailStart, handleEmailVerify } from './email-auth';
 import {
   handleGetCredits,
   handleGetCreditTransactions,
@@ -227,6 +228,34 @@ export default {
       // same job concurrently (translations_v2 has no UNIQUE constraint, so
       // a dual writer would produce duplicate paragraphs).
       await runMigration('translation_jobs_backend', "ALTER TABLE translation_jobs ADD COLUMN backend TEXT NOT NULL DEFAULT 'railway'");
+      // Multi-provider auth: identities live in their own table; users.google_id
+      // stays as-is for compatibility (email-created users get a sentinel).
+      await runMigration('create_user_identities', `CREATE TABLE IF NOT EXISTS user_identities (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        provider TEXT NOT NULL,
+        provider_id TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(provider, provider_id),
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      )`);
+      await runMigration('user_identities_backfill_google', `INSERT OR IGNORE INTO user_identities (user_id, provider, provider_id)
+        SELECT id, 'google', google_id FROM users WHERE google_id IS NOT NULL AND google_id NOT LIKE 'email:%'`);
+      await runMigration('user_identities_user_index', 'CREATE INDEX IF NOT EXISTS idx_user_identities_user ON user_identities(user_id)');
+      await runMigration('create_login_codes', `CREATE TABLE IF NOT EXISTS login_codes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        email TEXT NOT NULL,
+        abuse_key TEXT NOT NULL,
+        code_hash TEXT NOT NULL,
+        expires_at DATETIME NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        consumed_at DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`);
+      await runMigration('login_codes_email_index', 'CREATE INDEX IF NOT EXISTS idx_login_codes_email ON login_codes(email, created_at)');
+      await runMigration('login_codes_abuse_index', 'CREATE INDEX IF NOT EXISTS idx_login_codes_abuse ON login_codes(abuse_key, created_at)');
+      await runMigration('login_codes_ip', 'ALTER TABLE login_codes ADD COLUMN ip TEXT');
+      await runMigration('login_codes_ip_index', 'CREATE INDEX IF NOT EXISTS idx_login_codes_ip ON login_codes(ip, created_at)');
       migrationsRan = true;
     }
 
@@ -381,6 +410,14 @@ export default {
             );
           }
           return handleGoogleCallback(request, env);
+        }
+
+        if (url.pathname === '/api/auth/email/start' && request.method === 'POST') {
+          return handleEmailStart(request, env);
+        }
+
+        if (url.pathname === '/api/auth/email/verify' && request.method === 'POST') {
+          return handleEmailVerify(request, env);
         }
 
         if (url.pathname === '/api/auth/me') {

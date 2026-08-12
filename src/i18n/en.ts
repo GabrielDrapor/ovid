@@ -178,6 +178,19 @@ export const en = {
     searchNoResults: 'No matches found',
   },
 
+  auth: {
+    continueWithGoogle: 'Continue with Google',
+    emailPlaceholder: 'you@example.com',
+    sendCode: 'Email me a sign-in code',
+    orEmail: 'or continue with email',
+    codeSentLabel: 'Code sent to',
+    codePlaceholder: '6-digit code',
+    verifyAndSignIn: 'Sign in',
+    changeEmail: 'Use a different email',
+    sendCodeFailed: 'Failed to send the code',
+    verifyFailed: 'Sign-in failed',
+  },
+
   book: {
     loadingContent: 'Loading book content...',
     loadChapterFailed: 'Failed to load chapter',
