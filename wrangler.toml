@@ -21,6 +21,14 @@ bucket_name = "ovid"
 [vars]
 APP_URL = "https://ovid.ink"
 
+# translate-book Workflow: durable translation orchestration (backend='cf'
+# jobs). Inert unless a job is explicitly created with backend='cf' and
+# started via POST /api/internal/translate-cf.
+[[workflows]]
+name = "translate-book"
+binding = "TRANSLATE_WORKFLOW"
+class_name = "TranslateBookWorkflow"
+
 # Workers Logs: persist console output + invocation metrics in the dashboard
 # (Observability → Logs). Full sampling — volume is well within plan limits.
 [observability]
@@ -47,6 +55,13 @@ bucket_name = "ovid"
 
 [env.staging.vars]
 APP_URL = "https://ovid-staging.drapor.workers.dev"
+
+# wrangler environments don't inherit bindings — duplicate the workflow here.
+# Distinct workflow name: workflow names are unique per account.
+[[env.staging.workflows]]
+name = "translate-book-staging"
+binding = "TRANSLATE_WORKFLOW"
+class_name = "TranslateBookWorkflow"
 
 [env.staging.observability]
 enabled = true

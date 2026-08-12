@@ -269,6 +269,40 @@ export default {
         });
       }
 
+      // Internal: start a translate-book Workflow (Cloudflare translation
+      // backend). Called by the Railway service (or operators) for jobs with
+      // backend='cf'; guarded by the shared translator secret.
+      if (url.pathname === '/api/internal/translate-cf' && request.method === 'POST') {
+        let body: { bookUuid?: string; secret?: string };
+        try {
+          body = await request.json();
+        } catch {
+          return jsonResponse({ error: 'Invalid JSON body' }, { status: 400 }, requestId);
+        }
+        if (!env.TRANSLATOR_SECRET || body.secret !== env.TRANSLATOR_SECRET) {
+          return jsonResponse({ error: 'Unauthorized' }, { status: 401 }, requestId);
+        }
+        if (!body.bookUuid) {
+          return jsonResponse({ error: 'Missing bookUuid' }, { status: 400 }, requestId);
+        }
+        // Refuse to start a CF workflow for a job another backend owns —
+        // dual writers produce duplicate paragraphs (no UNIQUE constraint)
+        const jobRow = await env.DB.prepare(
+          'SELECT backend, status FROM translation_jobs WHERE book_uuid = ? LIMIT 1'
+        ).bind(body.bookUuid).first<{ backend: string; status: string }>();
+        if (!jobRow) {
+          return jsonResponse({ error: 'No translation job for this book' }, { status: 404 }, requestId);
+        }
+        if (jobRow.backend !== 'cf') {
+          return jsonResponse({ error: `Job backend is '${jobRow.backend}', not 'cf'` }, { status: 409 }, requestId);
+        }
+        const instance = await env.TRANSLATE_WORKFLOW.create({
+          params: { bookUuid: body.bookUuid },
+        });
+        logEvent({ type: 'translate_cf_started', requestId, bookUuid: body.bookUuid, instanceId: instance.id });
+        return jsonResponse({ status: 'started', instanceId: instance.id }, {}, requestId);
+      }
+
       // Upload-specific checks
       if (url.pathname === '/api/books/upload' && request.method === 'POST') {
         // Size check: reject uploads > 50MB
@@ -1056,3 +1090,7 @@ export default {
 
 // Re-export types for convenience
 export type { Env } from './types';
+
+// Workflow entrypoints must be exported from the main module for the
+// [[workflows]] class_name binding to resolve
+export { TranslateBookWorkflow } from './translation/workflow';
