@@ -221,6 +221,12 @@ export default {
       // survives untouched instead of being destroyed.
       await runMigration('clear_private_global_labels', `UPDATE shelf_slots SET label = NULL
         WHERE is_public = 0 AND id IN (SELECT slot_id FROM user_shelf_slot_labels)`);
+      // Which service owns a translation job ('railway' | 'cf'). The Railway
+      // stalled-job scanner only resumes jobs it owns, so when translation
+      // moves to Cloudflare Workflows the two backends can never write the
+      // same job concurrently (translations_v2 has no UNIQUE constraint, so
+      // a dual writer would produce duplicate paragraphs).
+      await runMigration('translation_jobs_backend', "ALTER TABLE translation_jobs ADD COLUMN backend TEXT NOT NULL DEFAULT 'railway'");
       migrationsRan = true;
     }
 
