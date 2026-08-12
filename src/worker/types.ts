@@ -18,6 +18,8 @@ export interface Env {
   STRIPE_PUBLISHABLE_KEY: string;
   TRANSLATOR_SERVICE_URL?: string;
   TRANSLATOR_SECRET?: string;
+  /** translate-book Workflow binding (Cloudflare Workflows translation backend) */
+  TRANSLATE_WORKFLOW: Workflow;
 }
 
 export interface User {
