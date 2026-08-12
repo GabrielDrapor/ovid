@@ -7,6 +7,7 @@
 
 import { Env } from './types';
 import { getCurrentUser } from './auth';
+import { chooseTranslationBackend } from './translation/backend-choice';
 import {
   updateBookStatus,
   getTranslationJob,
@@ -288,6 +289,9 @@ export async function handleBookUpload(
     // Delegate everything to Railway (parsing, DB writes, credits, translation)
     const translatorUrl = env.TRANSLATOR_SERVICE_URL;
     const translatorSecret = env.TRANSLATOR_SECRET;
+    // Which service will own the translation job: Railway translates in-place;
+    // 'cf' makes Railway parse only and hand translation to the Workflow
+    const backend = chooseTranslationBackend(user.email, env);
     ctx.waitUntil(
       fetch(`${translatorUrl}/upload-and-parse`, {
         method: 'POST',
@@ -301,6 +305,7 @@ export async function handleBookUpload(
           userId: user.id,
           secret: translatorSecret,
           skipTranslation,
+          backend,
         }),
       }).catch((err) => {
         console.error(

@@ -110,7 +110,7 @@ describe('skipTranslation credit deduction SQL', () => {
 
   it('translation job SQL is NOT the same as the skip-translation ready SQL', () => {
     // When skipTranslation=false, a translation_jobs INSERT is made instead
-    const translationJobSQL = `INSERT INTO translation_jobs (book_id, book_uuid, source_language, target_language, total_chapters, status) VALUES (?, ?, ?, ?, ?, 'pending')`;
+    const translationJobSQL = `INSERT INTO translation_jobs (book_id, book_uuid, source_language, target_language, total_chapters, status, backend) VALUES (?, ?, ?, ?, ?, 'pending', ?)`;
     const skipTranslationSQL =
       "UPDATE books_v2 SET status = 'ready' WHERE uuid = ?";
 
