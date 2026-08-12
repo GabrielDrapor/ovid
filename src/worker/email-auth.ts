@@ -117,6 +117,29 @@ async function sendCodeEmail(
     console.log(`[email-auth] DEV login code for ${email}: ${code}`);
     return true;
   }
+  // Paper-and-ink look matching the reader; inline styles only (email
+  // clients strip everything else), text/plain fallback kept alongside.
+  const html = `<!DOCTYPE html>
+<html>
+<body style="margin:0;padding:0;background-color:#f4f1ea;">
+  <div style="max-width:440px;margin:0 auto;padding:40px 24px;font-family:Georgia,'Songti SC','Times New Roman',serif;">
+    <div style="text-align:center;padding-bottom:20px;">
+      <span style="font-size:26px;letter-spacing:0.08em;color:#2b241a;">Ovid</span>
+      <div style="font-size:12px;color:#8a8171;letter-spacing:0.14em;padding-top:4px;">BILINGUAL READER</div>
+    </div>
+    <div style="background-color:#fffdf6;border:1px solid #e6dfcc;border-radius:12px;padding:32px 24px;text-align:center;">
+      <div style="font-size:14px;color:#4a443a;">你的登录验证码 · Your sign-in code</div>
+      <div style="font-size:36px;letter-spacing:0.28em;color:#2b241a;font-weight:bold;padding:18px 0 14px;font-family:'SF Mono',Menlo,Consolas,monospace;">${code}</div>
+      <div style="font-size:12.5px;color:#8a8171;">${CODE_TTL_MINUTES} 分钟内有效 · Expires in ${CODE_TTL_MINUTES} minutes</div>
+    </div>
+    <div style="text-align:center;padding-top:20px;font-size:12px;color:#8a8171;line-height:1.7;">
+      如果这不是你本人的操作,请忽略这封邮件。<br/>
+      If you didn't request this, you can safely ignore this email.
+    </div>
+  </div>
+</body>
+</html>`;
+
   const resp = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: {
@@ -128,6 +151,7 @@ async function sendCodeEmail(
       to: [email],
       subject: `${code} — Ovid 登录验证码 / your sign-in code`,
       text: `你的 Ovid 登录验证码是:${code}\n10 分钟内有效。如果这不是你本人的操作,请忽略这封邮件。\n\nYour Ovid sign-in code is: ${code}\nIt expires in ${CODE_TTL_MINUTES} minutes. If you didn't request this, you can safely ignore this email.`,
+      html,
     }),
   });
   if (!resp.ok) {
