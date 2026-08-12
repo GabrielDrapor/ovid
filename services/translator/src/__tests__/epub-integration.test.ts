@@ -260,18 +260,19 @@ describe('EPUB Integration Tests', () => {
 
       const mockFirst = vi.fn().mockImplementation(async (sql: string) => {
         if (sql.includes('translation_jobs')) return job;
-        if (sql.includes('text_nodes_json'))
-          return { text_nodes_json: textNodesJson };
-        if (sql.includes('chapters_v2') && sql.includes('id'))
-          return { id: 1 };
         if (sql.includes('original_title'))
           return { original_title: bookData.title };
         return null;
       });
+      const mockAll = vi.fn().mockImplementation(async (sql: string) => {
+        if (sql.includes('text_nodes_json'))
+          return [{ id: 1, chapter_number: 1, original_title: 'Chapter One', text_nodes_json: textNodesJson }];
+        return [];
+      });
 
       const db = {
         first: mockFirst,
-        all: vi.fn().mockResolvedValue([]),
+        all: mockAll,
         run: vi.fn().mockResolvedValue(undefined),
         query: vi.fn().mockResolvedValue({ results: [], success: true }),
         batchInsert: vi.fn().mockResolvedValue(undefined),
@@ -381,15 +382,18 @@ describe('EPUB Integration Tests', () => {
 
       const mockFirst = vi.fn().mockImplementation(async (sql: string) => {
         if (sql.includes('translation_jobs')) return job;
-        if (sql.includes('text_nodes_json')) return { text_nodes_json: textNodesJson };
-        if (sql.includes('chapters_v2') && sql.includes('id')) return { id: 1 };
         if (sql.includes('original_title')) return { original_title: 'Flaky' };
         return null;
+      });
+      const mockAll = vi.fn().mockImplementation(async (sql: string) => {
+        if (sql.includes('text_nodes_json'))
+          return [{ id: 1, chapter_number: 1, original_title: 'Flaky Chapter', text_nodes_json: textNodesJson }];
+        return [];
       });
 
       const db = {
         first: mockFirst,
-        all: vi.fn().mockResolvedValue([]),
+        all: mockAll,
         run: vi.fn().mockResolvedValue(undefined),
         query: vi.fn().mockResolvedValue({ results: [], success: true }),
         batchInsert: vi.fn().mockResolvedValue(undefined),
