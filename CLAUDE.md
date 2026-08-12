@@ -89,7 +89,7 @@ TypeScript-first across frontend, backend, CLI, and translator service.
 ### Books
 - `GET /api/books` (alias `/api/v2/books`) — List books (public + user's private)
 - `POST /api/books/estimate` — Parse an EPUB via Railway and return a translation cost estimate
-- `POST /api/books/upload` — Upload EPUB (auth required, deducts credits; Railway handles the rest via `/upload-and-parse`). Accepts an optional shelf target (`shelfSlotId`, or `shelfRow`/`shelfCol` to create one on the fly) from clicking an empty slot in the 3D closet
+- `POST /api/books/upload` — Upload EPUB (auth required, deducts credits; Railway handles the rest via `/upload-and-parse`). Accepts an optional shelf target (`shelfSlotId`, or `shelfRow`/`shelfCol` to create one on the fly) from clicking an empty slot in the 3D closet. The handler picks the translation backend per user (`chooseTranslationBackend`: `CF_TRANSLATION_ALLOWLIST` emails → `'cf'`, `CF_TRANSLATION_DEFAULT=1` → everyone; else `'railway'`) and passes it to Railway, which parses either way but for `'cf'` jobs hands translation to the Workflow via `POST /api/internal/translate-cf` (falling back to translating on Railway — after flipping job ownership — if the trigger fails)
 - `GET /api/book/:uuid/status` — Parsing/translation progress (polled by the shelf)
 - `GET /api/book/:uuid/chapters` — Chapter list
 - `GET /api/book/:uuid/chapter/:number` — Chapter content (XPath-mapped paragraphs)

@@ -21,6 +21,10 @@ export interface Env {
   /** translate-book Workflow binding (Cloudflare Workflows translation backend) */
   TRANSLATE_WORKFLOW: Workflow;
   RESEND_API_KEY?: string;
+  /** Comma-separated emails whose uploads translate on the cf backend (M2 gradual rollout) */
+  CF_TRANSLATION_ALLOWLIST?: string;
+  /** '1'/'true' routes every new upload to the cf backend (M3 flip) */
+  CF_TRANSLATION_DEFAULT?: string;
 }
 
 export interface User {
