@@ -27,8 +27,18 @@ export interface TranslateBookParams {
   bookUuid: string;
 }
 
-/** Concurrent chapter steps in flight (each runs up to 3 concurrent LLM calls) */
-const CHAPTER_WINDOW = 5;
+/**
+ * Concurrent chapter steps in flight. Workers cap each isolate at 6
+ * simultaneous open connections; excess fetches queue, and an LLM call
+ * queued past llmChat's 120s abort fails the whole batch (observed as
+ * contiguous [Translation failed] runs in the first staging test at
+ * 5 windows x 3 batch-concurrency). Keep window x per-chapter
+ * concurrency comfortably under 6.
+ */
+const CHAPTER_WINDOW = 4;
+
+/** LLM calls in flight within one chapter step (see CHAPTER_WINDOW budget) */
+const BATCH_CONCURRENCY = 1;
 
 const STEP_CONFIG = {
   retries: {
@@ -65,7 +75,7 @@ export class TranslateBookWorkflow extends WorkflowEntrypoint<Env, TranslateBook
         }
         const p = step
           .do(`chapter-${chapterNumber}`, STEP_CONFIG, () =>
-            translateChapterStep(db, llm, bookUuid, chapterNumber)
+            translateChapterStep(db, llm, bookUuid, chapterNumber, BATCH_CONCURRENCY)
           )
           .catch((err: Error) => {
             failures.push(err);
