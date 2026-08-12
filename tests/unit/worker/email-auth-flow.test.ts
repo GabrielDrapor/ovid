@@ -18,6 +18,7 @@ function createFakeDB() {
       email: string;
       abuse_key: string;
       code_hash: string;
+      ip: string;
       expires_at: number;
       attempts: number;
       consumed_at: number | null;
@@ -52,16 +53,23 @@ function createFakeDB() {
           const now = Date.now();
           return {
             async first() {
-              if (sql.includes('SUM(CASE WHEN created_at')) {
-                const [abuseKey] = args as [string];
-                const rows = state.loginCodes.filter(
+              if (sql.includes('SUM(CASE WHEN abuse_key')) {
+                const [abuseKey, ip] = args as [string, string];
+                const day = now - 24 * 3600_000;
+                const byKey = state.loginCodes.filter(
                   (r) => r.abuse_key === abuseKey
                 );
+                const byIp = state.loginCodes.filter((r) => r.ip === ip);
                 return {
-                  recent: rows.filter((r) => r.created_at >= now - 15 * 60_000)
+                  recent: byKey.filter((r) => r.created_at >= now - 15 * 60_000)
                     .length,
-                  daily: rows.filter((r) => r.created_at >= now - 24 * 3600_000)
+                  daily: byKey.filter((r) => r.created_at >= day).length,
+                  ip_hour: byIp.filter((r) => r.created_at >= now - 3600_000)
                     .length,
+                  ip_day: byIp.filter((r) => r.created_at >= day).length,
+                  global_day: state.loginCodes.filter(
+                    (r) => r.created_at >= day
+                  ).length,
                 };
               }
               if (
@@ -111,12 +119,13 @@ function createFakeDB() {
             },
             async run() {
               if (sql.includes('INSERT INTO login_codes')) {
-                const [email, abuseKey, codeHash] = args as string[];
+                const [email, abuseKey, codeHash, ip] = args as string[];
                 state.loginCodes.push({
                   id: state.nextId++,
                   email,
                   abuse_key: abuseKey,
                   code_hash: codeHash,
+                  ip,
                   expires_at: now + 10 * 60_000,
                   attempts: 0,
                   consumed_at: null,
@@ -226,6 +235,7 @@ async function seedCode(
     email,
     abuse_key: email,
     code_hash: await sha256Hex(`${email}:${code}`),
+    ip: 'seed-ip',
     expires_at: Date.now() + 10 * 60_000,
     attempts: 0,
     consumed_at: null,
@@ -280,6 +290,44 @@ describe('handleEmailStart', () => {
     expect(
       (await handleEmailStart(post({ email: 'a+tag@x.com' }), env)).status
     ).toBe(429);
+  });
+
+  it('caps issuance per IP across different addresses', async () => {
+    const fake = createFakeDB();
+    const env = makeEnv(fake);
+    // 6 codes to 6 different addresses from the default test IP
+    for (let i = 0; i < 6; i++) {
+      expect(
+        (await handleEmailStart(post({ email: `u${i}@x.com` }), env)).status
+      ).toBe(200);
+    }
+    // 7th address from the same IP is blocked
+    expect(
+      (await handleEmailStart(post({ email: 'u7@x.com' }), env)).status
+    ).toBe(429);
+  });
+
+  it('trips the global daily circuit breaker with 503', async () => {
+    const fake = createFakeDB();
+    // Seed 300 rows from many IPs/addresses in the last day
+    for (let i = 0; i < 300; i++) {
+      fake.state.loginCodes.push({
+        id: fake.state.nextId++,
+        email: `bulk${i}@x.com`,
+        abuse_key: `bulk${i}@x.com`,
+        code_hash: 'h',
+        ip: `10.0.${Math.floor(i / 250)}.${i % 250}`,
+        expires_at: Date.now() + 600_000,
+        attempts: 0,
+        consumed_at: null,
+        created_at: Date.now() - 1000,
+      });
+    }
+    const resp = await handleEmailStart(
+      post({ email: 'legit@x.com' }),
+      makeEnv(fake)
+    );
+    expect(resp.status).toBe(503);
   });
 
   it('deletes the stored code when the email fails to send', async () => {

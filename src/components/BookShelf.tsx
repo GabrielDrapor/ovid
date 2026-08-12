@@ -112,6 +112,10 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
     setOpenDockMenu(null);
   }, []);
 
+  const signinEmailValid = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(
+    signinEmail.trim()
+  );
+
   const handleSendCode = async () => {
     setSigninBusy(true);
     setSigninError(null);
@@ -1340,13 +1344,13 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                               autoComplete="email"
                               onChange={(e) => setSigninEmail(e.target.value)}
                               onKeyDown={(e) => {
-                                if (e.key === 'Enter' && signinEmail.trim())
+                                if (e.key === 'Enter' && signinEmailValid)
                                   handleSendCode();
                               }}
                             />
                             <button
                               className="signin-submit-btn"
-                              disabled={signinBusy || !signinEmail.trim()}
+                              disabled={signinBusy || !signinEmailValid}
                               onClick={handleSendCode}
                             >
                               {signinBusy ? '…' : t.auth.sendCode}

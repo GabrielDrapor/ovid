@@ -254,6 +254,8 @@ export default {
       )`);
       await runMigration('login_codes_email_index', 'CREATE INDEX IF NOT EXISTS idx_login_codes_email ON login_codes(email, created_at)');
       await runMigration('login_codes_abuse_index', 'CREATE INDEX IF NOT EXISTS idx_login_codes_abuse ON login_codes(abuse_key, created_at)');
+      await runMigration('login_codes_ip', 'ALTER TABLE login_codes ADD COLUMN ip TEXT');
+      await runMigration('login_codes_ip_index', 'CREATE INDEX IF NOT EXISTS idx_login_codes_ip ON login_codes(ip, created_at)');
       migrationsRan = true;
     }
 

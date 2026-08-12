@@ -18,6 +18,13 @@ export const MAX_VERIFY_ATTEMPTS = 5;
 // Issuance caps per normalized email address (durable, via login_codes rows)
 const MAX_CODES_PER_15_MIN = 3;
 const MAX_CODES_PER_DAY = 10;
+// Per-IP caps: one IP fanning out codes to many different addresses is
+// either bombing victims or burning our Resend quota.
+const MAX_CODES_PER_IP_HOUR = 6;
+const MAX_CODES_PER_IP_DAY = 20;
+// Global circuit breaker: protects the send quota and deliverability if
+// someone distributes the abuse across IPs.
+const MAX_CODES_GLOBAL_DAY = 300;
 
 /** Lowercased/trimmed address, or null if it doesn't look like an email. */
 export function normalizeEmail(raw: unknown): string | null {
@@ -179,31 +186,51 @@ export async function handleEmailStart(
     return json({ error: 'Temporary email addresses are not supported' }, 400);
   }
 
-  // Durable issuance caps, counted against the abuse key so +tags and
-  // gmail-dot variants share a budget.
+  // Durable issuance caps — all counted from login_codes rows so they
+  // survive isolate restarts. Per address (abuse key folds +tags and
+  // gmail-dot variants), per IP, and a global daily circuit breaker.
   const abuseKey = abuseKeyForEmail(email);
+  const ip =
+    request.headers.get('cf-connecting-ip') ||
+    request.headers.get('x-forwarded-for') ||
+    'unknown';
   const counts = await env.DB.prepare(
     `SELECT
-       SUM(CASE WHEN created_at >= datetime('now', '-15 minutes') THEN 1 ELSE 0 END) AS recent,
-       SUM(CASE WHEN created_at >= datetime('now', '-1 day') THEN 1 ELSE 0 END) AS daily
-     FROM login_codes WHERE abuse_key = ?`
+       SUM(CASE WHEN abuse_key = ?1 AND created_at >= datetime('now', '-15 minutes') THEN 1 ELSE 0 END) AS recent,
+       SUM(CASE WHEN abuse_key = ?1 AND created_at >= datetime('now', '-1 day') THEN 1 ELSE 0 END) AS daily,
+       SUM(CASE WHEN ip = ?2 AND created_at >= datetime('now', '-1 hour') THEN 1 ELSE 0 END) AS ip_hour,
+       SUM(CASE WHEN ip = ?2 AND created_at >= datetime('now', '-1 day') THEN 1 ELSE 0 END) AS ip_day,
+       SUM(CASE WHEN created_at >= datetime('now', '-1 day') THEN 1 ELSE 0 END) AS global_day
+     FROM login_codes`
   )
-    .bind(abuseKey)
-    .first<{ recent: number | null; daily: number | null }>();
+    .bind(abuseKey, ip)
+    .first<{
+      recent: number | null;
+      daily: number | null;
+      ip_hour: number | null;
+      ip_day: number | null;
+      global_day: number | null;
+    }>();
   if (
     (counts?.recent ?? 0) >= MAX_CODES_PER_15_MIN ||
-    (counts?.daily ?? 0) >= MAX_CODES_PER_DAY
+    (counts?.daily ?? 0) >= MAX_CODES_PER_DAY ||
+    (counts?.ip_hour ?? 0) >= MAX_CODES_PER_IP_HOUR ||
+    (counts?.ip_day ?? 0) >= MAX_CODES_PER_IP_DAY
   ) {
     return json({ error: 'Too many codes requested — try again later' }, 429);
+  }
+  if ((counts?.global_day ?? 0) >= MAX_CODES_GLOBAL_DAY) {
+    console.error('[email-auth] Global daily send cap reached');
+    return json({ error: 'Sign-in codes are temporarily unavailable' }, 503);
   }
 
   const code = generateLoginCode();
   const codeHash = await sha256Hex(`${email}:${code}`);
   await env.DB.prepare(
-    `INSERT INTO login_codes (email, abuse_key, code_hash, expires_at)
-     VALUES (?, ?, ?, datetime('now', '+${CODE_TTL_MINUTES} minutes'))`
+    `INSERT INTO login_codes (email, abuse_key, code_hash, ip, expires_at)
+     VALUES (?, ?, ?, ?, datetime('now', '+${CODE_TTL_MINUTES} minutes'))`
   )
-    .bind(email, abuseKey, codeHash)
+    .bind(email, abuseKey, codeHash, ip)
     .run();
 
   const sent = await sendCodeEmail(env, email, code);
