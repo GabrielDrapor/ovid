@@ -68,13 +68,17 @@ describe('Translation Worker Reliability', () => {
 
       const mockFirst = vi.fn().mockImplementation(async (sql: string) => {
         if (sql.includes('translation_jobs')) return job;
-        if (sql.includes('text_nodes_json')) return { text_nodes_json: JSON.stringify(textNodes) };
-        if (sql.includes('chapters_v2') && sql.includes('id')) return { id: 1 };
         if (sql.includes('original_title')) return { original_title: 'Ch 1' };
         return null;
       });
+      const mockAll = vi.fn().mockImplementation(async (sql: string) => {
+        if (sql.includes('text_nodes_json')) {
+          return [{ id: 1, chapter_number: 1, original_title: 'Ch 1', text_nodes_json: JSON.stringify(textNodes) }];
+        }
+        return [];
+      });
 
-      const db = makeMockDb({ first: mockFirst });
+      const db = makeMockDb({ first: mockFirst, all: mockAll });
 
       // The LLM fetch mock — fail for "Fail me" text, succeed for others
       vi.stubGlobal('fetch', vi.fn().mockImplementation(async (_url: string, opts: any) => {
@@ -187,18 +191,22 @@ describe('Translation Worker Reliability', () => {
 
       const mockFirst = vi.fn().mockImplementation(async (sql: string) => {
         if (sql.includes('translation_jobs')) return job;
-        if (sql.includes('text_nodes_json')) return { text_nodes_json: JSON.stringify(textNodes) };
-        if (sql.includes('chapters_v2') && sql.includes('id')) return { id: 1 };
         if (sql.includes('original_title')) return { original_title: 'Ch 1' };
         return null;
       });
+      const mockAll = vi.fn().mockImplementation(async (sql: string) => {
+        if (sql.includes('text_nodes_json')) {
+          return [{ id: 1, chapter_number: 1, original_title: 'Ch 1', text_nodes_json: JSON.stringify(textNodes) }];
+        }
+        return [];
+      });
 
-      const db = makeMockDb({ first: mockFirst });
+      const db = makeMockDb({ first: mockFirst, all: mockAll });
 
       vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
         ok: true,
         json: async () => ({
-          choices: [{ message: { content: '翻译' } }],
+          choices: [{ message: { content: '<seg id="0">翻译一</seg>\n<seg id="1">翻译二</seg>\n<seg id="2">翻译三</seg>' } }],
         }),
       }));
 

@@ -42,8 +42,13 @@ TypeScript-first across frontend, backend, CLI, and translator service.
 - **CF Worker** (`src/worker/`) — API server: auth, book-handlers, credits, db, types
 - **Railway Translator** (`services/translator/`) — Long-running translation service (Hono + Sharp)
   - Receives webhook from Worker on EPUB upload
-  - Translates via OpenAI-compatible API (default: gpt-4o-mini), 5 concurrent chapters
-  - Reads/writes D1 via REST API, supports checkpoint resume
+  - Translates via OpenAI-compatible API (default: gpt-4o-mini). All LLM work
+    (paragraph batches, chapter titles, per-node retries) flows through one
+    global worker pool spanning chapters (`TRANSLATE_CONCURRENCY`, default 8)
+  - Reads/writes D1 via REST API. Checkpoint resume is chapter-level: a chapter
+    counts as done only when every node has a translations_v2 row; partially
+    written chapters are wiped and redone on resume (translations_v2 has no
+    UNIQUE constraint, so this is what keeps resume idempotent)
   - Generates each book's cover + spine by compositing onto a pre-made blank
     cloth-hardcover template (pure Sharp, no AI at request time) — see
     `cover-composer.ts`. Spine width scales with book length.

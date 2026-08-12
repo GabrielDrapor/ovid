@@ -56,6 +56,19 @@ const TRANSLATION_FAILED_MARKER = '[Translation failed]';
 /** Threshold (in characters) above which a single text node is split into chunks for translation */
 const LARGE_NODE_CHAR_THRESHOLD = 3000;
 
+/**
+ * Number of LLM calls kept in flight for one book, across ALL chapters.
+ * Batches, chapter titles, and per-node retries all share this pool, so the
+ * pipeline no longer serializes at chapter boundaries.
+ */
+const TRANSLATE_CONCURRENCY = (() => {
+  const n = parseInt(process.env.TRANSLATE_CONCURRENCY || '', 10);
+  return Number.isFinite(n) && n >= 1 && n <= 32 ? n : 8;
+})();
+
+/** Chapters fetched per D1 REST round-trip (text_nodes_json rows are large) */
+const CHAPTER_FETCH_CHUNK = 5;
+
 /** Column list for translations_v2 batch inserts */
 const TRANSLATIONS_V2_COLUMNS = ['chapter_id', 'xpath', 'original_text', 'original_html', 'translated_text', 'order_index'] as const;
 
@@ -101,7 +114,15 @@ async function llmChat(config: LLMConfig, messages: Array<{ role: string; conten
 
       if (!res.ok) {
         const text = await res.text();
-        throw new Error(`LLM API ${res.status}: ${text}`);
+        const httpErr = new Error(`LLM API ${res.status}: ${text}`) as Error & { retryAfterMs?: number };
+        if (res.status === 429) {
+          // Respect Retry-After when the provider sends it (seconds), capped at 60s
+          const retryAfter = parseFloat(res.headers?.get?.('retry-after') ?? '');
+          httpErr.retryAfterMs = Number.isFinite(retryAfter)
+            ? Math.min(retryAfter * 1000, 60000)
+            : 5000;
+        }
+        throw httpErr;
       }
 
       const json = await res.json() as any;
@@ -111,7 +132,10 @@ async function llmChat(config: LLMConfig, messages: Array<{ role: string; conten
     } catch (err) {
       lastError = err as Error;
       if (attempt < maxRetries) {
-        const delay = Math.pow(2, attempt) * 1000;
+        // Exponential backoff + jitter; rate limits wait at least Retry-After
+        let delay = Math.pow(2, attempt) * 1000 + Math.random() * 500;
+        const retryAfterMs = (err as Error & { retryAfterMs?: number }).retryAfterMs;
+        if (retryAfterMs) delay = Math.max(delay, retryAfterMs);
         console.warn(`LLM retry ${attempt + 1}: ${(err as Error).message}`);
         await new Promise(r => setTimeout(r, delay));
       }
@@ -535,8 +559,75 @@ async function translateBatch(
   return resultMap;
 }
 
+/** Loaded chapter data for the translate phase */
+interface ChapterData {
+  id: number;
+  chapterNumber: number;
+  originalTitle: string | null;
+  nodes: TextNode[];
+}
+
 /**
- * Main translation orchestrator — translates an entire book
+ * Load all chapters for a book in chunked queries (text_nodes_json rows are
+ * large, so fetching the whole book in one round-trip risks oversized
+ * responses; per-chapter fetching wastes N sequential HTTP round-trips).
+ */
+async function loadChapters(db: D1Client, bookId: number, totalChapters: number): Promise<ChapterData[]> {
+  const chapters: ChapterData[] = [];
+  for (let start = 1; start <= totalChapters; start += CHAPTER_FETCH_CHUNK) {
+    const end = Math.min(start + CHAPTER_FETCH_CHUNK - 1, totalChapters);
+    const rows = await db.all<{ id: number; chapter_number: number; original_title: string | null; text_nodes_json: string | null }>(
+      'SELECT id, chapter_number, original_title, text_nodes_json FROM chapters_v2 WHERE book_id = ? AND chapter_number BETWEEN ? AND ? ORDER BY chapter_number',
+      [bookId, start, end]
+    );
+    for (const row of rows) {
+      chapters.push({
+        id: row.id,
+        chapterNumber: row.chapter_number,
+        originalTitle: row.original_title ?? null,
+        nodes: row.text_nodes_json ? JSON.parse(row.text_nodes_json) : [],
+      });
+    }
+  }
+  return chapters;
+}
+
+/**
+ * Count existing translation rows per chapter. A chapter is complete iff its
+ * row count equals its node count (failed nodes still get a marker row, so
+ * counts match). translations_v2 has no UNIQUE(chapter_id, xpath) constraint,
+ * so any other count means a partial/duplicated chapter that must be wiped
+ * and redone to stay idempotent.
+ */
+async function countExistingTranslations(db: D1Client, chapterIds: number[]): Promise<Map<number, number>> {
+  const counts = new Map<number, number>();
+  const CHUNK = 90; // D1 REST API: 100 bound params per query
+  for (let i = 0; i < chapterIds.length; i += CHUNK) {
+    const ids = chapterIds.slice(i, i + CHUNK);
+    const placeholders = ids.map(() => '?').join(', ');
+    const rows = await db.all<{ chapter_id: number; cnt: number }>(
+      `SELECT chapter_id, COUNT(*) AS cnt FROM translations_v2 WHERE chapter_id IN (${placeholders}) GROUP BY chapter_id`,
+      ids
+    );
+    for (const row of rows) counts.set(row.chapter_id, row.cnt);
+  }
+  return counts;
+}
+
+/**
+ * Main translation orchestrator — translates an entire book.
+ *
+ * All LLM work (paragraph batches, chapter titles, per-node retries) flows
+ * through one global worker pool of TRANSLATE_CONCURRENCY, so chapters no
+ * longer serialize at their boundaries. Prompts, batch sizes, and the
+ * residue-retry ladder are identical to the sequential pipeline — only the
+ * scheduling changed.
+ *
+ * Checkpointing is chapter-level: a chapter counts as done only when every
+ * node has a row in translations_v2 (translation or failure marker). On
+ * resume, chapters with a mismatched row count are wiped and redone, which
+ * also closes the old crash window where the item offset could advance past
+ * nodes whose rows were never written.
  */
 export async function translateBook(
   db: D1Client,
@@ -553,37 +644,35 @@ export async function translateBook(
   if (job.status === 'completed') return;
 
   const jobStartedAt = Date.now();
-  const setProgress = (phase: string, chaptersCompleted: number, detail?: string) => {
+  const setProgress = (phase: string, chaptersCompleted: number, currentChapter: number, detail?: string) => {
     activeJobs.set(bookUuid, {
       phase,
       chaptersCompleted,
       chaptersTotal: job.total_chapters,
-      currentChapter: job.current_chapter,
+      currentChapter,
       detail,
       startedAt: jobStartedAt,
     });
   };
 
   try {
+    checkJobTimeout(bookUuid);
+
+    // Load all chapter data upfront (shared by glossary sampling + translation)
+    const chapters = await loadChapters(db, job.book_id, job.total_chapters);
+
     // Phase 1: Glossary extraction
     let glossary: Record<string, string> = {};
     if (!job.glossary_extracted) {
-      setProgress('glossary', 0, 'Extracting proper nouns...');
+      setProgress('glossary', 0, job.current_chapter, 'Extracting proper nouns...');
       await db.run(
         "UPDATE translation_jobs SET status = 'extracting_glossary', updated_at = CURRENT_TIMESTAMP WHERE book_uuid = ?",
         [bookUuid]
       );
 
       const allTexts: string[] = [];
-      for (let ch = 1; ch <= job.total_chapters; ch++) {
-        const row = await db.first<{ text_nodes_json: string }>(
-          'SELECT text_nodes_json FROM chapters_v2 WHERE book_id = ? AND chapter_number = ?',
-          [job.book_id, ch]
-        );
-        if (row?.text_nodes_json) {
-          const nodes: TextNode[] = JSON.parse(row.text_nodes_json);
-          for (const n of nodes) allTexts.push(n.text);
-        }
+      for (const ch of chapters) {
+        for (const n of ch.nodes) allTexts.push(n.text);
       }
 
       let glossaryWarning: string | null = null;
@@ -606,7 +695,7 @@ export async function translateBook(
 
     // Phase 2: Translate book title
     if (!job.title_translated) {
-      setProgress('translating', 0, 'Translating book title...');
+      setProgress('translating', 0, job.current_chapter, 'Translating book title...');
       const bookRow = await db.first<{ original_title: string }>(
         'SELECT original_title FROM books_v2 WHERE uuid = ?',
         [bookUuid]
@@ -622,53 +711,183 @@ export async function translateBook(
       console.log(`[${bookUuid}] Title: "${originalTitle}" → "${translatedTitle}"`);
     }
 
-    // Phase 3: Translate chapters
-    const startChapter = job.glossary_extracted ? (job.current_chapter || 1) : 1;
-    let completedChapters = job.completed_chapters || 0;
+    // Phase 3: Figure out which chapters still need work (chapter-level,
+    // row-count-based resume; the legacy current_item_offset is superseded)
+    const nonEmptyChapters = chapters.filter(ch => ch.nodes.length > 0);
+    const existingCounts = await countExistingTranslations(db, nonEmptyChapters.map(ch => ch.id));
 
-    for (let chNum = startChapter; chNum <= job.total_chapters; chNum++) {
-      checkJobTimeout(bookUuid);
-      setProgress('translating', completedChapters, `Chapter ${chNum}/${job.total_chapters}`);
+    const pendingChapters: ChapterData[] = [];
+    const partialChapterIds: number[] = [];
+    for (const ch of nonEmptyChapters) {
+      const cnt = existingCounts.get(ch.id) ?? 0;
+      if (cnt === ch.nodes.length) continue; // fully translated
+      if (cnt > 0) partialChapterIds.push(ch.id);
+      pendingChapters.push(ch);
+    }
 
-      const row = await db.first<{ text_nodes_json: string }>(
-        'SELECT text_nodes_json FROM chapters_v2 WHERE book_id = ? AND chapter_number = ?',
-        [job.book_id, chNum]
+    if (partialChapterIds.length > 0) {
+      // Wipe partial chapters so redoing them can't leave duplicate rows
+      console.log(`[${bookUuid}] Resume: wiping ${partialChapterIds.length} partially translated chapter(s)`);
+      const placeholders = partialChapterIds.map(() => '?').join(', ');
+      await db.run(
+        `DELETE FROM translations_v2 WHERE chapter_id IN (${placeholders})`,
+        partialChapterIds
       );
-      const textNodes: TextNode[] = row?.text_nodes_json ? JSON.parse(row.text_nodes_json) : [];
+    }
 
-      if (textNodes.length === 0) {
-        completedChapters++;
-        await db.run(
+    // Chapters that are empty, missing, or already fully translated count as done
+    let completedChapters = job.total_chapters - pendingChapters.length;
+    const pendingChapterNumbers = new Set(pendingChapters.map(ch => ch.chapterNumber));
+    const lowestPending = () => {
+      let min = job.total_chapters + 1;
+      for (const n of pendingChapterNumbers) min = Math.min(min, n);
+      return Math.min(min, job.total_chapters);
+    };
+
+    // Serialize job-progress writes so completion updates never interleave
+    let progressChain: Promise<void> = Promise.resolve();
+    const recordChapterComplete = (ch: ChapterData): Promise<void> => {
+      pendingChapterNumbers.delete(ch.chapterNumber);
+      completedChapters++;
+      const completedSnapshot = completedChapters;
+      const nextChapter = lowestPending();
+      setProgress('translating', completedSnapshot, nextChapter, `Chapter ${nextChapter}/${job.total_chapters}`);
+      console.log(`[${bookUuid}] Chapter ${ch.chapterNumber}/${job.total_chapters} done`);
+      progressChain = progressChain.then(() =>
+        db.run(
           'UPDATE translation_jobs SET current_chapter = ?, completed_chapters = ?, current_item_offset = 0, updated_at = CURRENT_TIMESTAMP WHERE book_uuid = ?',
-          [chNum + 1, completedChapters, bookUuid]
-        );
-        continue;
-      }
-
-      // Get chapter ID
-      const chapterRow = await db.first<{ id: number }>(
-        'SELECT id FROM chapters_v2 WHERE book_id = ? AND chapter_number = ?',
-        [job.book_id, chNum]
+          [nextChapter, completedSnapshot, bookUuid]
+        )
       );
-      if (!chapterRow) {
-        completedChapters++;
-        continue;
+      return progressChain;
+    };
+
+    setProgress('translating', completedChapters, lowestPending(), `Chapter ${lowestPending()}/${job.total_chapters}`);
+
+    // Phase 4: One global work queue across all chapters — paragraph batches,
+    // chapter titles, and individual retries all share the same pool.
+    const MAX_BATCH_TOKENS = 2000;
+
+    interface ChapterState {
+      ch: ChapterData;
+      pending: number; // outstanding work items (batches + title + retries)
+    }
+
+    type WorkItem = () => Promise<void>;
+    const queue: WorkItem[] = [];
+    let fatalError: Error | null = null;
+
+    const finishItem = async (state: ChapterState) => {
+      state.pending--;
+      if (state.pending === 0) {
+        await recordChapterComplete(state.ch);
+      }
+    };
+
+    const makeRetryItem = (state: ChapterState, node: TextNode): WorkItem => async () => {
+      let translated: string;
+      try {
+        translated = await translateText(
+          llmConfig, node.text, glossary,
+          job.source_language, job.target_language
+        );
+      } catch (retryErr) {
+        console.warn(`[${bookUuid}] Retry failed for ${node.xpath}:`, retryErr);
+        translated = TRANSLATION_FAILED_MARKER;
+      }
+      await db.batchInsert(
+        'translations_v2',
+        [...TRANSLATIONS_V2_COLUMNS],
+        [[state.ch.id, node.xpath, node.text, node.html, translated, node.orderIndex]]
+      );
+      await finishItem(state);
+    };
+
+    const makeTitleItem = (state: ChapterState): WorkItem => async () => {
+      try {
+        const translatedChTitle = await translateText(
+          llmConfig, state.ch.originalTitle!, glossary,
+          job.source_language, job.target_language
+        );
+        await db.run(
+          'UPDATE chapters_v2 SET title = ? WHERE book_id = ? AND chapter_number = ?',
+          [translatedChTitle, job.book_id, state.ch.chapterNumber]
+        );
+      } catch { /* keep original title */ }
+      await finishItem(state);
+    };
+
+    const makeBatchItem = (
+      state: ChapterState,
+      batch: { index: number; text: string; node: TextNode }[]
+    ): WorkItem => async () => {
+      const failedNodes: TextNode[] = [];
+      const successRows: unknown[][] = [];
+
+      try {
+        if (batch.length === 1) {
+          // Single node — use simple translateText (more reliable for short text)
+          const { node } = batch[0];
+          const translated = node.text.length > LARGE_NODE_CHAR_THRESHOLD
+            ? await translateLargeNode(llmConfig, node.text, glossary, job.source_language, job.target_language, bookUuid)
+            : await translateText(llmConfig, node.text, glossary, job.source_language, job.target_language);
+          successRows.push([state.ch.id, node.xpath, node.text, node.html, translated, node.orderIndex]);
+        } else {
+          // Multi-node batch translation
+          const segments = batch.map(b => ({ index: b.index, text: b.text }));
+          const resultMap = await translateBatch(
+            llmConfig, segments, glossary,
+            job.source_language, job.target_language
+          );
+          for (const item of batch) {
+            const translated = resultMap.get(item.index) ?? null;
+            // Check for English residue — if found, retry individually with stronger prompt
+            if (translated !== null) {
+              const residue = detectEnglishResidue(translated, glossary);
+              if (residue.length > 0) {
+                console.warn(`[${bookUuid}] Batch seg ${item.index} has English residue: [${residue.join(', ')}] — will retry individually`);
+                failedNodes.push(item.node);
+                continue;
+              }
+              successRows.push([state.ch.id, item.node.xpath, item.node.text, item.node.html, translated, item.node.orderIndex]);
+            } else {
+              failedNodes.push(item.node);
+            }
+          }
+        }
+      } catch {
+        // Entire batch failed — every node goes to individual retry
+        successRows.length = 0;
+        failedNodes.length = 0;
+        failedNodes.push(...batch.map(b => b.node));
       }
 
-      // Resume from offset if partially done
-      const startOffset = (chNum === startChapter && job.current_item_offset > 0) ? job.current_item_offset : 0;
+      if (successRows.length > 0) {
+        await db.batchInsert('translations_v2', [...TRANSLATIONS_V2_COLUMNS], successRows);
+      }
 
-      // Group text nodes into LLM-sized batches (~2000 tokens each), then run batches concurrently
-      const MAX_BATCH_TOKENS = 2000;
-      const CONCURRENCY = 5;
+      if (failedNodes.length > 0) {
+        console.log(`[${bookUuid}] Retrying ${failedNodes.length} failed node(s) in chapter ${state.ch.chapterNumber}`);
+        // Register retries before finishing this item so the chapter can't
+        // be marked complete while retries are still outstanding
+        state.pending += failedNodes.length;
+        for (const node of failedNodes) {
+          queue.push(makeRetryItem(state, node));
+        }
+      }
 
-      // Build batches based on token budget
+      await finishItem(state);
+    };
+
+    // Enqueue chapters in reading order so early chapters finish first
+    for (const ch of pendingChapters) {
+      // Group text nodes into LLM-sized batches (~2000 tokens each)
       const llmBatches: { index: number; text: string; node: TextNode }[][] = [];
       let currentBatch: { index: number; text: string; node: TextNode }[] = [];
       let currentTokens = 0;
 
-      for (let i = startOffset; i < textNodes.length; i++) {
-        const node = textNodes[i];
+      for (let i = 0; i < ch.nodes.length; i++) {
+        const node = ch.nodes[i];
         const tokens = estimateTokens(node.text);
         if (currentBatch.length > 0 && currentTokens + tokens > MAX_BATCH_TOKENS) {
           llmBatches.push(currentBatch);
@@ -680,133 +899,44 @@ export async function translateBook(
       }
       if (currentBatch.length > 0) llmBatches.push(currentBatch);
 
-      console.log(`[${bookUuid}] Chapter ${chNum}: ${textNodes.length - startOffset} nodes → ${llmBatches.length} batched LLM calls (concurrency ${CONCURRENCY})`);
+      const state: ChapterState = {
+        ch,
+        pending: llmBatches.length + (ch.originalTitle ? 1 : 0),
+      };
 
-      const failedNodes: TextNode[] = [];
+      console.log(`[${bookUuid}] Chapter ${ch.chapterNumber}: ${ch.nodes.length} nodes → ${llmBatches.length} batched LLM calls`);
 
-      for (let b = 0; b < llmBatches.length; b += CONCURRENCY) {
-        const concurrentBatches = llmBatches.slice(b, b + CONCURRENCY);
-        const batchResults = await Promise.allSettled(
-          concurrentBatches.map(async (batch) => {
-            if (batch.length === 1) {
-              // Single node — use simple translateText (more reliable for short text)
-              const { node } = batch[0];
-              const translated = node.text.length > LARGE_NODE_CHAR_THRESHOLD
-                ? await translateLargeNode(llmConfig, node.text, glossary, job.source_language, job.target_language, bookUuid)
-                : await translateText(llmConfig, node.text, glossary, job.source_language, job.target_language);
-              return new Map([[batch[0].index, { node, translated }]]);
-            }
-
-            // Multi-node batch translation
-            const segments = batch.map(b => ({ index: b.index, text: b.text }));
-            const resultMap = await translateBatch(
-              llmConfig, segments, glossary,
-              job.source_language, job.target_language
-            );
-            const out = new Map<number, { node: TextNode; translated: string | null }>();
-            for (const item of batch) {
-              const translated = resultMap.get(item.index) ?? null;
-              // Check for English residue — if found, mark as null to trigger individual retry with stronger prompt
-              if (translated !== null) {
-                const residue = detectEnglishResidue(translated, glossary);
-                if (residue.length > 0) {
-                  console.warn(`[${bookUuid}] Batch seg ${item.index} has English residue: [${residue.join(', ')}] — will retry individually`);
-                  out.set(item.index, { node: item.node, translated: null });
-                  continue;
-                }
-              }
-              out.set(item.index, { node: item.node, translated });
-            }
-            return out;
-          })
-        );
-
-        // Collect results and failures
-        const successRows: unknown[][] = [];
-        for (let r = 0; r < batchResults.length; r++) {
-          const result = batchResults[r];
-          if (result.status === 'rejected') {
-            // Entire batch failed — collect all nodes for individual retry
-            failedNodes.push(...concurrentBatches[r].map(b => b.node));
-            continue;
-          }
-          for (const [, { node, translated }] of result.value) {
-            if (translated === null) {
-              failedNodes.push(node);
-            } else {
-              successRows.push([chapterRow.id, node.xpath, node.text, node.html, translated, node.orderIndex]);
-            }
-          }
-        }
-
-        if (successRows.length > 0) {
-          await db.batchInsert(
-            'translations_v2',
-            [...TRANSLATIONS_V2_COLUMNS],
-            successRows
-          );
-        }
-
-        // Update offset for resume capability
-        const lastBatch = concurrentBatches[concurrentBatches.length - 1];
-        const lastIndex = lastBatch[lastBatch.length - 1].index;
-        await db.run(
-          'UPDATE translation_jobs SET current_item_offset = ?, updated_at = CURRENT_TIMESTAMP WHERE book_uuid = ?',
-          [lastIndex + 1, bookUuid]
-        );
+      for (const batch of llmBatches) {
+        queue.push(makeBatchItem(state, batch));
       }
-
-      // Retry failed nodes one at a time
-      if (failedNodes.length > 0) {
-        console.log(`[${bookUuid}] Retrying ${failedNodes.length} failed node(s) in chapter ${chNum}`);
-        const retryRows: unknown[][] = [];
-        for (const node of failedNodes) {
-          let translated: string;
-          try {
-            translated = await translateText(
-              llmConfig, node.text, glossary,
-              job.source_language, job.target_language
-            );
-          } catch (retryErr) {
-            console.warn(`[${bookUuid}] Retry failed for ${node.xpath}:`, retryErr);
-            translated = TRANSLATION_FAILED_MARKER;
-          }
-          retryRows.push([chapterRow.id, node.xpath, node.text, node.html, translated, node.orderIndex]);
-        }
-        if (retryRows.length > 0) {
-          await db.batchInsert(
-            'translations_v2',
-            [...TRANSLATIONS_V2_COLUMNS],
-            retryRows
-          );
-        }
+      if (ch.originalTitle) {
+        queue.push(makeTitleItem(state));
       }
-
-      // Translate chapter title
-      const chTitleRow = await db.first<{ original_title: string }>(
-        'SELECT original_title FROM chapters_v2 WHERE book_id = ? AND chapter_number = ?',
-        [job.book_id, chNum]
-      );
-      if (chTitleRow?.original_title) {
-        try {
-          const translatedChTitle = await translateText(
-            llmConfig, chTitleRow.original_title, glossary,
-            job.source_language, job.target_language
-          );
-          await db.run(
-            'UPDATE chapters_v2 SET title = ? WHERE book_id = ? AND chapter_number = ?',
-            [translatedChTitle, job.book_id, chNum]
-          );
-        } catch { /* keep original */ }
-      }
-
-      completedChapters++;
-      await db.run(
-        'UPDATE translation_jobs SET current_chapter = ?, completed_chapters = ?, current_item_offset = 0, updated_at = CURRENT_TIMESTAMP WHERE book_uuid = ?',
-        [chNum + 1, completedChapters, bookUuid]
-      );
-      console.log(`[${bookUuid}] Chapter ${chNum}/${job.total_chapters} done`);
     }
+
+    // Run the pool: N workers drain the shared queue. Workers that find the
+    // queue empty exit; a worker that enqueues retries keeps looping, so
+    // dynamically added items always get processed.
+    const worker = async () => {
+      while (queue.length > 0) {
+        if (fatalError) return;
+        const item = queue.shift()!;
+        try {
+          checkJobTimeout(bookUuid);
+          await item();
+        } catch (err) {
+          fatalError = fatalError ?? (err as Error);
+          return;
+        }
+      }
+    };
+
+    console.log(`[${bookUuid}] ${pendingChapters.length} chapter(s) to translate, pool size ${TRANSLATE_CONCURRENCY}`);
+    await Promise.all(Array.from({ length: TRANSLATE_CONCURRENCY }, () => worker()));
+    await progressChain.catch((err) => {
+      fatalError = fatalError ?? (err as Error);
+    });
+    if (fatalError) throw fatalError;
 
     // Done — mark completed
     await db.run("UPDATE books_v2 SET status = 'ready' WHERE uuid = ?", [bookUuid]);
