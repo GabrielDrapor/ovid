@@ -31,6 +31,8 @@ interface MockDbSetup {
   chapterRow?: { id: number; original_title: string | null; text_nodes_json: string | null };
   countForChapter?: number;
   incompleteCount?: number;
+  translatedTotal?: number;
+  chaptersWithNodes?: number;
   job?: Record<string, unknown>;
 }
 
@@ -41,6 +43,8 @@ function makeDb(setup: MockDbSetup) {
     first: vi.fn().mockImplementation(async (sql: string) => {
       if (sql.includes('FROM translation_jobs')) return setup.job ?? JOB;
       if (sql.includes('COUNT(*) AS cnt FROM translations_v2')) return { cnt: setup.countForChapter ?? 0 };
+      if (sql.includes('COUNT(*) AS n FROM translations_v2')) return { n: setup.translatedTotal ?? 1 };
+      if (sql.includes('json_array_length(text_nodes_json), 0) > 0')) return { n: setup.chaptersWithNodes ?? 1 };
       if (sql.includes('COUNT(*) AS n FROM chapters_v2')) return { n: setup.incompleteCount ?? 0 };
       if (sql.includes('SELECT id, original_title, text_nodes_json')) return setup.chapterRow ?? null;
       if (sql.includes('original_title FROM books_v2')) return { original_title: 'Book' };
@@ -196,5 +200,13 @@ describe('finalizeStep', () => {
     expect(runs.some(r => r.sql.includes("SET status = 'ready'"))).toBe(true);
     expect(runs.some(r => r.sql.includes('text_nodes_json = NULL'))).toBe(true);
     expect(runs.some(r => r.sql.includes("status = 'completed'"))).toBe(true);
+  });
+
+  it('refuses to publish an empty book (no nodes, no translations)', async () => {
+    // Corrupted state: text_nodes_json cleared while job incomplete —
+    // finalize must fail loudly instead of shipping a hollow "ready" book
+    const { db, runs } = makeDb({ incompleteCount: 0, translatedTotal: 0, chaptersWithNodes: 0 });
+    await expect(finalizeStep(db, 'cf-test')).rejects.toThrow('refusing to mark ready');
+    expect(runs.some(r => r.sql.includes("SET status = 'ready'"))).toBe(false);
   });
 });

@@ -799,6 +799,28 @@ export async function finalizeStep(db: DbClient, bookUuid: string): Promise<void
     throw new Error(`finalize: ${incomplete!.n} chapter(s) still incomplete for ${bookUuid}`);
   }
 
+  // A job with chapters but neither text nodes nor translations means the
+  // source state was corrupted (e.g. text_nodes_json cleared while the job
+  // was incomplete). Marking that "ready" would publish an empty book.
+  if (job.total_chapters > 0) {
+    const translated = await db.first<{ n: number }>(
+      `SELECT COUNT(*) AS n FROM translations_v2 t
+       JOIN chapters_v2 ch ON ch.id = t.chapter_id
+       WHERE ch.book_id = ?`,
+      [job.book_id]
+    );
+    const withNodes = await db.first<{ n: number }>(
+      `SELECT COUNT(*) AS n FROM chapters_v2
+       WHERE book_id = ? AND COALESCE(json_array_length(text_nodes_json), 0) > 0`,
+      [job.book_id]
+    );
+    if ((translated?.n ?? 0) === 0 && (withNodes?.n ?? 0) === 0) {
+      throw new Error(
+        `finalize: book has ${job.total_chapters} chapter(s) but no text nodes and no translations — refusing to mark ready`
+      );
+    }
+  }
+
   await db.run("UPDATE books_v2 SET status = 'ready' WHERE uuid = ?", [bookUuid]);
   await db.run('UPDATE chapters_v2 SET text_nodes_json = NULL WHERE book_id = ?', [job.book_id]);
   await db.run(
