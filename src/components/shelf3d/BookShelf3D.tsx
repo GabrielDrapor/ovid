@@ -1671,9 +1671,20 @@ function CameraRig({
     } else {
       // While a book is presented, quiet the gaze so the pose feels stable.
       const gaze = focused ? 0.18 : 1;
-      tx = state.pointer.x * xMax * gaze;
+      // Zoomed in, the pannable range (xMax) dwarfs the visible width, so a
+      // linear pointer mapping whips the camera on small mouse moves. Blend
+      // toward a cubic curve as the camera closes in: the center flattens
+      // out (calm reading/browsing) while full deflection still reaches the
+      // wall edges. Fully zoomed out stays linear — the current feel.
+      const zoomIn = THREE.MathUtils.clamp(
+        (maxZoomRef.current - z) / Math.max(0.001, maxZoomRef.current - MIN_ZOOM),
+        0,
+        1
+      );
+      const curve = (v: number) => THREE.MathUtils.lerp(v, v * v * v, zoomIn);
+      tx = curve(state.pointer.x) * xMax * gaze;
       ty = THREE.MathUtils.clamp(
-        wallMidY + state.pointer.y * ((yMax - yMin) / 2) * gaze,
+        wallMidY + curve(state.pointer.y) * ((yMax - yMin) / 2) * gaze,
         yMin,
         yMax
       );
