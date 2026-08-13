@@ -1677,7 +1677,8 @@ function CameraRig({
       // out (calm reading/browsing) while full deflection still reaches the
       // wall edges. Fully zoomed out stays linear — the current feel.
       const zoomIn = THREE.MathUtils.clamp(
-        (maxZoomRef.current - z) / Math.max(0.001, maxZoomRef.current - MIN_ZOOM),
+        (maxZoomRef.current - z) /
+          Math.max(0.001, maxZoomRef.current - MIN_ZOOM),
         0,
         1
       );
