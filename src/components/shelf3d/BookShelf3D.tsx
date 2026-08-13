@@ -1651,7 +1651,6 @@ function CameraRig({
   }, [gl, camera, size, dragDist, dragPointerId]);
 
   useFrame((state, delta) => {
-    const k = 1 - Math.exp(-delta * 4);
     const z = zoom.current ?? fitZ;
     // Clamp the pan so the frustum never leaves the wall.
     const visHalfH = tanHalf * z;
@@ -1660,6 +1659,15 @@ function CameraRig({
     let yMin = caseBottom + visHalfH;
     let yMax = caseTop - visHalfH;
     if (yMin > yMax) yMin = yMax = wallMidY;
+
+    // Ease slower as the camera closes in — high zoom magnifies every
+    // target change, so the follow itself needs damping too.
+    const zoomInGlobal = THREE.MathUtils.clamp(
+      (maxZoomRef.current - z) / Math.max(0.001, maxZoomRef.current - MIN_ZOOM),
+      0,
+      1
+    );
+    const k = 1 - Math.exp(-delta * (4 - 2 * zoomInGlobal));
 
     let tx: number;
     let ty: number;
@@ -1676,13 +1684,9 @@ function CameraRig({
       // toward a cubic curve as the camera closes in: the center flattens
       // out (calm reading/browsing) while full deflection still reaches the
       // wall edges. Fully zoomed out stays linear — the current feel.
-      const zoomIn = THREE.MathUtils.clamp(
-        (maxZoomRef.current - z) /
-          Math.max(0.001, maxZoomRef.current - MIN_ZOOM),
-        0,
-        1
-      );
-      const curve = (v: number) => THREE.MathUtils.lerp(v, v * v * v, zoomIn);
+      // Quintic at full zoom-in: the center is near-flat, edges keep reach.
+      const curve = (v: number) =>
+        THREE.MathUtils.lerp(v, v * v * v * v * v, zoomInGlobal);
       tx = curve(state.pointer.x) * xMax * gaze;
       ty = THREE.MathUtils.clamp(
         wallMidY + curve(state.pointer.y) * ((yMax - yMin) / 2) * gaze,
