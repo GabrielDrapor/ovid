@@ -68,6 +68,9 @@ const SEGMENTS = [
 ];
 
 // ─── Prompts ─────────────────────────────────────────────────────────────────
+// A = the pre-2026-08 production prompt; B = A + naturalness rules 7-8.
+// B won 21/27 (0 control regressions) and shipped as the production prompt —
+// future candidates should use the current prod prompt as their new "A".
 const PROMPT_A = `You are a professional literary translator. Translate the following en text to Chinese.
 
 **CRITICAL RULES:**

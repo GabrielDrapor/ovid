@@ -229,7 +229,9 @@ async function translateText(
 3. Maintain style, tone, and formatting.
 4. For proper nouns, use exact translations from the Glossary.
 5. Output ONLY the translated text.
-6. NEVER leave English words in the output, except for proper nouns with no standard ${targetLang} translation. If a word is difficult to translate, find the closest natural expression.${glossaryStr}`,
+6. NEVER leave English words in the output, except for proper nouns with no standard ${targetLang} translation. If a word is difficult to translate, find the closest natural expression.
+7. Do NOT mirror English sentence structure. Reorder and restructure freely so the result reads as if originally written in ${targetLang}: convert unnatural passives into natural voice, move reporting clauses to where ${targetLang} puts them (e.g. "X, Nixon was told." → "有人告诉尼克松，X"), and split or merge clauses to match ${targetLang} rhythm.
+8. Before answering, reread your translation as a native ${targetLang} literary editor would; if any sentence reads like a word-for-word gloss of the English, rewrite that sentence.${glossaryStr}`,
     },
     {
       role: 'user',
@@ -511,7 +513,9 @@ async function translateBatch(
 5. Do NOT wrap in quotes unless the source has them.
 6. For proper nouns, use exact translations from the Glossary.
 7. Output ONLY the translated segments with their tags, nothing else.
-8. NEVER leave English words in the output, except for proper nouns with no standard ${targetLang} translation. Translate every word into ${targetLang}.${glossaryStr}`,
+8. NEVER leave English words in the output, except for proper nouns with no standard ${targetLang} translation. Translate every word into ${targetLang}.
+9. Do NOT mirror English sentence structure. Within each segment, reorder and restructure freely so the result reads as if originally written in ${targetLang}: convert unnatural passives into natural voice, move reporting clauses to where ${targetLang} puts them (e.g. "X, Nixon was told." → "有人告诉尼克松，X"), and split or merge clauses to match ${targetLang} rhythm.
+10. Before answering, reread each segment as a native ${targetLang} literary editor would; if any sentence reads like a word-for-word gloss of the English, rewrite that sentence.${glossaryStr}`,
     },
     {
       role: 'user',
