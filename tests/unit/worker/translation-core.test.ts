@@ -3,6 +3,7 @@ import {
   planTranslation,
   translateChapterStep,
   finalizeStep,
+  detectEnglishResidue,
   TRANSLATION_FAILED_MARKER,
 } from '../../../src/worker/translation/translate-core';
 import type { DbClient } from '../../../src/worker/translation/d1-binding-client';
@@ -185,6 +186,20 @@ describe('translateChapterStep', () => {
     const progress = runs.find(r => r.sql.includes('completed_chapters = ('));
     expect(progress).toBeDefined();
     expect(progress!.sql).toContain('json_array_length');
+  });
+});
+
+describe('detectEnglishResidue (mirror of translate-worker.ts)', () => {
+  it('flags bare lowercase common words in mostly-Chinese text (2026-08 regression)', () => {
+    const text =
+      '他尤其喜欢对阵那些有明确、僵化哲学的主帅——这 simply 让他的战术任务更容易，正如他在 2014 年的一次采访中所概述的那样。';
+    expect(detectEnglishResidue(text, {})).toEqual(['simply']);
+  });
+
+  it('does not flag quoted words, glosses, proper nouns, or pinyin', () => {
+    expect(detectEnglishResidue('因为剪切者在剪“keep away”这个词时不得不剪了两下。', {})).toEqual([]);
+    expect(detectEnglishResidue('每当您看到这样一座泰勒（tell）或孤立土丘。', {})).toEqual([]);
+    expect(detectEnglishResidue('正如 Hessler 在书中所写，Feng tong xing 一家搬到了涪陵。', {})).toEqual([]);
   });
 });
 

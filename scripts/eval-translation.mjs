@@ -257,14 +257,38 @@ function stripCitations(text) {
     .replace(/\.(?:shtml|html?|pdf|txt|aspx?|jsp|php|csv|json|xml)\b/gi, ' ');
 }
 
+// Mirror of translate-worker.ts — keep in sync (incl. the high-CJK
+// lowercase-common-word check; an eval carrying the old blind spot would
+// report "0% residue" for outputs that ship visible leftovers)
+const COMMON_ENGLISH_WORDS = new Set((
+  'about above across after again against almost along already also although always among another anyone anything ' +
+  'anywhere around because become becomes been before behind being below between both business came cannot certain ' +
+  'certainly change children coming completely could course does doing done during each early either enough even ' +
+  'every everyone everything exactly example except finally first following found four from further gave general ' +
+  'getting give given goes going gone good great group hand having head help here herself high himself history home ' +
+  'house however hundred idea important indeed instead into itself just keep kind knew know known large last later ' +
+  'least leave left less life like likely little longer look looked looking made make making many matter maybe mean ' +
+  'meant might more most much must myself near need never next nothing nowhere number often once only order other ' +
+  'others ought over own part people perhaps place point possible probably problem public put quite rather real ' +
+  'really right room said same saw says second see seem seemed seems seen several shall should side simply since ' +
+  'small some someone something sometimes soon still such sure taken tell than that their them themselves then there ' +
+  'these they thing things think third this those though thought three through thus time today together told took ' +
+  'toward turn under until upon used using very want water week well went were what when where whether which while ' +
+  'whole whom whose will with within without word work world would year years your yourself'
+).split(/\s+/));
+
+function stripQuotedSpans(text) {
+  return text
+    .replace(/“[^”]{0,120}”/g, ' ')
+    .replace(/‘[^’]{0,120}’/g, ' ')
+    .replace(/"[^"]{0,120}"/g, ' ')
+    .replace(/'[^']{0,80}'/g, ' ')
+    .replace(/（[^）]{0,120}）/g, ' ')
+    .replace(/\([^)]{0,120}\)/g, ' ');
+}
+
 function detectEnglishResidue(text, glossary) {
   const stripped = stripCitations(text);
-  const cjkCount = (stripped.match(/[　-鿿가-힯]/g) ?? []).length;
-  const latinCount = (stripped.match(/[a-zA-Z]/g) ?? []).length;
-  if (cjkCount > 0 && cjkCount / (cjkCount + latinCount) >= 0.6) return [];
-
-  const englishWords = stripped.match(/[a-zA-Z]{3,}/g);
-  if (!englishWords) return [];
 
   const allowed = new Set();
   for (const [key, val] of Object.entries(glossary)) {
@@ -278,6 +302,22 @@ function detectEnglishResidue(text, glossary) {
     'app', 'web', 'api', 'url', 'http', 'https', 'www', 'html', 'css',
     'pdf', 'jpg', 'png', 'gif', 'xml', 'json', 'sql', 'seg', 'translate', 'context',
   ]);
+
+  const cjkCount = (stripped.match(/[　-鿿가-힯]/g) ?? []).length;
+  const latinCount = (stripped.match(/[a-zA-Z]/g) ?? []).length;
+  if (cjkCount > 0 && cjkCount / (cjkCount + latinCount) >= 0.6) {
+    const bare = stripQuotedSpans(stripped);
+    const tokens = bare.match(/[a-zA-Z]{3,}/g) ?? [];
+    return tokens.filter(w =>
+      /^[a-z]+$/.test(w) &&
+      COMMON_ENGLISH_WORDS.has(w) &&
+      !commonAllowed.has(w) &&
+      !allowed.has(w)
+    );
+  }
+
+  const englishWords = stripped.match(/[a-zA-Z]{3,}/g);
+  if (!englishWords) return [];
 
   const residue = englishWords.filter(w => {
     const lower = w.toLowerCase();
