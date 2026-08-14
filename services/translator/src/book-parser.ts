@@ -1304,11 +1304,14 @@ export async function parseEPUB(
   //
   // When the EPUB has a usable TOC we follow it: files it references get
   // its titles; substantial files between two referenced ones are treated
-  // as split-chapter continuations and inherit the preceding entry's title;
-  // tiny text-only pages OUTSIDE the TOC's range (publisher ads, blank
-  // filler around the actual book) are dropped. Everything else falls back
-  // through guide/filename roles, headings, then a derived title — and
-  // "Chapter N" only as the true last resort.
+  // as split-chapter continuations and inherit the preceding entry's title
+  // (unless they open with their own h1 — see below); tiny text-only pages
+  // OUTSIDE the TOC's range (publisher ads, blank filler around the actual
+  // book) are dropped; tiny TOC-referenced half-title pages donate their
+  // nav title forward and are dropped. Everything else falls back through
+  // guide/filename roles, headings, then a derived title — and "Chapter N"
+  // only as the true last resort.
+  const TINY_PAGE_CHARS = 300;
   const tocIdx = prepared.map((p, i) => (tocTitleMap.has(p.normPath) ? i : -1));
   const coveredIdx = tocIdx.filter((i) => i >= 0);
   const tocUsable = coveredIdx.length >= 2;
@@ -1316,20 +1319,60 @@ export async function parseEPUB(
   const lastCovered = coveredIdx[coveredIdx.length - 1] ?? -1;
 
   const skipped = new Set<number>();
-  let lastTocTitle = '';
+
+  // A TOC-referenced half-title page (a bare part/chapter number, tiny, no
+  // images) followed by a file with no nav entry of its own is a print
+  // artifact: keeping it creates a near-empty "chapter" that readers land
+  // on from the TOC (The Mixer had 24 of these). Drop it and donate its nav
+  // title to the following file. Title precedence for the recipient:
+  // donated nav title > the file's own heading > inheritance — the nav
+  // title ("10 One Up Front") is richer than the file's heading ("One Up
+  // Front").
+  const donatedTitle = new Map<number, string>();
+  if (tocUsable) {
+    prepared.forEach((p, i) => {
+      const tocTitle = tocTitleMap.get(p.normPath);
+      if (!tocTitle) return;
+      if (p.textLength >= TINY_PAGE_CHARS || p.hasImages) return;
+      const next = prepared[i + 1];
+      if (!next || tocTitleMap.has(next.normPath)) return;
+      skipped.add(i);
+      donatedTitle.set(i + 1, tocTitle);
+    });
+  }
+
+  let lastTitle = '';
   prepared.forEach((p, i) => {
-    const tocTitle = tocTitleMap.get(p.normPath);
-    if (tocTitle) {
-      p.title = tocTitle;
-      lastTocTitle = tocTitle;
+    if (skipped.has(i)) return;
+
+    const donated = donatedTitle.get(i);
+    if (donated) {
+      p.title = donated;
+      lastTitle = donated;
       return;
     }
 
-    // After the first TOC entry, a substantial untitled file is a
-    // split-chapter continuation of the preceding entry — including the
-    // trailing parts of the final chapter after the last entry.
-    if (tocUsable && i > firstCovered && p.textLength >= 1500 && lastTocTitle) {
-      p.title = lastTocTitle;
+    const tocTitle = tocTitleMap.get(p.normPath);
+    if (tocTitle) {
+      p.title = tocTitle;
+      lastTitle = tocTitle;
+      return;
+    }
+
+    // After the first TOC entry, a substantial untitled file is either a
+    // real chapter the TOC skipped (The Mixer's nav lists only Parts for
+    // chapters 1-9) or a split-chapter continuation of the preceding entry.
+    // The distinction: real chapters open with their own h1; continuations
+    // start mid-text, headingless. Only a leading h1 overrides inheritance —
+    // h2/h3 can legitimately start a mid-chapter split at a section break.
+    if (tocUsable && i > firstCovered && p.textLength >= 1500 && lastTitle) {
+      const ownH1 = p.doc.getElementsByTagName('h1')[0]?.textContent?.trim();
+      if (ownH1) {
+        p.title = ownH1;
+        lastTitle = ownH1;
+        return;
+      }
+      p.title = lastTitle;
       return;
     }
     // Outside the TOC's range: tiny text-only pages are publisher filler
@@ -1338,7 +1381,7 @@ export async function parseEPUB(
     if (
       tocUsable &&
       (i < firstCovered || i > lastCovered) &&
-      p.textLength < 300 &&
+      p.textLength < TINY_PAGE_CHARS &&
       !p.hasImages
     ) {
       skipped.add(i);
