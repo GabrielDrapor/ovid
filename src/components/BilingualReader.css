@@ -703,8 +703,12 @@ h3.chapter-text {
 .nav-button {
   background-color: transparent;
   border: none;
-  font-size: 32px;
+  font-size: 36px;
   font-weight: 900;
+  /* The glyph maxes out at weight 900, so the extra heft comes from a
+     same-color stroke — readers reported the thin arrows read as
+     decoration rather than a control. */
+  -webkit-text-stroke: 1px currentColor;
   color: var(--rt-text-muted, #8a8171);
   cursor: pointer;
   transition:
