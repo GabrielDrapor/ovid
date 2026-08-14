@@ -48,8 +48,9 @@ const SOURCE_LANG = 'en';
 const TARGET_LANG = 'zh';
 
 const MODELS_TO_EVAL = [
-  { name: 'deepseek-v4-flash (prod)', model: 'deepseek/deepseek-v4-flash' },
-  { name: 'deepseek-v3.2', model: 'deepseek/deepseek-v3.2' },
+  // Production model — keep this marker in sync with Railway's OPENAI_MODEL
+  { name: 'deepseek-v3.2 (prod)', model: 'deepseek/deepseek-v3.2' },
+  { name: 'deepseek-v4-flash', model: 'deepseek/deepseek-v4-flash' },
   { name: 'gemini-2.5-flash', model: 'google/gemini-2.5-flash' },
   { name: 'gpt-4o-mini', model: 'openai/gpt-4o-mini' },
   { name: 'qwen-2.5-72b', model: 'qwen/qwen-2.5-72b-instruct' },
@@ -381,7 +382,9 @@ async function translateText(model, text, glossary) {
 3. Maintain style, tone, and formatting.
 4. For proper nouns, use exact translations from the Glossary.
 5. Output ONLY the translated text.
-6. NEVER leave English words in the output, except for proper nouns with no standard ${targetLang} translation.${glossaryStr}`,
+6. NEVER leave English words in the output, except for proper nouns with no standard ${targetLang} translation.
+7. Do NOT mirror English sentence structure. Reorder and restructure freely so the result reads as if originally written in ${targetLang}: convert unnatural passives into natural voice, move reporting clauses to where ${targetLang} puts them (e.g. "X, Nixon was told." → "有人告诉尼克松，X"), and split or merge clauses to match ${targetLang} rhythm.
+8. Before answering, reread your translation as a native ${targetLang} literary editor would; if any sentence reads like a word-for-word gloss of the English, rewrite that sentence.${glossaryStr}`,
     },
     {
       role: 'user',
@@ -412,7 +415,9 @@ async function translateBatch(model, segments, glossary) {
 5. Do NOT wrap in quotes unless the source has them.
 6. For proper nouns, use exact translations from the Glossary.
 7. Output ONLY the translated segments with their tags, nothing else.
-8. NEVER leave English words in the output, except for proper nouns with no standard ${targetLang} translation.${glossaryStr}`,
+8. NEVER leave English words in the output, except for proper nouns with no standard ${targetLang} translation.
+9. Do NOT mirror English sentence structure. Within each segment, reorder and restructure freely so the result reads as if originally written in ${targetLang}: convert unnatural passives into natural voice, move reporting clauses to where ${targetLang} puts them (e.g. "X, Nixon was told." → "有人告诉尼克松，X"), and split or merge clauses to match ${targetLang} rhythm.
+10. Before answering, reread each segment as a native ${targetLang} literary editor would; if any sentence reads like a word-for-word gloss of the English, rewrite that sentence.${glossaryStr}`,
     },
     { role: 'user', content: taggedInput },
   ], { maxTokens: 16384 });
