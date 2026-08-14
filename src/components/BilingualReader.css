@@ -701,28 +701,38 @@ h3.chapter-text {
 }
 
 .nav-button {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
   background-color: transparent;
-  border: none;
-  font-size: 32px;
-  font-weight: 900;
+  border: 1.5px solid var(--rt-border, #d8d0bc);
   color: var(--rt-text-muted, #8a8171);
   cursor: pointer;
   transition:
     color 0.15s ease,
-    opacity 0.15s ease;
+    border-color 0.15s ease,
+    background-color 0.15s ease,
+    transform 0.12s ease;
   text-decoration: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 8px;
+  padding: 0;
 }
 
 .nav-button:hover {
   color: var(--rt-text, #2f2a21);
+  border-color: var(--rt-text-muted, #8a8171);
+  background-color: var(--rt-surface-alt, #f2edde);
+  transform: translateX(2px);
+}
+
+.prev-button:hover {
+  transform: translateX(-2px);
 }
 
 .nav-button:active {
-  opacity: 0.65;
+  transform: scale(0.94);
 }
 
 .prev-button {

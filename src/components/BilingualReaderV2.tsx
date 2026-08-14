@@ -1374,8 +1374,21 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
               className="nav-button prev-button"
               onClick={goToPreviousChapter}
               title={t.reader.prevChapter}
+              aria-label={t.reader.prevChapter}
             >
-              ↶
+              <svg
+                viewBox="0 0 24 24"
+                width="22"
+                height="22"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M19 12H5" />
+                <path d="M11 6l-6 6 6 6" />
+              </svg>
             </button>
           </div>
         )}
@@ -1422,8 +1435,21 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
               className="nav-button next-button"
               onClick={goToNextChapter}
               title={t.reader.nextChapter}
+              aria-label={t.reader.nextChapter}
             >
-              ↷
+              <svg
+                viewBox="0 0 24 24"
+                width="22"
+                height="22"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M5 12h14" />
+                <path d="M13 6l6 6-6 6" />
+              </svg>
             </button>
           </div>
         )}
