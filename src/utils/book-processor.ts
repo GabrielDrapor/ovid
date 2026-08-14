@@ -1030,28 +1030,60 @@ export class BookProcessor {
     const firstCovered = coveredIdx[0] ?? -1;
     const lastCovered = coveredIdx[coveredIdx.length - 1] ?? -1;
 
+    const TINY_PAGE_CHARS = 300;
     const skippedIdx = new Set<number>();
-    let lastTocTitle = '';
+
+    // Tiny nav-referenced half-title pages donate their title forward and
+    // are dropped (donated nav title > own heading > inheritance).
+    const donatedTitle = new Map<number, string>();
+    if (tocUsable) {
+      prepared.forEach((p, i) => {
+        const tocTitle = tocTitleMap.get(p.normPath);
+        if (!tocTitle) return;
+        if (p.textLength >= TINY_PAGE_CHARS || p.hasImages) return;
+        const next = prepared[i + 1];
+        if (!next || tocTitleMap.has(next.normPath)) return;
+        skippedIdx.add(i);
+        donatedTitle.set(i + 1, tocTitle);
+      });
+    }
+
+    let lastTitle = '';
     prepared.forEach((p, i) => {
+      if (skippedIdx.has(i)) return;
+      const donated = donatedTitle.get(i);
+      if (donated) {
+        p.title = donated;
+        lastTitle = donated;
+        return;
+      }
       const tocTitle = tocTitleMap.get(p.normPath);
       if (tocTitle) {
         p.title = tocTitle;
-        lastTocTitle = tocTitle;
+        lastTitle = tocTitle;
         return;
       }
       if (
         tocUsable &&
         i > firstCovered &&
         p.textLength >= 1500 &&
-        lastTocTitle
+        lastTitle
       ) {
-        p.title = lastTocTitle;
+        // A leading h1 marks a real chapter the TOC skipped; headingless
+        // substantial files are split continuations and inherit.
+        const ownH1 = p.doc.getElementsByTagName('h1')[0]?.textContent?.trim();
+        if (ownH1) {
+          p.title = ownH1;
+          lastTitle = ownH1;
+          return;
+        }
+        p.title = lastTitle;
         return;
       }
       if (
         tocUsable &&
         (i < firstCovered || i > lastCovered) &&
-        p.textLength < 300 &&
+        p.textLength < TINY_PAGE_CHARS &&
         !p.hasImages
       ) {
         skippedIdx.add(i);

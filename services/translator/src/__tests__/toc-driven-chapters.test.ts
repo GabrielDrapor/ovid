@@ -237,3 +237,75 @@ describe('front/back-matter and fallback titles', () => {
     expect(book.chapters[0].title).toBe('OTHER RIVERS – A Chinese Education');
   });
 });
+
+describe('half-title stubs and TOC-skipped chapters (The Mixer regression, 2026-08)', () => {
+  // Real-world shape: nav lists Parts + only some chapters; every chapter is
+  // preceded by a tiny number-only half-title page which the nav points at;
+  // the actual content files have their own h1 and no nav entry.
+  it('drops number-only half-title pages and donates their nav title forward', async () => {
+    const book = await parseEPUB(
+      await buildTestEpub({
+        rawFiles: [
+          // nav → this stub, "10 One Up Front"; next file unreferenced
+          { fileName: 'ch10-stub.xhtml', bodyHtml: '<p class="part_number">10</p>' },
+          { fileName: 'ch10.xhtml', bodyHtml: `<h1>One Up Front</h1>${longText('Ten')}` },
+          { fileName: 'ch11-stub.xhtml', bodyHtml: '<p class="part_number">11</p>' },
+          { fileName: 'ch11.xhtml', bodyHtml: `<h1>Invincibles</h1>${longText('Eleven')}` },
+        ],
+        ncxEntries: [
+          { src: 'ch10-stub.xhtml', title: '10 One Up Front' },
+          { src: 'ch11-stub.xhtml', title: '11 Invincibles & Convincibles' },
+        ],
+      })
+    );
+    // Stubs are gone; donated nav titles (richer than the h1) win
+    expect(book.chapters.map((c) => c.title)).toEqual([
+      '10 One Up Front',
+      '11 Invincibles & Convincibles',
+    ]);
+    expect(book.chapters.length).toBe(2);
+  });
+
+  it('a substantial unreferenced file with its own h1 is a chapter, not a continuation', async () => {
+    const book = await parseEPUB(
+      await buildTestEpub({
+        rawFiles: [
+          // nav lists only the Part and the Postscript; the real chapters have h1s
+          { fileName: 'part1.xhtml', bodyHtml: `<h1>In the Beginning</h1>${longText('Part opener')}` },
+          { fileName: 'ch1.xhtml', bodyHtml: `<h1>A Whole New Ball Game</h1>${longText('One')}` },
+          { fileName: 'ch2.xhtml', bodyHtml: `<h1>The Route One Debate</h1>${longText('Two')}` },
+          // a true continuation: substantial but headingless — still inherits
+          { fileName: 'ch2b.xhtml', bodyHtml: longText('Two continued') },
+          { fileName: 'post.xhtml', bodyHtml: longText('Postscript') },
+        ],
+        ncxEntries: [
+          { src: 'part1.xhtml', title: 'Part One – In the Beginning' },
+          { src: 'post.xhtml', title: 'Postscript' },
+        ],
+      })
+    );
+    const titles = book.chapters.map((c) => c.title);
+    expect(titles[0]).toBe('Part One – In the Beginning');
+    expect(titles[1]).toBe('A Whole New Ball Game');
+    expect(titles[2]).toBe('The Route One Debate');
+    // headingless continuation inherits the h1 title of its chapter, not the Part title
+    expect(titles[3]).toBe('The Route One Debate');
+    expect(titles[4]).toBe('Postscript');
+  });
+
+  it('keeps a tiny nav-referenced page when the next file has its own nav entry', async () => {
+    const book = await parseEPUB(
+      await buildTestEpub({
+        rawFiles: [
+          { fileName: 'dedication.xhtml', bodyHtml: '<p>For my parents</p>' },
+          { fileName: 'ch1.xhtml', bodyHtml: longText('One') },
+        ],
+        ncxEntries: [
+          { src: 'dedication.xhtml', title: 'Dedication' },
+          { src: 'ch1.xhtml', title: 'Chapter One' },
+        ],
+      })
+    );
+    expect(book.chapters.map((c) => c.title)).toEqual(['Dedication', 'Chapter One']);
+  });
+});
