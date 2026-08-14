@@ -111,6 +111,9 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
   // Lets prev/next navigation hit memory instead of the network so the
   // page-turn animation runs without a fetch stall.
   const chapterCacheRef = useRef<Map<number, ChapterContent>>(new Map());
+  // True once any chapter rendered successfully this session — gates the
+  // unload/hide progress beacon so broken sessions never overwrite cloud state
+  const hasLoadedChapterRef = useRef(false);
 
   // Track book completion status
   const [isCompleted, setIsCompleted] = useState(false);
@@ -370,8 +373,18 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
     if (!cacheHit) setLoading(true);
     try {
       const data = await fetchChapterData(chapterNumber);
+      // The server clamps stale chapter numbers (e.g. a cached position from
+      // before a chapter-structure repair) to the nearest valid chapter and
+      // reports the real number — adopt it so state and saved progress
+      // re-sync instead of persisting the dead number.
+      const actualChapter = data.chapterInfo?.number ?? chapterNumber;
+      if (actualChapter !== chapterNumber) {
+        chapterCacheRef.current.set(actualChapter, data);
+      }
       setChapterContent(data);
-      setCurrentChapter(chapterNumber);
+      setCurrentChapter(actualChapter);
+      hasLoadedChapterRef.current = true;
+      chapterNumber = actualChapter;
       // Warm the cache for adjacent chapters so the next click is also instant.
       prefetchChapter(chapterNumber - 1);
       prefetchChapter(chapterNumber + 1);
@@ -451,6 +464,12 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
   // Flush current reading position to localStorage AND backend on page exit or tab hide
   useEffect(() => {
     const flushProgress = () => {
+      // A session that never successfully displayed a chapter has nothing
+      // trustworthy to save — beaconing here would overwrite good cloud
+      // progress with a stale/broken position (seen after a chapter
+      // renumbering: the error page's unload beacon kept restoring the
+      // dead chapter number).
+      if (!hasLoadedChapterRef.current) return;
       if (currentXpathRef.current) {
         saveProgress(currentChapter, currentXpathRef.current);
 
