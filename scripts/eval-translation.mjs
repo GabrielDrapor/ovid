@@ -48,8 +48,9 @@ const SOURCE_LANG = 'en';
 const TARGET_LANG = 'zh';
 
 const MODELS_TO_EVAL = [
-  { name: 'deepseek-v4-flash (prod)', model: 'deepseek/deepseek-v4-flash' },
-  { name: 'deepseek-v3.2', model: 'deepseek/deepseek-v3.2' },
+  // Production model — keep this marker in sync with Railway's OPENAI_MODEL
+  { name: 'deepseek-v3.2 (prod)', model: 'deepseek/deepseek-v3.2' },
+  { name: 'deepseek-v4-flash', model: 'deepseek/deepseek-v4-flash' },
   { name: 'gemini-2.5-flash', model: 'google/gemini-2.5-flash' },
   { name: 'gpt-4o-mini', model: 'openai/gpt-4o-mini' },
   { name: 'qwen-2.5-72b', model: 'qwen/qwen-2.5-72b-instruct' },
