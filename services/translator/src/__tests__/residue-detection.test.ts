@@ -82,4 +82,48 @@ describe('detectEnglishResidue', () => {
       ).toEqual([]);
     });
   });
+
+  describe('high-CJK residue (regression: prod misses reported 2026-08)', () => {
+    // Real production output from "How to Win the Premier League": the
+    // segment is ~89% CJK so the old detector skipped it entirely, and
+    // the bare "simply" shipped to readers.
+    it('flags a bare lowercase common word inside mostly-Chinese text', () => {
+      const text =
+        '他尤其喜欢对阵那些有明确、僵化哲学的主帅——这 simply 让他的战术任务更容易，正如他在 2014 年的一次采访中所概述的那样。';
+      expect(detectEnglishResidue(text, noGlossary)).toEqual(['simply']);
+    });
+
+    it('flags multiple bare leftovers (real Dracula segment)', () => {
+      const text =
+        '至少，他回答我的问题 exactly 像是听懂了。这 simply 说明还需 further 检查。';
+      const residue = detectEnglishResidue(text, noGlossary);
+      expect(residue).toContain('exactly');
+      expect(residue).toContain('simply');
+      expect(residue).toContain('further');
+    });
+
+    it('does not flag quoted English word discussions', () => {
+      // Real Hound of the Baskervilles output: cut-out newspaper words
+      const text =
+        '因为剪切者在剪“keep away”这个词时不得不剪了两下，所以那是一把刃部很短的剪刀。';
+      expect(detectEnglishResidue(text, noGlossary)).toEqual([]);
+    });
+
+    it('does not flag bracketed glosses', () => {
+      // Real archaeology-book output: 泰勒（tell）style gloss
+      const text = '每当您看到这样一座泰勒（tell）或孤立土丘耸立于平原之上，您就可以确信下面有遗迹。';
+      expect(detectEnglishResidue(text, noGlossary)).toEqual([]);
+    });
+
+    it('does not flag proper nouns or pinyin in mostly-Chinese text', () => {
+      const text = '正如 Hessler 在书中所写，Feng tong xing 一家搬到了涪陵。这段话完全没有问题。';
+      expect(detectEnglishResidue(text, noGlossary)).toEqual([]);
+    });
+
+    it('does not flag glossary terms left in English', () => {
+      const text = '这 simply 是一个测试。';
+      // If the glossary maps "simply" (contrived), it is allowed
+      expect(detectEnglishResidue(text, { simply: 'simply' })).toEqual([]);
+    });
+  });
 });

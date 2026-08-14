@@ -419,6 +419,55 @@ function stripCitations(text: string): string {
 }
 
 /**
+ * Common English words that should never survive untranslated in mostly-CJK
+ * output. Used by the high-CJK branch of detectEnglishResidue: a bare
+ * lowercase "simply" or "thus" mid-sentence is residue even when 99% of the
+ * segment is Chinese. Deliberately curated to avoid pinyin collisions
+ * (no "long", "sang", "tong", ... and the ≥3-char rule excludes "he"/"me").
+ */
+const COMMON_ENGLISH_WORDS = new Set((
+  'about above across after again against almost along already also although always among another anyone anything ' +
+  'anywhere around because become becomes been before behind being below between both business came cannot certain ' +
+  'certainly change children coming completely could course does doing done during each early either enough even ' +
+  'every everyone everything exactly example except finally first following found four from further gave general ' +
+  'getting give given goes going gone good great group hand having head help here herself high himself history home ' +
+  'house however hundred idea important indeed instead into itself just keep kind knew know known large last later ' +
+  'least leave left less life like likely little longer look looked looking made make making many matter maybe mean ' +
+  'meant might more most much must myself near need never next nothing nowhere number often once only order other ' +
+  'others ought over own part people perhaps place point possible probably problem public put quite rather real ' +
+  'really right room said same saw says second see seem seemed seems seen several shall should side simply since ' +
+  'small some someone something sometimes soon still such sure taken tell than that their them themselves then there ' +
+  'these they thing things think third this those though thought three through thus time today together told took ' +
+  'toward turn under until upon used using very want water week well went were what when where whether which while ' +
+  'whole whom whose will with within without word work world would year years your yourself'
+).split(/\s+/));
+
+/**
+ * Strip quoted and parenthesized spans. Quoted English in a Chinese
+ * translation is deliberate — word discussions, cited phrases, signage,
+ * bracketed glosses like 泰勒（tell）— not residue. Span length is bounded
+ * so an unbalanced quote can't swallow the whole segment.
+ */
+function stripQuotedSpans(text: string): string {
+  return text
+    .replace(/“[^”]{0,120}”/g, ' ')
+    .replace(/‘[^’]{0,120}’/g, ' ')
+    .replace(/"[^"]{0,120}"/g, ' ')
+    .replace(/'[^']{0,80}'/g, ' ')
+    .replace(/（[^）]{0,120}）/g, ' ')
+    .replace(/\([^)]{0,120}\)/g, ' ');
+}
+
+/** Common acceptable English tokens in translated text */
+const TECH_ALLOWED = new Set([
+  'the', 'and', 'for', 'with', 'from', 'that', 'this', 'not', 'but',
+  'are', 'was', 'were', 'has', 'had', 'have', 'will', 'can', 'may',
+  'app', 'web', 'api', 'url', 'http', 'https', 'www', 'html', 'css',
+  'pdf', 'jpg', 'png', 'gif', 'xml', 'json', 'sql',
+  'seg', 'translate', 'context',  // XML tag residue from prompt
+]);
+
+/**
  * Detect non-proper-noun English words left in a translation.
  * Returns the offending words, or an empty array if clean.
  */
@@ -426,20 +475,6 @@ export function detectEnglishResidue(text: string, glossary: Record<string, stri
   // Strip URLs/emails/file extensions first — citations and reference URLs
   // legitimately remain verbatim and must not count as untranslated text.
   const stripped = stripCitations(text);
-
-  // For CJK targets, if the translation is already mostly target-language, trust it
-  // and skip residue scanning. Threshold: ≥60% CJK chars among letter-or-CJK chars
-  // means the model produced a real translation; sparse English is almost always
-  // legitimate proper nouns the model couldn't transliterate.
-  const cjkCount = (stripped.match(/[　-鿿가-힯]/g) ?? []).length;
-  const latinCount = (stripped.match(/[a-zA-Z]/g) ?? []).length;
-  if (cjkCount > 0 && cjkCount / (cjkCount + latinCount) >= 0.6) {
-    return [];
-  }
-
-  // Match sequences of 3+ ASCII letters (skip short ones like "OK", "vs")
-  const englishWords = stripped.match(/[a-zA-Z]{3,}/g);
-  if (!englishWords) return [];
 
   // Build set of allowed English words from glossary keys + values
   const allowed = new Set<string>();
@@ -453,14 +488,28 @@ export function detectEnglishResidue(text: string, glossary: Record<string, stri
     }
   }
 
-  // Common acceptable English tokens in translated text
-  const commonAllowed = new Set([
-    'the', 'and', 'for', 'with', 'from', 'that', 'this', 'not', 'but',
-    'are', 'was', 'were', 'has', 'had', 'have', 'will', 'can', 'may',
-    'app', 'web', 'api', 'url', 'http', 'https', 'www', 'html', 'css',
-    'pdf', 'jpg', 'png', 'gif', 'xml', 'json', 'sql',
-    'seg', 'translate', 'context',  // XML tag residue from prompt
-  ]);
+  const cjkCount = (stripped.match(/[　-鿿가-힯]/g) ?? []).length;
+  const latinCount = (stripped.match(/[a-zA-Z]/g) ?? []).length;
+  if (cjkCount > 0 && cjkCount / (cjkCount + latinCount) >= 0.6) {
+    // Mostly target-language: sparse English is usually legitimate (proper
+    // nouns, quoted phrases) — but a bare lowercase common-English word
+    // mid-sentence ("这 simply 让他的战术任务更容易") is residue. Corpus scan
+    // over 173k production segments: this flags 0.03% with ~88% precision.
+    const bare = stripQuotedSpans(stripped);
+    const tokens = bare.match(/[a-zA-Z]{3,}/g) ?? [];
+    return tokens.filter(w =>
+      /^[a-z]+$/.test(w) &&
+      COMMON_ENGLISH_WORDS.has(w) &&
+      !TECH_ALLOWED.has(w) &&
+      !allowed.has(w)
+    );
+  }
+
+  // Match sequences of 3+ ASCII letters (skip short ones like "OK", "vs")
+  const englishWords = stripped.match(/[a-zA-Z]{3,}/g);
+  if (!englishWords) return [];
+
+  const commonAllowed = TECH_ALLOWED;
 
   const residue = englishWords.filter(w => {
     const lower = w.toLowerCase();

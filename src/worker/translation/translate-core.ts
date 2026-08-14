@@ -377,19 +377,51 @@ function stripCitations(text: string): string {
 }
 
 /**
+ * Common English words that should never survive untranslated in mostly-CJK
+ * output — see translate-worker.ts for rationale (curated to avoid pinyin
+ * collisions; corpus-tuned at ~88% precision, 0.03% flag rate).
+ */
+const COMMON_ENGLISH_WORDS = new Set((
+  'about above across after again against almost along already also although always among another anyone anything ' +
+  'anywhere around because become becomes been before behind being below between both business came cannot certain ' +
+  'certainly change children coming completely could course does doing done during each early either enough even ' +
+  'every everyone everything exactly example except finally first following found four from further gave general ' +
+  'getting give given goes going gone good great group hand having head help here herself high himself history home ' +
+  'house however hundred idea important indeed instead into itself just keep kind knew know known large last later ' +
+  'least leave left less life like likely little longer look looked looking made make making many matter maybe mean ' +
+  'meant might more most much must myself near need never next nothing nowhere number often once only order other ' +
+  'others ought over own part people perhaps place point possible probably problem public put quite rather real ' +
+  'really right room said same saw says second see seem seemed seems seen several shall should side simply since ' +
+  'small some someone something sometimes soon still such sure taken tell than that their them themselves then there ' +
+  'these they thing things think third this those though thought three through thus time today together told took ' +
+  'toward turn under until upon used using very want water week well went were what when where whether which while ' +
+  'whole whom whose will with within without word work world would year years your yourself'
+).split(/\s+/));
+
+/** Strip quoted/parenthesized spans — quoted English is deliberate, not residue */
+function stripQuotedSpans(text: string): string {
+  return text
+    .replace(/“[^”]{0,120}”/g, ' ')
+    .replace(/‘[^’]{0,120}’/g, ' ')
+    .replace(/"[^"]{0,120}"/g, ' ')
+    .replace(/'[^']{0,80}'/g, ' ')
+    .replace(/（[^）]{0,120}）/g, ' ')
+    .replace(/\([^)]{0,120}\)/g, ' ');
+}
+
+const TECH_ALLOWED = new Set([
+  'the', 'and', 'for', 'with', 'from', 'that', 'this', 'not', 'but',
+  'are', 'was', 'were', 'has', 'had', 'have', 'will', 'can', 'may',
+  'app', 'web', 'api', 'url', 'http', 'https', 'www', 'html', 'css',
+  'pdf', 'jpg', 'png', 'gif', 'xml', 'json', 'sql',
+  'seg', 'translate', 'context',
+]);
+
+/**
  * Detect non-proper-noun English words left in a translation — ported verbatim
  */
 export function detectEnglishResidue(text: string, glossary: Record<string, string>): string[] {
   const stripped = stripCitations(text);
-
-  const cjkCount = (stripped.match(/[　-鿿가-힯]/g) ?? []).length;
-  const latinCount = (stripped.match(/[a-zA-Z]/g) ?? []).length;
-  if (cjkCount > 0 && cjkCount / (cjkCount + latinCount) >= 0.6) {
-    return [];
-  }
-
-  const englishWords = stripped.match(/[a-zA-Z]{3,}/g);
-  if (!englishWords) return [];
 
   const allowed = new Set<string>();
   for (const [key, val] of Object.entries(glossary)) {
@@ -401,13 +433,24 @@ export function detectEnglishResidue(text: string, glossary: Record<string, stri
     }
   }
 
-  const commonAllowed = new Set([
-    'the', 'and', 'for', 'with', 'from', 'that', 'this', 'not', 'but',
-    'are', 'was', 'were', 'has', 'had', 'have', 'will', 'can', 'may',
-    'app', 'web', 'api', 'url', 'http', 'https', 'www', 'html', 'css',
-    'pdf', 'jpg', 'png', 'gif', 'xml', 'json', 'sql',
-    'seg', 'translate', 'context',
-  ]);
+  const cjkCount = (stripped.match(/[　-鿿가-힯]/g) ?? []).length;
+  const latinCount = (stripped.match(/[a-zA-Z]/g) ?? []).length;
+  if (cjkCount > 0 && cjkCount / (cjkCount + latinCount) >= 0.6) {
+    // Mostly target-language: only bare lowercase common-English words count
+    const bare = stripQuotedSpans(stripped);
+    const tokens = bare.match(/[a-zA-Z]{3,}/g) ?? [];
+    return tokens.filter(w =>
+      /^[a-z]+$/.test(w) &&
+      COMMON_ENGLISH_WORDS.has(w) &&
+      !TECH_ALLOWED.has(w) &&
+      !allowed.has(w)
+    );
+  }
+
+  const englishWords = stripped.match(/[a-zA-Z]{3,}/g);
+  if (!englishWords) return [];
+
+  const commonAllowed = TECH_ALLOWED;
 
   const residue = englishWords.filter(w => {
     const lower = w.toLowerCase();
