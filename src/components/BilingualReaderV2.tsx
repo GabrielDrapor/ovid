@@ -1374,6 +1374,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
               className="nav-button prev-button"
               onClick={goToPreviousChapter}
               title={t.reader.prevChapter}
+              aria-label={t.reader.prevChapter}
             >
               ↶
             </button>
@@ -1422,6 +1423,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
               className="nav-button next-button"
               onClick={goToNextChapter}
               title={t.reader.nextChapter}
+              aria-label={t.reader.nextChapter}
             >
               ↷
             </button>
