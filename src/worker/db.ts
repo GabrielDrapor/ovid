@@ -525,7 +525,7 @@ export async function getChapterContentV2(
     throw new Error('Book not found');
   }
 
-  const chapter = await db
+  let chapter = await db
     .prepare(
       `SELECT id, chapter_number, title, original_title, raw_html, order_index
        FROM chapters_v2
@@ -533,6 +533,33 @@ export async function getChapterContentV2(
     )
     .bind(book.id, chapterNumber)
     .first();
+
+  if (!chapter) {
+    // Stale chapter number (e.g. a client's cached reading position after a
+    // chapter-structure repair renumbered the book): serve the nearest valid
+    // chapter instead of erroring the whole reader. The response carries the
+    // real chapter_number, so clients re-sync their state from it.
+    chapter = await db
+      .prepare(
+        `SELECT id, chapter_number, title, original_title, raw_html, order_index
+         FROM chapters_v2
+         WHERE book_id = ? AND chapter_number <= ?
+         ORDER BY chapter_number DESC LIMIT 1`
+      )
+      .bind(book.id, chapterNumber)
+      .first();
+    if (!chapter) {
+      chapter = await db
+        .prepare(
+          `SELECT id, chapter_number, title, original_title, raw_html, order_index
+           FROM chapters_v2
+           WHERE book_id = ?
+           ORDER BY chapter_number ASC LIMIT 1`
+        )
+        .bind(book.id)
+        .first();
+    }
+  }
 
   if (!chapter) {
     throw new Error('Chapter not found');
