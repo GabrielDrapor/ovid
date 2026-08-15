@@ -2,6 +2,7 @@
  * Credits and Stripe payment functions
  */
 
+import { OvidDatabase } from '../platform/types';
 import { Env, User } from './types';
 import { getCurrentUser } from './auth';
 
@@ -12,7 +13,7 @@ export const CREDIT_PACKAGES = [
   { id: 'credits_15000', credits: 15000, price: 5000, currency: 'usd', name: '15,000 Credits' },
 ];
 
-export async function getUserCredits(db: D1Database, userId: number): Promise<number> {
+export async function getUserCredits(db: OvidDatabase, userId: number): Promise<number> {
   const user = await db
     .prepare('SELECT credits FROM users WHERE id = ?')
     .bind(userId)
@@ -21,7 +22,7 @@ export async function getUserCredits(db: D1Database, userId: number): Promise<nu
 }
 
 export async function deductCredits(
-  db: D1Database,
+  db: OvidDatabase,
   userId: number,
   amount: number,
   bookUuid: string,
@@ -51,7 +52,7 @@ export async function deductCredits(
 }
 
 export async function addCredits(
-  db: D1Database,
+  db: OvidDatabase,
   userId: number,
   amount: number,
   type: 'signup_bonus' | 'purchase' | 'refund',

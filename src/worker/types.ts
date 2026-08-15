@@ -1,11 +1,12 @@
 /**
  * Shared types for Cloudflare Worker
  */
+import { OvidDatabase, OvidStorage } from '../platform/types';
 
 export interface Env {
   ASSETS: Fetcher;
-  DB: D1Database;
-  ASSETS_BUCKET: R2Bucket;
+  DB: OvidDatabase;
+  ASSETS_BUCKET: OvidStorage;
   GOOGLE_OAUTH_CLIENT_ID: string;
   GOOGLE_OAUTH_CLIENT_SECRET: string;
   APP_URL: string;
