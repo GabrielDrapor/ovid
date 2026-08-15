@@ -1,0 +1,37 @@
+# Self-hosted Ovid. See SELF-HOSTING.md.
+#
+#   cp .env.example .env    # set OPENAI_API_KEY
+#   docker compose up -d    # http://localhost:8080
+
+services:
+  ovid:
+    build: .
+    image: ovid:latest
+    ports:
+      - '${OVID_PORT:-8080}:8080'
+    environment:
+      APP_URL: ${APP_URL:-http://localhost:8080}
+      # Sign-in: email codes work out of the box (codes are printed to the
+      # container log when RESEND_API_KEY is unset). Google OAuth optional.
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:-}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET:-}
+      # Book import/translation runs in the translator service below.
+      TRANSLATOR_SERVICE_URL: ${TRANSLATOR_SERVICE_URL:-http://translator:8080}
+      TRANSLATOR_SECRET: ${TRANSLATOR_SECRET:-selfhost-dev-secret}
+    volumes:
+      - ovid-data:/data
+    restart: unless-stopped
+
+  translator:
+    build: ./services/translator
+    image: ovid-translator:latest
+    environment:
+      TRANSLATOR_SECRET: ${TRANSLATOR_SECRET:-selfhost-dev-secret}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?set OPENAI_API_KEY in .env}
+      OPENAI_API_BASE_URL: ${OPENAI_API_BASE_URL:-https://api.openai.com/v1}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+    restart: unless-stopped
+
+volumes:
+  ovid-data:

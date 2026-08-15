@@ -35,7 +35,9 @@
     "sync-remote-book": "ts-node --project scripts/tsconfig.json scripts/sync-remote-book.ts",
     "backfill-links": "ts-node --project scripts/tsconfig.json scripts/backfill-internal-links.ts",
     "generate-cover": "ts-node --project scripts/tsconfig.json scripts/generate-cover.ts",
-    "eval-translation": "node scripts/eval-translation.mjs"
+    "eval-translation": "node scripts/eval-translation.mjs",
+    "build:server": "esbuild src/platform/node/server.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist-server/server.mjs --external:node:sqlite --alias:cloudflare:workers=./src/platform/node/workflow-stub.ts --banner:js=\"import{createRequire}from'module';const require=createRequire(import.meta.url);\"",
+    "start:selfhost": "node dist-server/server.mjs"
   },
   "keywords": [
     "react",
@@ -61,6 +63,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250830.0",
+    "@hono/node-server": "^2.1.1",
     "@playwright/test": "^1.58.2",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^6.9.1",
@@ -70,6 +73,7 @@
     "@types/react-dom": "18.3.5",
     "@types/three": "0.160.0",
     "dotenv": "^10.0.0",
+    "hono": "^4.13.2",
     "jsdom": "^28.1.0",
     "prettier": "^3.6.2",
     "serve": "^14.2.5",

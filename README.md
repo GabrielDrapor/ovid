@@ -56,8 +56,21 @@ Cloudflare D1         Cloudflare R2
 
 ## Quick Start
 
+### Run your own instance (Docker)
+
 ```bash
 git clone https://github.com/GabrielDrapor/ovid.git && cd ovid
+cp .env.example .env      # set OPENAI_API_KEY — the only required value
+docker compose up -d      # http://localhost:8080
+```
+
+Data lives in one volume (SQLite + uploaded files). No Cloudflare account
+needed. See **[SELF-HOSTING.md](SELF-HOSTING.md)** for configuration, backups,
+and troubleshooting.
+
+### Develop against Cloudflare
+
+```bash
 yarn install
 cp wrangler.toml.example wrangler.toml   # fill in your D1 database ID
 yarn db:init                           # create tables
@@ -94,6 +107,7 @@ docs/                Architecture & translation system docs
 
 ## Documentation
 
+- **[SELF-HOSTING.md](SELF-HOSTING.md)** — Running your own instance with Docker
 - **[CLAUDE.md](CLAUDE.md)** — Developer guide (commands, architecture, API endpoints, DB schema)
 - **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — System architecture overview
 - **[docs/TRANSLATION.md](docs/TRANSLATION.md)** — How the translation pipeline works

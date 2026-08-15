@@ -1,0 +1,16 @@
+node_modules
+services/translator/node_modules
+services/translator/dist
+build
+dist-server
+data
+.git
+.github
+.wrangler
+tests
+test-results
+playwright-report
+*.log
+.env
+.env.local
+.dev.vars
