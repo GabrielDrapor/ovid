@@ -45,3 +45,39 @@ jobs:
             test-results/
             playwright-report/
           retention-days: 7
+
+  self-host:
+    # Boots the self-hosted stack (SQLite + filesystem, no Cloudflare) and
+    # runs the real API against it, so the Docker path can't silently rot.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+      - run: yarn install --frozen-lockfile
+      - run: yarn build
+        env:
+          CI: true
+          SKIP_PREFLIGHT_CHECK: 'true'
+      - run: yarn build:server
+      - name: Start self-hosted server
+        run: |
+          mkdir -p /tmp/ovid-data
+          OVID_DATA_DIR=/tmp/ovid-data OVID_PORT=8899 \
+            node dist-server/server.mjs > /tmp/ovid-selfhost.log 2>&1 &
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8899/api/v2/books >/dev/null && exit 0
+            sleep 1
+          done
+          echo "server did not come up"; cat /tmp/ovid-selfhost.log; exit 1
+      - name: Verify functionality
+        run: yarn verify:selfhost
+        env:
+          OVID_URL: http://localhost:8899
+          OVID_LOG: /tmp/ovid-selfhost.log
+          OVID_DB: /tmp/ovid-data/ovid.db
+      - name: Server log on failure
+        if: failure()
+        run: cat /tmp/ovid-selfhost.log

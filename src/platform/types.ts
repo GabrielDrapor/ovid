@@ -7,7 +7,7 @@
  * deployment passes its bindings straight through with zero wrapper and zero
  * runtime cost, and no call site has to change. A self-hosted deployment
  * implements the same surface over SQLite and the local filesystem
- * (see src/platform/node/), so handlers stay identical on both runtimes.
+ * (see server/), so handlers stay identical on both runtimes.
  *
  * Keep these interfaces narrow: every method added here is one a self-host
  * adapter must reimplement.
