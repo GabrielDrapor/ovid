@@ -17,5 +17,9 @@ const localStorageMock: Storage = {
   key: (index) => Array.from(localStorageMap.keys())[index] ?? null,
   get length() { return localStorageMap.size; },
 };
-Object.defineProperty(window, 'localStorage', { value: localStorageMock, writable: true });
+// Node-environment suites (the self-host adapters) have no window; the
+// browser polyfills above simply don't apply there.
+if (typeof window !== 'undefined') {
+  Object.defineProperty(window, 'localStorage', { value: localStorageMock, writable: true });
+}
 

@@ -1,3 +1,9 @@
+/**
+ * @vitest-environment node
+ *
+ * These adapters use Node built-ins (node:sqlite, fs), so they must run in
+ * the node environment — the default jsdom environment can't resolve them.
+ */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
