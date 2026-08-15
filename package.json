@@ -37,7 +37,8 @@
     "generate-cover": "ts-node --project scripts/tsconfig.json scripts/generate-cover.ts",
     "eval-translation": "node scripts/eval-translation.mjs",
     "build:server": "esbuild src/platform/node/server.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist-server/server.mjs --external:node:sqlite --alias:cloudflare:workers=./src/platform/node/workflow-stub.ts --banner:js=\"import{createRequire}from'module';const require=createRequire(import.meta.url);\"",
-    "start:selfhost": "node dist-server/server.mjs"
+    "start:selfhost": "node dist-server/server.mjs",
+    "verify:selfhost": "node scripts/verify-selfhost.mjs"
   },
   "keywords": [
     "react",
