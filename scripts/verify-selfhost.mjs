@@ -28,6 +28,9 @@ const j = async (u, o) => {
 // Seed a small bilingual book directly through SQLite so the read path can be
 // checked without needing an LLM key or a real import.
 async function seedBook() {
+  // OVID_DB=external: the caller seeded already (e.g. the book was inserted
+  // inside a container), so just use what's there.
+  if (DB === 'external') return;
   const { DatabaseSync } = await import('node:sqlite');
   const d = new DatabaseSync(DB);
   const existing = d
@@ -87,6 +90,29 @@ async function seedBook() {
 }
 await seedBook();
 
+/**
+ * Read the newest sign-in code for an address out of the server log.
+ * Log tailing is asynchronous (a container's stdout reaches the file with a
+ * lag), so poll briefly; always take the *last* match, since reruns leave
+ * older codes behind.
+ */
+async function readLoginCode(fs, email, timeoutMs = 5000) {
+  const escaped = email.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    let text = '';
+    try {
+      text = fs.readFileSync(LOG, 'utf8');
+    } catch {
+      /* log not created yet */
+    }
+    const matches = [...text.matchAll(new RegExp(escaped + ': (\\d{6})', 'g'))];
+    if (matches.length) return matches[matches.length - 1][1];
+    if (Date.now() > deadline) return null;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+}
+
 console.log('\n[1] 书架与书籍');
 let r = await j('/api/v2/books');
 ck(
@@ -140,9 +166,7 @@ const st = await fetch(BASE + '/api/auth/email/start', {
   body: JSON.stringify({ email: 'reader2@example.com' }),
 });
 const fs = await import('node:fs');
-const code = (fs
-  .readFileSync(LOG, 'utf8')
-  .match(/reader2@example\.com: (\d{6})/) || [])[1];
+const code = await readLoginCode(fs, 'reader2@example.com');
 const vr = await fetch(BASE + '/api/auth/email/verify', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
