@@ -17,7 +17,7 @@ const env: Env = { DB: /* D1Database */, ASSETS_BUCKET: /* R2Bucket */, ... };
 ```
 
 A self-hosted deployment supplies its own implementations over SQLite and the
-local filesystem (`src/platform/node/`, added in a follow-up), and the
+local filesystem (`server/`, added in a follow-up), and the
 handlers are unchanged.
 
 ## Rules for changing these interfaces

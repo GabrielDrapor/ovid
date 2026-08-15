@@ -74,7 +74,7 @@ All settings are environment variables in `.env` (see `.env.example`):
 
 Handler code is identical on both: they talk to the platform interfaces in
 `src/platform/`, and Cloudflare's bindings satisfy those directly while
-`src/platform/node/` implements them over SQLite and the filesystem.
+`server/` implements them over SQLite and the filesystem.
 
 ### Granting yourself credits
 

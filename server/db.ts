@@ -13,7 +13,7 @@ import type {
   OvidRunResult,
   OvidStatement,
   OvidStatementResult,
-} from '../types';
+} from '../src/platform/types';
 
 /** D1 accepts booleans/undefined; SQLite's binder wants primitives. */
 function normalizeParams(params: unknown[]): unknown[] {

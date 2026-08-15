@@ -2,8 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { SqliteDatabase } from '../../../src/platform/node/db';
-import { FileStorage } from '../../../src/platform/node/storage';
+import { SqliteDatabase } from '../../../server/db';
+import { FileStorage } from '../../../server/storage';
 
 /**
  * The self-host adapters must behave like D1/R2 closely enough that handler

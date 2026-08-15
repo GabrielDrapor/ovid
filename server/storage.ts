@@ -13,7 +13,7 @@ import type {
   OvidStorage,
   OvidStoredObject,
   OvidStoredObjectMeta,
-} from '../types';
+} from '../src/platform/types';
 
 export class FileStorage implements OvidStorage {
   constructor(private root: string) {}

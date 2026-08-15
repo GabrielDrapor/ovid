@@ -9,6 +9,7 @@ RUN yarn install --frozen-lockfile --network-timeout 600000
 COPY tsconfig.json ./
 COPY public/ ./public/
 COPY src/ ./src/
+COPY server/ ./server/
 COPY database/ ./database/
 
 # React SPA

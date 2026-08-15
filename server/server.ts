@@ -18,8 +18,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SqliteDatabase } from './db';
 import { FileStorage } from './storage';
-import worker from '../../worker/index';
-import type { Env } from '../../worker/types';
+import worker from '../src/worker/index';
+import type { Env } from '../src/worker/types';
 
 const DATA_DIR = process.env.OVID_DATA_DIR || './data';
 const PORT = Number(process.env.OVID_PORT || 8080);
@@ -88,7 +88,7 @@ function createAssetsFetcher(buildDir: string) {
 async function bootstrapSchema(db: SqliteDatabase): Promise<void> {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const roots = [
-    path.resolve(here, '../../../database'),
+    path.resolve(here, '../database'),
     path.resolve(process.cwd(), 'database'),
   ];
   let dbDir: string | null = null;
