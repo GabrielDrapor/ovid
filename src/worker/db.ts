@@ -2,7 +2,7 @@
  * Database query functions (V2 - XPath-based)
  */
 
-export async function getAllBooksV2(db: D1Database, userId?: number) {
+export async function getAllBooksV2(db: OvidDatabase, userId?: number) {
   // shelf_slot_label mirrors getShelfSlots' resolution: global label on
   // public slots, the requesting user's own label on private slots.
   let query = `SELECT b.id, b.uuid, b.title, b.original_title, b.author, b.language_pair,
@@ -43,7 +43,7 @@ export async function getAllBooksV2(db: D1Database, userId?: number) {
   return books.results;
 }
 
-export async function getShelfSlots(db: D1Database, shelfId = 'main', userId?: number | null) {
+export async function getShelfSlots(db: OvidDatabase, shelfId = 'main', userId?: number | null) {
   const slots = await db.prepare(
     `SELECT ss.id, ss.shelf_id, ss.row, ss.col, ss.sort_order,
             CASE WHEN ss.is_public = 1 THEN ss.label ELSE ul.label END AS label,
@@ -63,7 +63,7 @@ export async function getShelfSlots(db: D1Database, shelfId = 'main', userId?: n
  * races with other requests creating the same coordinate concurrently.
  */
 export async function resolveOrCreateShelfSlot(
-  db: D1Database,
+  db: OvidDatabase,
   target: { slotId?: number | null; row?: number | null; col?: number | null } | null,
   shelfId = 'main'
 ): Promise<number | null> {
@@ -140,7 +140,7 @@ export async function resolveOrCreateShelfSlot(
  * single db.batch() so the renumber + upsert commit atomically.
  */
 export async function moveBookToSlot(
-  db: D1Database,
+  db: OvidDatabase,
   bookUuid: string,
   userId: number,
   target: { slotId?: number | null; row?: number | null; col?: number | null },
@@ -227,7 +227,7 @@ export async function moveBookToSlot(
  * mirroring who may upload into one.
  */
 export async function updateShelfSlotLabel(
-  db: D1Database,
+  db: OvidDatabase,
   slotId: number,
   userId: number,
   label: string | null
@@ -275,14 +275,14 @@ export async function updateShelfSlotLabel(
     .run();
 }
 
-export async function getBookStatus(db: D1Database, bookUuid: string): Promise<string | null> {
+export async function getBookStatus(db: OvidDatabase, bookUuid: string): Promise<string | null> {
   const book = await db.prepare('SELECT status FROM books_v2 WHERE uuid = ?')
     .bind(bookUuid)
     .first();
   return book ? (book.status as string) : null;
 }
 
-export async function updateBookStatus(db: D1Database, bookUuid: string, status: string): Promise<void> {
+export async function updateBookStatus(db: OvidDatabase, bookUuid: string, status: string): Promise<void> {
   await db.prepare('UPDATE books_v2 SET status = ? WHERE uuid = ?')
     .bind(status, bookUuid)
     .run();
@@ -293,7 +293,7 @@ export async function updateBookStatus(db: D1Database, bookUuid: string, status:
  * Used for async upload: book appears on shelf immediately while translating in background.
  */
 export async function insertBookShellV2(
-  db: D1Database,
+  db: OvidDatabase,
   bookData: {
     title: string;
     originalTitle: string;
@@ -353,7 +353,7 @@ export async function insertBookShellV2(
  * Insert translations for a single chapter (used during background translation)
  */
 export async function insertChapterTranslationsV2(
-  db: D1Database,
+  db: OvidDatabase,
   bookId: number,
   chapterNumber: number,
   translatedTitle: string,
@@ -387,7 +387,7 @@ export async function insertChapterTranslationsV2(
  * Returns { accessible: false } if the book doesn't exist or is private and not owned by the user.
  */
 export async function checkBookAccess(
-  db: D1Database,
+  db: OvidDatabase,
   bookUuid: string,
   userId?: number
 ): Promise<{ accessible: boolean; book?: any }> {
@@ -413,7 +413,7 @@ export async function checkBookAccess(
   return { accessible: false };
 }
 
-export async function getBookChaptersV2(db: D1Database, bookUuid: string) {
+export async function getBookChaptersV2(db: OvidDatabase, bookUuid: string) {
   const book = await db
     .prepare('SELECT id FROM books_v2 WHERE uuid = ?')
     .bind(bookUuid)
@@ -445,7 +445,7 @@ export async function getBookChaptersV2(db: D1Database, bookUuid: string) {
  * limit+1 row.
  */
 export async function searchBookV2(
-  db: D1Database,
+  db: OvidDatabase,
   bookUuid: string,
   pattern: string,
   limit: number,
@@ -512,7 +512,7 @@ export async function searchBookV2(
 }
 
 export async function getChapterContentV2(
-  db: D1Database,
+  db: OvidDatabase,
   chapterNumber: number,
   bookUuid: string
 ) {
@@ -609,7 +609,7 @@ export async function getChapterContentV2(
 /**
  * Delete a book and all its chapters/translations from V2 tables
  */
-export async function deleteBookV2(db: D1Database, bookUuid: string, userId: number): Promise<void> {
+export async function deleteBookV2(db: OvidDatabase, bookUuid: string, userId: number): Promise<void> {
   const book = await db.prepare('SELECT id, user_id FROM books_v2 WHERE uuid = ?')
     .bind(bookUuid)
     .first();
@@ -648,7 +648,7 @@ export async function deleteBookV2(db: D1Database, bookUuid: string, userId: num
  * Insert a processed book into V2 database tables (XPath-based)
  */
 export async function insertProcessedBookV2(
-  db: D1Database,
+  db: OvidDatabase,
   processedBook: {
     metadata: {
       title: string;
@@ -785,7 +785,7 @@ export interface TranslationJob {
 }
 
 export async function createTranslationJob(
-  db: D1Database,
+  db: OvidDatabase,
   bookId: number,
   bookUuid: string,
   sourceLang: string,
@@ -798,7 +798,7 @@ export async function createTranslationJob(
   ).bind(bookId, bookUuid, sourceLang, targetLang, totalChapters).run();
 }
 
-export async function getTranslationJob(db: D1Database, bookUuid: string): Promise<TranslationJob | null> {
+export async function getTranslationJob(db: OvidDatabase, bookUuid: string): Promise<TranslationJob | null> {
   const row = await db.prepare(
     'SELECT * FROM translation_jobs WHERE book_uuid = ? LIMIT 1'
   ).bind(bookUuid).first();
@@ -806,7 +806,7 @@ export async function getTranslationJob(db: D1Database, bookUuid: string): Promi
 }
 
 export async function updateTranslationJob(
-  db: D1Database,
+  db: OvidDatabase,
   bookUuid: string,
   updates: Partial<Pick<TranslationJob,
     'status' | 'current_chapter' | 'current_item_offset' | 'completed_chapters' |
@@ -829,7 +829,7 @@ export async function updateTranslationJob(
 }
 
 export async function storeChapterTextNodes(
-  db: D1Database,
+  db: OvidDatabase,
   bookId: number,
   chapterNumber: number,
   textNodesJson: string
@@ -840,7 +840,7 @@ export async function storeChapterTextNodes(
 }
 
 export async function getChapterTextNodes(
-  db: D1Database,
+  db: OvidDatabase,
   bookId: number,
   chapterNumber: number
 ): Promise<Array<{ xpath: string; text: string; html: string; orderIndex: number }> | null> {
@@ -853,7 +853,7 @@ export async function getChapterTextNodes(
 }
 
 export async function getChapterIdByNumber(
-  db: D1Database,
+  db: OvidDatabase,
   bookId: number,
   chapterNumber: number
 ): Promise<number | null> {
@@ -864,7 +864,7 @@ export async function getChapterIdByNumber(
 }
 
 export async function insertTranslationRow(
-  db: D1Database,
+  db: OvidDatabase,
   chapterId: number,
   xpath: string,
   originalText: string,
@@ -879,7 +879,7 @@ export async function insertTranslationRow(
 }
 
 export async function updateChapterTitle(
-  db: D1Database,
+  db: OvidDatabase,
   bookId: number,
   chapterNumber: number,
   translatedTitle: string
@@ -889,13 +889,13 @@ export async function updateChapterTitle(
   ).bind(translatedTitle, bookId, chapterNumber).run();
 }
 
-export async function clearTextNodesJson(db: D1Database, bookId: number): Promise<void> {
+export async function clearTextNodesJson(db: OvidDatabase, bookId: number): Promise<void> {
   await db.prepare(
     'UPDATE chapters_v2 SET text_nodes_json = NULL WHERE book_id = ?'
   ).bind(bookId).run();
 }
 
-export async function deleteTranslationJob(db: D1Database, bookUuid: string): Promise<void> {
+export async function deleteTranslationJob(db: OvidDatabase, bookUuid: string): Promise<void> {
   await db.prepare('DELETE FROM translation_jobs WHERE book_uuid = ?')
     .bind(bookUuid).run();
 }
@@ -922,7 +922,7 @@ export interface UserBookProgress {
  * Upsert user's reading progress for a book
  */
 export async function upsertUserBookProgress(
-  db: D1Database,
+  db: OvidDatabase,
   userId: number,
   bookUuid: string,
   isCompleted: boolean,
@@ -955,7 +955,7 @@ export async function upsertUserBookProgress(
  * Update reading_progress (and optionally chapter/xpath) without touching is_completed or completed_at
  */
 export async function updateReadingProgress(
-  db: D1Database,
+  db: OvidDatabase,
   userId: number,
   bookUuid: string,
   readingProgress: number,
@@ -992,7 +992,7 @@ export async function updateReadingProgress(
  * Get all reading progress for a user (batch)
  */
 export async function getAllUserBookProgress(
-  db: D1Database,
+  db: OvidDatabase,
   userId: number
 ): Promise<UserBookProgress[]> {
   const rows = await db.prepare(
@@ -1012,7 +1012,7 @@ export async function getAllUserBookProgress(
  * Generate and store a share token for a book (owner only)
  */
 export async function createShareToken(
-  db: D1Database,
+  db: OvidDatabase,
   bookUuid: string,
   userId: number
 ): Promise<string> {
@@ -1035,7 +1035,7 @@ export async function createShareToken(
  * Get share token for a book (owner only)
  */
 export async function getShareToken(
-  db: D1Database,
+  db: OvidDatabase,
   bookUuid: string,
   userId: number
 ): Promise<string | null> {
@@ -1052,7 +1052,7 @@ export async function getShareToken(
  * Revoke share token for a book (owner only)
  */
 export async function revokeShareToken(
-  db: D1Database,
+  db: OvidDatabase,
   bookUuid: string,
   userId: number
 ): Promise<void> {
@@ -1069,8 +1069,9 @@ export async function revokeShareToken(
 /**
  * Get book by share token (for unauthenticated access)
  */
+import { OvidDatabase } from '../platform/types';
 export async function getBookByShareToken(
-  db: D1Database,
+  db: OvidDatabase,
   token: string
 ): Promise<{ id: number; uuid: string } | null> {
   const book = await db.prepare('SELECT id, uuid FROM books_v2 WHERE share_token = ?')
@@ -1079,7 +1080,7 @@ export async function getBookByShareToken(
 }
 
 export async function getUserBookProgress(
-  db: D1Database,
+  db: OvidDatabase,
   userId: number,
   bookUuid: string
 ): Promise<UserBookProgress | null> {

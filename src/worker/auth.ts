@@ -2,6 +2,7 @@
  * Authentication helper functions
  */
 
+import { OvidDatabase } from '../platform/types';
 import { Env, User } from './types';
 
 // Welcome bonus credits for new users
@@ -34,7 +35,7 @@ export function createExpiredSessionCookie(): string {
 
 /** Create a 30-day session for the user and return the token. */
 export async function createSession(
-  db: D1Database,
+  db: OvidDatabase,
   userId: number
 ): Promise<string> {
   const sessionToken = generateSessionToken();
@@ -49,7 +50,7 @@ export async function createSession(
 }
 
 export async function getCurrentUser(
-  db: D1Database,
+  db: OvidDatabase,
   request: Request
 ): Promise<User | null> {
   const sessionToken = getSessionCookie(request);
