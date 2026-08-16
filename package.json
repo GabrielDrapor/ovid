@@ -34,6 +34,7 @@
     "remove-book:remote": "ts-node --project scripts/tsconfig.json scripts/remove-book.ts --mode=remote",
     "sync-remote-book": "ts-node --project scripts/tsconfig.json scripts/sync-remote-book.ts",
     "backfill-links": "ts-node --project scripts/tsconfig.json scripts/backfill-internal-links.ts",
+    "backfill-residue": "ts-node --project scripts/tsconfig.json scripts/backfill-residue.ts",
     "generate-cover": "ts-node --project scripts/tsconfig.json scripts/generate-cover.ts",
     "eval-translation": "node scripts/eval-translation.mjs",
     "build:server": "esbuild server/server.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist-server/server.mjs --external:node:sqlite --alias:cloudflare:workers=./server/workflow-stub.ts --banner:js=\"import{createRequire}from'module';const require=createRequire(import.meta.url);\"",

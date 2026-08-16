@@ -126,4 +126,47 @@ describe('detectEnglishResidue', () => {
       expect(detectEnglishResidue(text, { simply: 'simply' })).toEqual([]);
     });
   });
+
+  describe('English word shapes (regression: The Mixer, reported 2026-08)', () => {
+    // The curated list only holds function words, so ordinary adverbs and
+    // adjectives shipped untranslated inside otherwise-Chinese paragraphs.
+    it('flags a bare adverb the word list never listed', () => {
+      const text =
+        '曼联的历史最佳射手 arguably 从未找到自己的最佳位置：在C罗时代常被拉边，随后几年在9号和10号位之间轮换。';
+      expect(detectEnglishResidue(text, noGlossary)).toEqual(['arguably']);
+    });
+
+    it('flags -ly adverbs, -ive/-less adjectives and -ed/-ing participles', () => {
+      const cases: [string, string][] = [
+        ['随后他 inevitably 被换下场。', 'inevitably'],
+        ['哈福德指导的训练课塑造了 cohesive 的整体配合。', 'cohesive'],
+        ['阿尔穆尼亚遭受了 relentless 的高空轰炸，他似乎毫无准备。', 'relentless'],
+        ['他让兹拉坦攻入两粒几乎 identical 的进球。', 'identical'],
+        ['罗布森以典型的 welcoming 风格邀请他过来喝杯茶。', 'welcoming'],
+        ['他被部署在中场，tasked 于限制对方的组织核心。', 'tasked'],
+        ['草皮妨碍了技术型客队的 possession 打法。', 'possession'],
+      ];
+      for (const [text, word] of cases) {
+        expect(detectEnglishResidue(text, noGlossary)).toContain(word);
+      }
+    });
+
+    it('flags connectives the list was missing', () => {
+      const text = '他从35码外击中门框，却 somehow 未能进球；otherwise 那将是一记世界波。';
+      const residue = detectEnglishResidue(text, noGlossary);
+      expect(residue).toContain('somehow');
+      expect(residue).toContain('otherwise');
+    });
+
+    it('leaves pinyin, quoted terms and short syllables alone', () => {
+      // The -ing shape needs 7+ chars so pinyin syllables can't match, and the
+      // book's own subject term stays quoted and untouched.
+      expect(
+        detectEnglishResidue('他在 Beijing 的经历，ping xing ming 三个音节。', noGlossary)
+      ).toEqual([]);
+      expect(
+        detectEnglishResidue('西班牙人把这种踢法叫做“tiki-taka”，节奏极快。', noGlossary)
+      ).toEqual([]);
+    });
+  });
 });

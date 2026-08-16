@@ -397,8 +397,23 @@ const COMMON_ENGLISH_WORDS = new Set((
   'small some someone something sometimes soon still such sure taken tell than that their them themselves then there ' +
   'these they thing things think third this those though thought three through thus time today together told took ' +
   'toward turn under until upon used using very want water week well went were what when where whether which while ' +
-  'whole whom whose will with within without word work world would year years your yourself'
+  'whole whom whose will with within without word work world would year years your yourself ' +
+  // connectives and adverbs that carry no English inflection to key off
+  'altogether anyhow besides elsewhere furthermore hence henceforth meanwhile moreover ' +
+  'nevertheless nonetheless otherwise somehow somewhat somewhere thereafter therefore ' +
+  'throughout whatever whenever whereas wherever'
 ).split(/\s+/));
+
+/**
+ * Unmistakably English inflections that cannot be pinyin or romaji — see
+ * translate-worker.ts for the rationale and the corpus numbers (0.19% of
+ * mostly-CJK segments flagged, vs 0.004% for the word list alone).
+ */
+const ENGLISH_WORD_SHAPES = [
+  /^[a-z]{3,}ly$/,
+  /^[a-z]{2,}(?:tion|sion|ment|ness|able|ible|ive|ous|ful|less|ical|istic)$/,
+  /^[a-z]{4,}(?:ing|ed|al)$/,
+];
 
 /** Strip quoted/parenthesized spans — quoted English is deliberate, not residue */
 function stripQuotedSpans(text: string): string {
@@ -438,12 +453,13 @@ export function detectEnglishResidue(text: string, glossary: Record<string, stri
   const cjkCount = (stripped.match(/[　-鿿가-힯]/g) ?? []).length;
   const latinCount = (stripped.match(/[a-zA-Z]/g) ?? []).length;
   if (cjkCount > 0 && cjkCount / (cjkCount + latinCount) >= 0.6) {
-    // Mostly target-language: only bare lowercase common-English words count
+    // Mostly target-language: only bare lowercase English words count — either
+    // curated function words or an unmistakably English inflection
     const bare = stripQuotedSpans(stripped);
     const tokens = bare.match(/[a-zA-Z]{3,}/g) ?? [];
     return tokens.filter(w =>
       /^[a-z]+$/.test(w) &&
-      COMMON_ENGLISH_WORDS.has(w) &&
+      (COMMON_ENGLISH_WORDS.has(w) || ENGLISH_WORD_SHAPES.some(re => re.test(w))) &&
       !TECH_ALLOWED.has(w) &&
       !allowed.has(w)
     );

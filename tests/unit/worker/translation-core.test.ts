@@ -196,6 +196,14 @@ describe('detectEnglishResidue (mirror of translate-worker.ts)', () => {
     expect(detectEnglishResidue(text, {})).toEqual(['simply']);
   });
 
+  it('flags English word shapes outside the curated list (The Mixer regression)', () => {
+    const text =
+      '曼联的历史最佳射手 arguably 从未找到自己的最佳位置：在C罗时代常被拉边，随后几年在9号和10号位之间轮换。';
+    expect(detectEnglishResidue(text, {})).toEqual(['arguably']);
+    expect(detectEnglishResidue('阿尔穆尼亚遭受了 relentless 的高空轰炸。', {})).toContain('relentless');
+    expect(detectEnglishResidue('他从35码外击中门框，却 somehow 未能进球。', {})).toContain('somehow');
+  });
+
   it('does not flag quoted words, glosses, proper nouns, or pinyin', () => {
     expect(detectEnglishResidue('因为剪切者在剪“keep away”这个词时不得不剪了两下。', {})).toEqual([]);
     expect(detectEnglishResidue('每当您看到这样一座泰勒（tell）或孤立土丘。', {})).toEqual([]);
