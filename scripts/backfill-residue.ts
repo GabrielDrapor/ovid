@@ -71,6 +71,7 @@ async function loadTranslator(): Promise<TranslatorModule> {
 interface Options {
   uuid: string;
   all: boolean;
+  highCjkOnly: boolean;
   env: 'local' | 'remote';
   dryRun: boolean;
   limit: number;
@@ -82,6 +83,7 @@ function parseArgs(): Options {
   const opts: Options = {
     uuid: '',
     all: false,
+    highCjkOnly: false,
     env: 'local',
     dryRun: false,
     limit: Infinity,
@@ -93,6 +95,7 @@ function parseArgs(): Options {
     const [, key, value] = m;
     if (key === 'uuid') opts.uuid = value || '';
     else if (key === 'all') opts.all = true;
+    else if (key === 'high-cjk-only') opts.highCjkOnly = true;
     else if (key === 'env' && (value === 'local' || value === 'remote'))
       opts.env = value;
     else if (key === 'dry-run') opts.dryRun = true;
@@ -108,7 +111,7 @@ function parseArgs(): Options {
     else if (key === 'log') opts.log = value;
     else if (key === 'help') {
       console.log(
-        'Usage: yarn backfill-residue -- (--uuid=<uuid> | --all) [--env=local|remote] [--dry-run] [--limit=N] [--skip-ids=1,2] [--log=path]'
+        'Usage: yarn backfill-residue -- (--uuid=<uuid> | --all) [--env=local|remote] [--high-cjk-only] [--dry-run] [--limit=N] [--skip-ids=1,2] [--log=path]'
       );
       process.exit(0);
     }
@@ -118,6 +121,23 @@ function parseArgs(): Options {
     process.exit(1);
   }
   return opts;
+}
+
+/** Mirror of translate-worker.ts — above this, the pipeline splits the node */
+const LARGE_NODE_CHAR_THRESHOLD = 3000;
+
+/**
+ * Is this segment judged by the detector's mostly-CJK branch? That branch is
+ * where the word-shape fix lives, so --high-cjk-only restricts a backfill to
+ * prose that reads as translated Chinese with English left inside it. The
+ * mixed-script branch flags name lists, credits pages and TOC headings, whose
+ * English is usually deliberate — those rows predate the fix and are not what
+ * a backfill should be rewriting.
+ */
+function isHighCjk(text: string): boolean {
+  const cjk = (text.match(/[　-鿿가-힯]/g) ?? []).length;
+  const latin = (text.match(/[a-zA-Z]/g) ?? []).length;
+  return cjk > 0 && cjk / (cjk + latin) >= 0.6;
 }
 
 // ---- D1 access (mirrors backfill-internal-links.ts) ----
@@ -346,7 +366,12 @@ async function processBook(
       ...r,
       residue: detectEnglishResidue(r.translated_text || '', glossary),
     }))
-    .filter((r: any) => r.residue.length > 0 && !opts.skipIds.has(r.id))
+    .filter(
+      (r: any) =>
+        r.residue.length > 0 &&
+        !opts.skipIds.has(r.id) &&
+        (!opts.highCjkOnly || isHighCjk(r.translated_text || ''))
+    )
     .slice(0, opts.limit);
 
   if (flagged.length === 0) return;
@@ -364,6 +389,17 @@ async function processBook(
     if (opts.dryRun) {
       console.log(
         `· ${label}\n    ${String(row.translated_text).slice(0, 160)}`
+      );
+      continue;
+    }
+
+    // The pipeline splits nodes this long across several LLM calls
+    // (LARGE_NODE_CHAR_THRESHOLD); a single call would come back truncated,
+    // and truncated output has no residue left to warn us with.
+    if (String(row.original_text).length > LARGE_NODE_CHAR_THRESHOLD) {
+      unchanged++;
+      console.log(
+        `- ${label} — source node is ${row.original_text.length} chars, too long for a single call; skipped`
       );
       continue;
     }
@@ -391,6 +427,16 @@ async function processBook(
       unchanged++;
       console.log(
         `- ${label} — retry still leaves [${after.join(', ')}], keeping original`
+      );
+      continue;
+    }
+
+    // Truncation tripwire: a half-length replacement is a dropped tail, not a
+    // tighter translation — and a truncated tail reads as residue-free.
+    if (retranslated.length < String(row.translated_text).length * 0.6) {
+      unchanged++;
+      console.log(
+        `- ${label} — replacement is ${retranslated.length} chars vs ${row.translated_text.length}, looks truncated; keeping original`
       );
       continue;
     }
