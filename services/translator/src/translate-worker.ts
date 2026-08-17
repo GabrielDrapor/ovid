@@ -314,7 +314,7 @@ ${glossaryStr}`,
  * translating each chunk independently, then joining the results.
  * This prevents LLM output truncation for very long single nodes.
  */
-async function translateLargeNode(
+export async function translateLargeNode(
   config: LLMConfig,
   text: string,
   glossary: Record<string, string>,

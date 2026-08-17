@@ -48,6 +48,14 @@ interface TranslatorModule {
     targetLanguage: string,
     context?: string[]
   ) => Promise<string>;
+  translateLargeNode: (
+    config: { apiKey: string; baseURL: string; model: string },
+    text: string,
+    glossary: Record<string, string>,
+    sourceLanguage: string,
+    targetLanguage: string,
+    bookUuid: string
+  ) => Promise<string>;
   detectEnglishResidue: (
     text: string,
     glossary: Record<string, string>
@@ -326,7 +334,8 @@ async function processBook(
   }
 ) {
   const { opts, query, translator, llmConfig, logPath, totals } = ctx;
-  const { translateText, detectEnglishResidue } = translator;
+  const { translateText, translateLargeNode, detectEnglishResidue } =
+    translator;
   const [sourceLanguage, targetLanguage] = String(
     book.language_pair || 'en-zh'
   ).split('-');
@@ -393,26 +402,30 @@ async function processBook(
       continue;
     }
 
-    // The pipeline splits nodes this long across several LLM calls
-    // (LARGE_NODE_CHAR_THRESHOLD); a single call would come back truncated,
-    // and truncated output has no residue left to warn us with.
-    if (String(row.original_text).length > LARGE_NODE_CHAR_THRESHOLD) {
-      unchanged++;
-      console.log(
-        `- ${label} — source node is ${row.original_text.length} chars, too long for a single call; skipped`
-      );
-      continue;
-    }
+    // Nodes past the pipeline's split threshold go through the same chunked
+    // path it uses; a single call would come back truncated, and a truncated
+    // tail has no residue left to warn us with.
+    const isLargeNode =
+      String(row.original_text).length > LARGE_NODE_CHAR_THRESHOLD;
 
     let retranslated: string;
     try {
-      retranslated = await translateText(
-        llmConfig,
-        row.original_text,
-        glossary,
-        sourceLanguage,
-        targetLanguage
-      );
+      retranslated = isLargeNode
+        ? await translateLargeNode(
+            llmConfig,
+            row.original_text,
+            glossary,
+            sourceLanguage,
+            targetLanguage,
+            book.uuid
+          )
+        : await translateText(
+            llmConfig,
+            row.original_text,
+            glossary,
+            sourceLanguage,
+            targetLanguage
+          );
     } catch (err) {
       console.warn(
         `✗ ${label} — translation failed: ${(err as Error).message}`
