@@ -19,6 +19,7 @@
  *   yarn backfill-residue -- --uuid="<book-uuid>" [--env=local|remote]
  *                            [--dry-run] [--limit=N] [--skip-ids=1,2,3]
  *                            [--log=path.jsonl]
+ *   yarn backfill-residue -- --all --env=remote --dry-run   # sweep every book
  *
  * Needs OPENAI_API_KEY / OPENAI_API_BASE_URL / OPENAI_MODEL in .env. Remote
  * mode uses the D1 REST API when CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_API_TOKEN
@@ -27,9 +28,8 @@
  */
 
 import 'dotenv/config';
-import { execSync } from 'child_process';
+import { execFileSync, execSync } from 'child_process';
 import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
 import { pathToFileURL } from 'url';
 
@@ -70,6 +70,7 @@ async function loadTranslator(): Promise<TranslatorModule> {
 
 interface Options {
   uuid: string;
+  all: boolean;
   env: 'local' | 'remote';
   dryRun: boolean;
   limit: number;
@@ -80,6 +81,7 @@ interface Options {
 function parseArgs(): Options {
   const opts: Options = {
     uuid: '',
+    all: false,
     env: 'local',
     dryRun: false,
     limit: Infinity,
@@ -90,6 +92,7 @@ function parseArgs(): Options {
     if (!m) continue;
     const [, key, value] = m;
     if (key === 'uuid') opts.uuid = value || '';
+    else if (key === 'all') opts.all = true;
     else if (key === 'env' && (value === 'local' || value === 'remote'))
       opts.env = value;
     else if (key === 'dry-run') opts.dryRun = true;
@@ -105,13 +108,13 @@ function parseArgs(): Options {
     else if (key === 'log') opts.log = value;
     else if (key === 'help') {
       console.log(
-        'Usage: yarn backfill-residue -- --uuid=<uuid> [--env=local|remote] [--dry-run] [--limit=N] [--skip-ids=1,2] [--log=path]'
+        'Usage: yarn backfill-residue -- (--uuid=<uuid> | --all) [--env=local|remote] [--dry-run] [--limit=N] [--skip-ids=1,2] [--log=path]'
       );
       process.exit(0);
     }
   }
-  if (!opts.uuid) {
-    console.error('Missing --uuid');
+  if (!opts.uuid && !opts.all) {
+    console.error('Missing --uuid (or --all to sweep every book)');
     process.exit(1);
   }
   return opts;
@@ -124,38 +127,42 @@ function parseArgs(): Options {
  * for remote mode when the Cloudflare API credentials aren't in .env (a
  * `wrangler login` session is enough).
  *
- * Reads go through --command (remote --file returns only a batch summary, not
- * rows); writes go through a temp --file so multi-line translated text can't
- * be mangled by shell quoting.
+ * Statements always go through --command, passed as an argv element via
+ * execFileSync (no shell), so multi-line translated text needs no escaping.
+ * The --file path is deliberately avoided: it uploads a temp file per call and
+ * remote runs return only a batch summary instead of rows.
  */
 function wranglerQuery(sql: string, params: unknown[], remote: boolean): any[] {
   const inlined = params.length ? inlineParams(sql, params) : sql;
-  const scope = remote ? '--remote' : '--local';
-
-  if (/^\s*(?:update|insert|delete)\b/i.test(inlined)) {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ovid-residue-'));
-    const file = path.join(dir, 'stmt.sql');
-    fs.writeFileSync(file, inlined);
+  // D1 occasionally answers a large read with "fetch failed" — one flaky call
+  // must not abandon a library-wide sweep half-way through.
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      execSync(
-        `npx wrangler d1 execute ovid-db ${scope} --json --file ${file}`,
-        {
-          encoding: 'utf8',
-          maxBuffer: 64 * 1024 * 1024,
-        }
+      const out = execFileSync(
+        'npx',
+        [
+          'wrangler',
+          'd1',
+          'execute',
+          'ovid-db',
+          remote ? '--remote' : '--local',
+          '--json',
+          '--command',
+          inlined,
+        ],
+        { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 }
       );
-      return [];
-    } finally {
-      fs.rmSync(dir, { recursive: true, force: true });
+      const start = out.indexOf('[');
+      return (
+        JSON.parse(start === -1 ? out : out.slice(start))[0]?.results || []
+      );
+    } catch (err) {
+      lastErr = err;
+      execSync(`sleep ${2 * (attempt + 1)}`);
     }
   }
-
-  const out = execSync(
-    `npx wrangler d1 execute ovid-db ${scope} --json --command "${inlined.replace(/"/g, '\\"')}"`,
-    { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 }
-  );
-  const start = out.indexOf('[');
-  return JSON.parse(start === -1 ? out : out.slice(start))[0]?.results || [];
+  throw lastErr;
 }
 
 /** The wrangler path has no bound-parameter support — inline them safely. */
@@ -205,15 +212,31 @@ function sqlQuote(s: string): string {
 
 // ---- Main ----
 
+type Query = (sql: string, params?: unknown[]) => Promise<any[]>;
+
+interface BookRow {
+  id: number;
+  uuid: string;
+  title: string;
+  language_pair: string;
+}
+
+interface Totals {
+  flagged: number;
+  fixed: number;
+  improved: number;
+  unchanged: number;
+}
+
 async function main() {
   const opts = parseArgs();
-  const query =
+  const query: Query =
     opts.env === 'local'
       ? async (sql: string, params: unknown[] = []) =>
           wranglerQuery(sql, params, false)
       : (sql: string, params: unknown[] = []) => remoteQuery(sql, params);
 
-  const { translateText, detectEnglishResidue } = await loadTranslator();
+  const translator = await loadTranslator();
 
   const llmConfig = {
     apiKey: process.env.OPENAI_API_KEY || '',
@@ -225,21 +248,71 @@ async function main() {
     process.exit(1);
   }
 
-  const books = await query(
-    `SELECT id, uuid, title, language_pair FROM books_v2 WHERE uuid = ${sqlQuote(opts.uuid)}`
-  );
+  const books: BookRow[] = opts.all
+    ? await query(
+        `SELECT id, uuid, title, language_pair FROM books_v2 ORDER BY id`
+      )
+    : await query(
+        `SELECT id, uuid, title, language_pair FROM books_v2 WHERE uuid = ${sqlQuote(opts.uuid)}`
+      );
   if (books.length === 0) {
-    console.error(`Book ${opts.uuid} not found in ${opts.env} DB`);
+    console.error(
+      opts.all
+        ? `No books found in ${opts.env} DB`
+        : `Book ${opts.uuid} not found in ${opts.env} DB`
+    );
     process.exit(1);
   }
-  const book = books[0];
+
+  const logPath =
+    opts.log ||
+    path.resolve(
+      process.cwd(),
+      `backfill-residue-${opts.all ? 'all' : opts.uuid}.jsonl`
+    );
+
+  const totals: Totals = { flagged: 0, fixed: 0, improved: 0, unchanged: 0 };
+  for (const book of books) {
+    await processBook(book, {
+      opts,
+      query,
+      translator,
+      llmConfig,
+      logPath,
+      totals,
+    });
+  }
+
+  if (books.length > 1) {
+    console.log(
+      `\n== ${books.length} books: ${totals.flagged} flagged, ${totals.fixed} clean, ` +
+        `${totals.improved} improved, ${totals.unchanged} left as-is`
+    );
+  }
+  if (!opts.dryRun && totals.fixed + totals.improved > 0) {
+    console.log(`Rollback log: ${logPath}`);
+  }
+}
+
+async function processBook(
+  book: BookRow,
+  ctx: {
+    opts: Options;
+    query: Query;
+    translator: TranslatorModule;
+    llmConfig: { apiKey: string; baseURL: string; model: string };
+    logPath: string;
+    totals: Totals;
+  }
+) {
+  const { opts, query, translator, llmConfig, logPath, totals } = ctx;
+  const { translateText, detectEnglishResidue } = translator;
   const [sourceLanguage, targetLanguage] = String(
     book.language_pair || 'en-zh'
   ).split('-');
-  console.log(`📖 ${book.title} (${book.uuid}), book_id=${book.id}`);
 
   const jobs = await query(
-    `SELECT glossary_json FROM translation_jobs WHERE book_uuid = ${sqlQuote(opts.uuid)}`
+    `SELECT glossary_json FROM translation_jobs WHERE book_uuid = ${sqlQuote(book.uuid)}`
   );
   let glossary: Record<string, string> = {};
   try {
@@ -249,15 +322,24 @@ async function main() {
       '   glossary_json unparseable — proceeding without a glossary'
     );
   }
-  console.log(`   glossary: ${Object.keys(glossary).length} terms`);
 
-  const rows = await query(
-    `SELECT t.id, t.original_text, t.translated_text, c.chapter_number
-     FROM translations_v2 t JOIN chapters_v2 c ON c.id = t.chapter_id
-     WHERE c.book_id = ${book.id}
-     ORDER BY c.chapter_number, t.order_index`
-  );
-  console.log(`   ${rows.length} translated segments`);
+  // Only rows with a run of 3+ lowercase latin letters can hold residue —
+  // the prefilter keeps the sweep from hauling every Chinese paragraph in
+  // the library across the wire. Paged, because a whole book's candidate
+  // rows in one response is what makes D1 answer "fetch failed".
+  const PAGE = 300;
+  const rows: any[] = [];
+  for (let offset = 0; ; offset += PAGE) {
+    const page = await query(
+      `SELECT t.id, t.original_text, t.translated_text, c.chapter_number
+       FROM translations_v2 t JOIN chapters_v2 c ON c.id = t.chapter_id
+       WHERE c.book_id = ${book.id} AND t.translated_text GLOB '*[a-z][a-z][a-z]*'
+       ORDER BY c.chapter_number, t.order_index
+       LIMIT ${PAGE} OFFSET ${offset}`
+    );
+    rows.push(...page);
+    if (page.length < PAGE) break;
+  }
 
   const flagged = rows
     .map((r: any) => ({
@@ -267,14 +349,12 @@ async function main() {
     .filter((r: any) => r.residue.length > 0 && !opts.skipIds.has(r.id))
     .slice(0, opts.limit);
 
-  console.log(
-    `   ${flagged.length} segments flagged by the current detector\n`
-  );
   if (flagged.length === 0) return;
-
-  const logPath =
-    opts.log ||
-    path.resolve(process.cwd(), `backfill-residue-${opts.uuid}.jsonl`);
+  totals.flagged += flagged.length;
+  console.log(
+    `\n📖 ${book.title} (${book.uuid}) — ${flagged.length} flagged of ${rows.length} candidate segments, ` +
+      `glossary ${Object.keys(glossary).length} terms`
+  );
 
   let fixed = 0;
   let improved = 0;
@@ -335,9 +415,12 @@ async function main() {
     console.log(`✓ ${label}${after.length ? ` → [${after.join(', ')}]` : ''}`);
   }
 
+  totals.fixed += fixed;
+  totals.improved += improved;
+  totals.unchanged += unchanged;
   if (!opts.dryRun) {
     console.log(
-      `\nDone: ${fixed} clean, ${improved} improved, ${unchanged} left as-is. Rollback log: ${logPath}`
+      `   ${fixed} clean, ${improved} improved, ${unchanged} left as-is`
     );
   }
 }
