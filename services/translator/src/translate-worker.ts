@@ -231,7 +231,7 @@ Return ONLY a valid JSON object. Be concise — short values, no commentary. Exa
 /**
  * Translate a single text segment with glossary context
  */
-async function translateText(
+export async function translateText(
   config: LLMConfig,
   text: string,
   glossary: Record<string, string>,
@@ -314,7 +314,7 @@ ${glossaryStr}`,
  * translating each chunk independently, then joining the results.
  * This prevents LLM output truncation for very long single nodes.
  */
-async function translateLargeNode(
+export async function translateLargeNode(
   config: LLMConfig,
   text: string,
   glossary: Record<string, string>,
@@ -441,8 +441,30 @@ const COMMON_ENGLISH_WORDS = new Set((
   'small some someone something sometimes soon still such sure taken tell than that their them themselves then there ' +
   'these they thing things think third this those though thought three through thus time today together told took ' +
   'toward turn under until upon used using very want water week well went were what when where whether which while ' +
-  'whole whom whose will with within without word work world would year years your yourself'
+  'whole whom whose will with within without word work world would year years your yourself ' +
+  // connectives and adverbs that carry no English inflection to key off
+  'altogether anyhow besides elsewhere furthermore hence henceforth meanwhile moreover ' +
+  'nevertheless nonetheless otherwise somehow somewhat somewhere thereafter therefore ' +
+  'throughout whatever whenever whereas wherever'
 ).split(/\s+/));
+
+/**
+ * Word *shapes* that are unmistakably English inflections and cannot be pinyin
+ * or romaji (no pinyin syllable ends in l/d/m/s/v, and none of these suffixes
+ * exist in romanised Chinese), so a bare lowercase token with one of these
+ * endings inside mostly-CJK output is residue no matter how rare the word is.
+ * This is what the curated list above can't do: "arguably", "inevitably",
+ * "relentless", "identical" are ordinary content words, not function words,
+ * and enumerating them is hopeless. Length floors keep pinyin-lookalike
+ * syllables out ("ping"/"ming"/"xing" are 4 chars, so -ing needs 7+).
+ * Corpus scan over 180k mostly-CJK production segments: the list plus these
+ * shapes flag 0.19% of segments (vs 0.004% for the list alone).
+ */
+const ENGLISH_WORD_SHAPES = [
+  /^[a-z]{3,}ly$/,                                                            // arguably, inevitably, momentarily
+  /^[a-z]{2,}(?:tion|sion|ment|ness|able|ible|ive|ous|ful|less|ical|istic)$/, // possession, cohesive, relentless
+  /^[a-z]{4,}(?:ing|ed|al)$/,                                                 // welcoming, tasked, identical
+];
 
 /**
  * Strip quoted and parenthesized spans. Quoted English in a Chinese
@@ -494,14 +516,15 @@ export function detectEnglishResidue(text: string, glossary: Record<string, stri
   const latinCount = (stripped.match(/[a-zA-Z]/g) ?? []).length;
   if (cjkCount > 0 && cjkCount / (cjkCount + latinCount) >= 0.6) {
     // Mostly target-language: sparse English is usually legitimate (proper
-    // nouns, quoted phrases) — but a bare lowercase common-English word
-    // mid-sentence ("这 simply 让他的战术任务更容易") is residue. Corpus scan
-    // over 173k production segments: this flags 0.03% with ~88% precision.
+    // nouns, quoted phrases) — but a bare lowercase English word mid-sentence
+    // ("这 simply 让他的战术任务更容易", "曼联的历史最佳射手 arguably 从未找到
+    // 自己的最佳位置") is residue. Two ways in: the curated function-word list,
+    // or an unmistakably English inflection (see ENGLISH_WORD_SHAPES).
     const bare = stripQuotedSpans(stripped);
     const tokens = bare.match(/[a-zA-Z]{3,}/g) ?? [];
     return tokens.filter(w =>
       /^[a-z]+$/.test(w) &&
-      COMMON_ENGLISH_WORDS.has(w) &&
+      (COMMON_ENGLISH_WORDS.has(w) || ENGLISH_WORD_SHAPES.some(re => re.test(w))) &&
       !TECH_ALLOWED.has(w) &&
       !allowed.has(w)
     );

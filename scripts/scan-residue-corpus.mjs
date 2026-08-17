@@ -45,7 +45,22 @@ function stripCitations(text) {
 // short — the ≥3-char rule plus this curation keeps precision high).
 const COMMON_ENGLISH = new Set((
   'about above across after again against almost along already also although always among another anyone anything anywhere around because become becomes been before behind being below between both business came cannot certain certainly change children coming completely could course does doing done during each early either enough even every everyone everything exactly example except finally first following found four from further gave general getting give given goes going gone good great group hand having head help here herself high himself history home house however hundred idea important indeed instead into itself just keep kind knew know known large last later least leave left less life like likely little longer look looked looking made make making many matter maybe mean meant might more most much must myself near need never next nothing nowhere number often once only order other others ought over own part people perhaps place point possible probably problem public put quite rather real really right room said same saw says second see seem seemed seems seen several shall should side simply since small some someone something sometimes soon still such sure taken tell than that their them themselves then there these they thing things think third this those though thought three through thus time today together told took toward turn under until upon used using very want water week well went were what when where whether which while whole whom whose will with within without word work world would year years your yourself'
+  + ' altogether anyhow besides elsewhere furthermore hence henceforth meanwhile moreover '
+  + 'nevertheless nonetheless otherwise somehow somewhat somewhere thereafter therefore '
+  + 'throughout whatever whenever whereas wherever'
 ).split(/\s+/).filter(w => w.length >= 3));
+
+/**
+ * Unmistakably English inflections — no pinyin syllable can end this way, so a
+ * bare lowercase token with one of these shapes inside mostly-CJK output is
+ * residue even when the word is too rare to enumerate. Mirror of
+ * ENGLISH_WORD_SHAPES in translate-worker.ts.
+ */
+const ENGLISH_WORD_SHAPES = [
+  /^[a-z]{3,}ly$/,
+  /^[a-z]{2,}(?:tion|sion|ment|ness|able|ible|ive|ous|ful|less|ical|istic)$/,
+  /^[a-z]{4,}(?:ing|ed|al)$/,
+];
 
 const TECH_ALLOWED = new Set([
   'the', 'and', 'for', 'with', 'from', 'that', 'this', 'not', 'but',
@@ -74,7 +89,7 @@ function lowercaseCommonResidue(strippedIn, glossaryAllowed) {
   const tokens = stripped.match(/[a-zA-Z]{3,}/g) ?? [];
   return tokens.filter(w =>
     /^[a-z]+$/.test(w) &&
-    COMMON_ENGLISH.has(w) &&
+    (COMMON_ENGLISH.has(w) || ENGLISH_WORD_SHAPES.some(re => re.test(w))) &&
     !TECH_ALLOWED.has(w) &&
     !glossaryAllowed.has(w)
   );

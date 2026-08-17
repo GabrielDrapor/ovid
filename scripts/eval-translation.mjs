@@ -275,8 +275,18 @@ const COMMON_ENGLISH_WORDS = new Set((
   'small some someone something sometimes soon still such sure taken tell than that their them themselves then there ' +
   'these they thing things think third this those though thought three through thus time today together told took ' +
   'toward turn under until upon used using very want water week well went were what when where whether which while ' +
-  'whole whom whose will with within without word work world would year years your yourself'
+  'whole whom whose will with within without word work world would year years your yourself ' +
+  'altogether anyhow besides elsewhere furthermore hence henceforth meanwhile moreover ' +
+  'nevertheless nonetheless otherwise somehow somewhat somewhere thereafter therefore ' +
+  'throughout whatever whenever whereas wherever'
 ).split(/\s+/));
+
+/** Unmistakably English inflections — mirror of translate-worker.ts */
+const ENGLISH_WORD_SHAPES = [
+  /^[a-z]{3,}ly$/,
+  /^[a-z]{2,}(?:tion|sion|ment|ness|able|ible|ive|ous|ful|less|ical|istic)$/,
+  /^[a-z]{4,}(?:ing|ed|al)$/,
+];
 
 function stripQuotedSpans(text) {
   return text
@@ -311,7 +321,7 @@ function detectEnglishResidue(text, glossary) {
     const tokens = bare.match(/[a-zA-Z]{3,}/g) ?? [];
     return tokens.filter(w =>
       /^[a-z]+$/.test(w) &&
-      COMMON_ENGLISH_WORDS.has(w) &&
+      (COMMON_ENGLISH_WORDS.has(w) || ENGLISH_WORD_SHAPES.some(re => re.test(w))) &&
       !commonAllowed.has(w) &&
       !allowed.has(w)
     );
