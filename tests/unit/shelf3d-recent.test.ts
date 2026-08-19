@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { pickMostRecentRead } from '../../src/components/shelf3d/layout';
+import {
+  pickMostRecentRead,
+  bookFocusPoint,
+} from '../../src/components/shelf3d/layout';
 
 const book = (uuid: string, status: string | null = 'ready') => ({
   uuid,
@@ -60,5 +63,36 @@ describe('pickMostRecentRead', () => {
       ['b', '2026-07-19 09:00:00'],
     ]);
     expect(pickMostRecentRead(books, p)).toBe('a');
+  });
+});
+
+describe('bookFocusPoint', () => {
+  const placements = [
+    { uuid: 'a', x: -2.5, row: 0, width: 0.2 },
+    { uuid: 'b', x: 1.75, row: 2, width: 0.2 },
+  ];
+  // rowYCenters output: index 0 is the empty top ring, content rows follow
+  const rowCenters = [3, 1.5, 0, -1.5, -3];
+
+  it('maps a placed book to its wall coordinates', () => {
+    expect(bookFocusPoint(placements, rowCenters, 'a')).toEqual({
+      x: -2.5,
+      y: 1.5,
+    });
+    expect(bookFocusPoint(placements, rowCenters, 'b')).toEqual({
+      x: 1.75,
+      y: -1.5,
+    });
+  });
+
+  it('returns null when there is nothing to focus on', () => {
+    expect(bookFocusPoint(placements, rowCenters, null)).toBeNull();
+    expect(bookFocusPoint(placements, rowCenters, 'missing')).toBeNull();
+    expect(bookFocusPoint([], rowCenters, 'a')).toBeNull();
+  });
+
+  it('returns null when the row falls outside the shelf', () => {
+    const offGrid = [{ uuid: 'c', x: 0, row: 9, width: 0.2 }];
+    expect(bookFocusPoint(offGrid, rowCenters, 'c')).toBeNull();
   });
 });

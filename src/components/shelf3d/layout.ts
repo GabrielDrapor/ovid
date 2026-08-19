@@ -688,6 +688,26 @@ export function resolveDropTarget(
  * under plain string comparison; ties break toward the smaller uuid so the
  * pick is deterministic. Books still importing can't have been read.
  */
+/**
+ * Where a book sits on the wall, for the opening camera bias.
+ *
+ * Row index +1 because rowYCenters includes the empty top ring that
+ * content rows are offset from. Returns null when the book isn't placed
+ * (e.g. it finished importing after this layout was computed).
+ */
+export function bookFocusPoint(
+  placements: ReadonlyArray<PlacedBook>,
+  rowCenters: ReadonlyArray<number>,
+  uuid: string | null
+): { x: number; y: number } | null {
+  if (!uuid) return null;
+  const placed = placements.find((p) => p.uuid === uuid);
+  if (!placed) return null;
+  const y = rowCenters[placed.row + 1];
+  if (y === undefined) return null;
+  return { x: placed.x, y };
+}
+
 export function pickMostRecentRead(
   books: ReadonlyArray<{ uuid: string; status: string | null }>,
   progress: ReadonlyMap<string, { last_read_at: string | null }>

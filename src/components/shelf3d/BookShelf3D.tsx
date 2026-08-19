@@ -32,6 +32,7 @@ import {
   clampSpineRatio,
   layoutBooks,
   pickMostRecentRead,
+  bookFocusPoint,
   resolveDropTarget,
   rowYCenters,
 } from './layout';
@@ -109,6 +110,8 @@ const CLOTH_FALLBACK = '#3a3026';
 const RIBBON_RED = '#a63d2b';
 
 const MIN_ZOOM = 2.5;
+/** How far the opening view leans toward the last-read book (0 = center). */
+const OPEN_FOCUS_BIAS = 0.6;
 const SHELF_LABEL_HEIGHT = 0.084;
 const SHELF_LABEL_FONT = '900 58px Arial, Helvetica, sans-serif';
 
@@ -1514,6 +1517,7 @@ function CameraRig({
   caseBottom,
   dragDist,
   dragPointerId,
+  openFocus,
 }: {
   focused: boolean;
   contentW: number;
@@ -1524,6 +1528,8 @@ function CameraRig({
   dragDist: React.MutableRefObject<number>;
   /** Pointer id currently picking up a book — excluded from pan/pinch. */
   dragPointerId: React.MutableRefObject<number | null>;
+  /** Where the last-read book sits; the opening view leans toward it. */
+  openFocus: { x: number; y: number } | null;
 }) {
   const { camera, gl, size } = useThree();
   const zoom = useRef<number | null>(null);
@@ -1532,6 +1538,15 @@ function CameraRig({
   const pan = useRef({ x: 0, y: (caseTop + caseBottom) / 2 });
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const pinchDist = useRef(0);
+  // Opening lean: the shelf comes up biased toward the book you were last
+  // reading rather than dead center, then hands control back the moment the
+  // reader moves the pointer, scrolls or touches. 1 = full lean, 0 = normal.
+  const openLean = useRef(1);
+  const leanReleased = useRef(false);
+  const lastPointer = useRef<{ x: number; y: number } | null>(null);
+  const panSeeded = useRef(false);
+  const openFocusRef = useRef(openFocus);
+  openFocusRef.current = openFocus;
 
   const tanHalf = Math.tan((38 / 2) * (Math.PI / 180));
   const aspect = size.width / size.height;
@@ -1570,6 +1585,7 @@ function CameraRig({
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       userZoomed.current = true;
+      leanReleased.current = true;
       zoom.current = THREE.MathUtils.clamp(
         (zoom.current ?? 6) + e.deltaY * 0.005,
         MIN_ZOOM,
@@ -1589,6 +1605,7 @@ function CameraRig({
       // This finger is picking up a book — it must not also pan/pinch.
       if (e.pointerId === dragPointerId.current) return;
       touchMode.current = true;
+      leanReleased.current = true;
       dragDist.current = 0;
       pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (pointers.current.size === 2) {
@@ -1669,6 +1686,30 @@ function CameraRig({
     );
     const k = 1 - Math.exp(-delta * (4 - 2 * zoomInGlobal));
 
+    // A pointer that has actually moved means the reader took over.
+    const prev = lastPointer.current;
+    if (prev) {
+      if (
+        Math.abs(state.pointer.x - prev.x) > 0.002 ||
+        Math.abs(state.pointer.y - prev.y) > 0.002
+      ) {
+        leanReleased.current = true;
+      }
+    }
+    lastPointer.current = { x: state.pointer.x, y: state.pointer.y };
+
+    const focus = openFocusRef.current;
+    const leanTarget = leanReleased.current || !focus ? 0 : 1;
+    openLean.current +=
+      (leanTarget - openLean.current) * (1 - Math.exp(-delta * 2));
+
+    // Touch has no hover gaze to lean, so seed its pan at the same spot.
+    if (!panSeeded.current && focus && !leanReleased.current) {
+      panSeeded.current = true;
+      pan.current.x = focus.x * OPEN_FOCUS_BIAS;
+      pan.current.y = wallMidY + (focus.y - wallMidY) * OPEN_FOCUS_BIAS;
+    }
+
     let tx: number;
     let ty: number;
     if (touchMode.current) {
@@ -1693,6 +1734,22 @@ function CameraRig({
         yMin,
         yMax
       );
+      if (focus && openLean.current > 0.001) {
+        // Lean partway toward the book — enough to say "you were here",
+        // not so far that the shelf looks off-center.
+        const leanX = THREE.MathUtils.clamp(
+          focus.x * OPEN_FOCUS_BIAS,
+          -xMax,
+          xMax
+        );
+        const leanY = THREE.MathUtils.clamp(
+          wallMidY + (focus.y - wallMidY) * OPEN_FOCUS_BIAS,
+          yMin,
+          yMax
+        );
+        tx = THREE.MathUtils.lerp(tx, leanX, openLean.current);
+        ty = THREE.MathUtils.lerp(ty, leanY, openLean.current);
+      }
     }
     camera.position.x += (tx - camera.position.x) * k;
     camera.position.y += (ty - camera.position.y) * k;
@@ -1942,6 +1999,13 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
     wallWidth,
   } = layout;
   const rowCenters = useMemo(() => rowYCenters(totalRows), [totalRows]);
+
+  // Opening the shelf leans the camera toward the book you last read, so you
+  // come back to where you left off instead of the middle of the wall.
+  const openFocus = useMemo(
+    () => bookFocusPoint(placements, rowCenters, recentUuid),
+    [placements, rowCenters, recentUuid]
+  );
   const caseTop =
     totalRows > 0 ? rowCenters[0] + BOOK_HEIGHT / 2 + 0.18 + 0.09 : 3;
   const caseBottom =
@@ -2113,6 +2177,7 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
           caseBottom={caseBottom}
           dragDist={dragDist}
           dragPointerId={dragPointerId}
+          openFocus={openFocus}
         />
       </Canvas>
 
