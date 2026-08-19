@@ -1,10 +1,12 @@
 /**
  * Cover preview debug tool.
  *
- * Upload an EPUB → the page shows the extracted embedded cover, the cover's
- * dominant colour, how each blank cloth template ranks against it (方案1:
- * dominant colour → nearest template cloth), and the final composed cover +
- * spine produced by the same pure-Sharp pipeline production uses.
+ * Upload an EPUB → the page shows the RAW extracted cover next to the spine
+ * generated for it (方案1: cover dominant colour → nearest cloth template,
+ * title/author typeset on that cloth). The pairing under evaluation is "the
+ * book's own cover as-is + a matched spine" — no cover composition happens
+ * here. The dominant swatch and the per-template distance ranking are shown
+ * so the matching can be tuned.
  *
  * The HTML below is served by index.ts (`GET /preview`); the matching API is
  * `POST /preview` (multipart, field `file`). Note: the preview skips the LLM
@@ -125,7 +127,7 @@ export const PREVIEW_HTML = `<!DOCTYPE html>
 </head>
 <body>
 <h1>Cover Preview</h1>
-<div class="sub">Upload an EPUB — extracts its embedded cover, matches the nearest cloth template by dominant colour, and composes the cover + spine exactly as production would (title is NOT LLM-sanitized here).</div>
+<div class="sub">Upload an EPUB — shows its raw embedded cover next to the spine generated for it (nearest cloth template by dominant colour, title/author typeset on it). Title is NOT LLM-sanitized here.</div>
 
 <div class="form">
   <input id="file" type="file" accept=".epub,application/epub+zip">
@@ -209,9 +211,7 @@ async function generate() {
           ? '<img class="cover-img" src="' + data.originalCover + '">'
           : '<div class="none">No embedded cover in this EPUB</div>') +
       '</div>' +
-      '<div class="card"><h3>Composed cover</h3>' +
-        '<img class="cover-img" src="' + data.cover + '"></div>' +
-      '<div class="card"><h3>Composed spine</h3>' +
+      '<div class="card"><h3>Generated spine</h3>' +
         '<img class="spine-img" src="' + data.spine + '"></div>';
   } catch (err) {
     status.className = 'status error';

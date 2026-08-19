@@ -419,8 +419,12 @@ async function composeCover(input: ComposeInput): Promise<Buffer> {
   return cropToBook(composited, box, MAX_COVER_HEIGHT);
 }
 
-/** Compose the spine: blank template + vertical title/author. */
-async function composeSpine(input: ComposeInput): Promise<Buffer> {
+/**
+ * Compose the spine: blank template + vertical title/author. Exported on its
+ * own for the preview page, which pairs a generated spine with the book's raw
+ * extracted cover (no cover composition involved).
+ */
+export async function composeSpine(input: ComposeInput): Promise<Buffer> {
   const { author } = input;
   const title = input.spineTitle || input.title;
 

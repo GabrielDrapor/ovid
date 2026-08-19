@@ -10,6 +10,7 @@ import { translateBook, activeJobs } from './translate-worker.js';
 import { processSpine, processCover } from './image-processor.js';
 import {
   composeBookImages,
+  composeSpine,
   spineThicknessFromLength,
   dominantColor,
   faceMeanColor,
@@ -1023,8 +1024,9 @@ app.post('/preview/login', async (c) => {
   }
   return c.json({ error: 'Wrong password' }, 401);
 });
-// --- Preview: parse an uploaded EPUB and compose cover + spine with the
-// production pipeline (template matched to the cover's dominant colour).
+// --- Preview: parse an uploaded EPUB and pair its RAW extracted cover with
+// a spine generated on the cloth template matched to the cover's dominant
+// colour — the pairing being evaluated is "book's own cover + matched spine".
 // Skips the LLM title sanitizer so the round-trip is fast and deterministic.
 app.post('/preview', async (c) => {
   const cookie = c.req.header('cookie') || '';
@@ -1070,10 +1072,10 @@ app.post('/preview', async (c) => {
           }
         : await pickRandomTemplate();
 
-    const { cover, spine } = await composeBookImages({
+    const spine = await composeSpine({
       templateCover: template.cover,
       templateSpine: template.spine,
-      originalCover,
+      originalCover: null,
       title,
       spineTitle,
       author,
@@ -1081,7 +1083,7 @@ app.post('/preview', async (c) => {
     });
 
     // Downscale the extracted cover for display — some EPUBs embed multi-MB
-    // covers, and the full-size buffer already went into the composition.
+    // covers, and the dominant colour was already taken from the full buffer.
     let originalCoverUri: string | null = null;
     if (originalCover) {
       const small = await sharp(originalCover)
@@ -1100,7 +1102,6 @@ app.post('/preview', async (c) => {
       chosenColor: template.color,
       candidates,
       originalCover: originalCoverUri,
-      cover: `data:image/png;base64,${cover.toString('base64')}`,
       spine: `data:image/png;base64,${spine.toString('base64')}`,
     });
   } catch (err) {
