@@ -320,14 +320,22 @@ function hslToRgb(h: number, s: number, l: number): RGB {
  * that detectBookBox still sees book pixels against the light backdrop, and
  * dark enough (even at textured highlights) that cropToBook's flood fill
  * never mistakes cloth for backdrop.
+ *
+ * Whether a dominant is "really" chromatic is judged by HSV saturation
+ * (chroma/max), not HSL saturation: near-white covers with a faint cast have
+ * tiny chroma but huge HSL saturation (the metric blows up as L→1), which
+ * would invent a loud hue for an essentially white cover. Dark muted colours
+ * (e.g. a rgb(56,40,40) book-cover brown) keep their hue — their chroma is
+ * small in absolute terms but large relative to their brightness. Near-neutral
+ * dominants stay neutral: a gray cloth, only lightness-clamped.
  */
 export function clampClothTint(c: RGB): RGB {
   const { h, s, l } = rgbToHsl(c);
-  return hslToRgb(
-    h,
-    Math.min(0.5, Math.max(0.12, s)),
-    Math.min(0.5, Math.max(0.2, l))
-  );
+  const max = Math.max(c.r, c.g, c.b);
+  const sHsv = max === 0 ? 0 : (max - Math.min(c.r, c.g, c.b)) / max;
+  const lClamped = Math.min(0.5, Math.max(0.2, l));
+  if (sHsv < 0.12) return hslToRgb(h, 0, lClamped);
+  return hslToRgb(h, Math.min(0.5, Math.max(0.12, s)), lClamped);
 }
 
 /**

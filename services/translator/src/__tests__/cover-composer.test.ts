@@ -368,6 +368,21 @@ describe('cloth tinting (方案2: cover dominant → tinted gray cloth)', () => 
     expect(red.r).toBeGreaterThan(red.b);
   });
 
+  it('clampClothTint keeps near-neutral covers neutral instead of inventing a hue', () => {
+    // Plain light-gray cover — no hue to take.
+    const gray = clampClothTint({ r: 200, g: 200, b: 200 });
+    expect(gray.r).toBe(gray.g);
+    expect(gray.g).toBe(gray.b);
+    // Near-white with a faint warm cast: HSL saturation blows up near L=1
+    // (this input is s≈0.54) but the cover reads as white — stay neutral.
+    const warmWhite = clampClothTint({ r: 248, g: 248, b: 232 });
+    expect(Math.abs(warmWhite.r - warmWhite.b)).toBeLessThan(6);
+    // Dark muted brown (real book-cover dominant): small absolute chroma but
+    // clearly chromatic relative to its brightness — hue must survive.
+    const brown = clampClothTint({ r: 56, g: 40, b: 40 });
+    expect(brown.r).toBeGreaterThan(brown.b + 8);
+  });
+
   it('tintTemplateCloth recolours the cloth but leaves the backdrop neutral', async () => {
     const tpl = await fakeRoundedSpineTemplate();
     const tint = clampClothTint({ r: 140, g: 40, b: 50 });
