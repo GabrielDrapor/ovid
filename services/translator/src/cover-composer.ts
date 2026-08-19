@@ -202,6 +202,277 @@ async function faceLuminance(buffer: Buffer, box: Box): Promise<number> {
   return sum / n;
 }
 
+export interface RGB {
+  r: number;
+  g: number;
+  b: number;
+}
+
+/**
+ * Dominant colour of a book's own (embedded) cover — used to pick the cloth
+ * template whose colour matches the cover best, so the spine reads as
+ * belonging to the same book. Sharp's 4096-bin histogram dominant is cheap
+ * (milliseconds) and deterministic.
+ */
+export async function dominantColor(cover: Buffer): Promise<RGB> {
+  const { dominant } = await sharp(cover).stats();
+  return dominant;
+}
+
+/**
+ * Mean cloth colour inside a blank template's detected book face — the
+ * per-template reference point that cover dominants are matched against.
+ */
+export async function faceMeanColor(templateCover: Buffer): Promise<RGB> {
+  const box = await detectBookBox(templateCover);
+  const { data, info } = await sharp(templateCover)
+    .extract({
+      left: box.left,
+      top: box.top,
+      width: Math.max(1, box.width),
+      height: Math.max(1, box.height),
+    })
+    .resize(40, 40, { fit: 'fill' })
+    .removeAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const ch = info.channels;
+  const n = info.width * info.height;
+  let r = 0,
+    g = 0,
+    b = 0;
+  for (let i = 0; i < n; i++) {
+    r += data[i * ch];
+    g += data[i * ch + 1];
+    b += data[i * ch + 2];
+  }
+  return { r: Math.round(r / n), g: Math.round(g / n), b: Math.round(b / n) };
+}
+
+/**
+ * The colour a cover READS as, rather than the colour covering the most area.
+ * `stats().dominant` picks the modal histogram bin, which for covers with a
+ * light background (or a big black-and-white photo) is the background — a
+ * cream cover with green typography came out cream, a burlap cover with a
+ * grayscale photo came out gray. Instead: consider only chromatic pixels
+ * (HSV saturation ≥ 0.2, value inside [0.12, 0.97] to drop near-black and
+ * blown-out whites), weight them by saturation, and take the weighted mean
+ * colour of the winning hue bin. Covers that are genuinely monochrome (< 3%
+ * chromatic pixels) fall back to the raw dominant, which the tint clamp then
+ * keeps neutral.
+ */
+export async function salientCoverColor(cover: Buffer): Promise<RGB> {
+  const { data, info } = await sharp(cover)
+    .resize(64, 64, { fit: 'fill' })
+    .removeAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const ch = info.channels;
+  const total = info.width * info.height;
+
+  const BINS = 12;
+  const weight = new Float64Array(BINS);
+  const sumR = new Float64Array(BINS);
+  const sumG = new Float64Array(BINS);
+  const sumB = new Float64Array(BINS);
+  let chromatic = 0;
+
+  for (let i = 0; i < total; i++) {
+    const r = data[i * ch],
+      g = data[i * ch + 1],
+      b = data[i * ch + 2];
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    const v = max / 255;
+    const sat = max === 0 ? 0 : (max - min) / max;
+    if (sat < 0.2 || v < 0.12 || v > 0.97) continue;
+    chromatic++;
+    const bin = Math.min(BINS - 1, Math.floor(rgbToHsl({ r, g, b }).h * BINS));
+    weight[bin] += sat;
+    sumR[bin] += r * sat;
+    sumG[bin] += g * sat;
+    sumB[bin] += b * sat;
+  }
+
+  if (chromatic / total < 0.03) return dominantColor(cover);
+
+  let best = 0;
+  for (let k = 1; k < BINS; k++) if (weight[k] > weight[best]) best = k;
+  return {
+    r: Math.round(sumR[best] / weight[best]),
+    g: Math.round(sumG[best] / weight[best]),
+    b: Math.round(sumB[best] / weight[best]),
+  };
+}
+
+export function colorDistance(a: RGB, b: RGB): number {
+  return Math.sqrt((a.r - b.r) ** 2 + (a.g - b.g) ** 2 + (a.b - b.b) ** 2);
+}
+
+/**
+ * Nearest template colour to a cover's dominant, by RGB distance. The pool is
+ * six muted cloths, so plain Euclidean is discriminating enough; returns null
+ * only for an empty candidate list.
+ */
+export function nearestColorKey(
+  target: RGB,
+  candidates: { key: string; rgb: RGB }[]
+): string | null {
+  let best: string | null = null;
+  let bestDist = Infinity;
+  for (const c of candidates) {
+    const d = colorDistance(target, c.rgb);
+    if (d < bestDist) {
+      bestDist = d;
+      best = c.key;
+    }
+  }
+  return best;
+}
+
+function rgbToHsl({ r, g, b }: RGB): { h: number; s: number; l: number } {
+  const rn = r / 255,
+    gn = g / 255,
+    bn = b / 255;
+  const max = Math.max(rn, gn, bn);
+  const min = Math.min(rn, gn, bn);
+  const l = (max + min) / 2;
+  if (max === min) return { h: 0, s: 0, l };
+  const d = max - min;
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  let h: number;
+  if (max === rn) h = ((gn - bn) / d + (gn < bn ? 6 : 0)) / 6;
+  else if (max === gn) h = ((bn - rn) / d + 2) / 6;
+  else h = ((rn - gn) / d + 4) / 6;
+  return { h, s, l };
+}
+
+function hslToRgb(h: number, s: number, l: number): RGB {
+  if (s === 0) {
+    const v = Math.round(l * 255);
+    return { r: v, g: v, b: v };
+  }
+  const hue2rgb = (p: number, q: number, t: number): number => {
+    if (t < 0) t += 1;
+    if (t > 1) t -= 1;
+    if (t < 1 / 6) return p + (q - p) * 6 * t;
+    if (t < 1 / 2) return q;
+    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+    return p;
+  };
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  const pp = 2 * l - q;
+  return {
+    r: Math.round(hue2rgb(pp, q, h + 1 / 3) * 255),
+    g: Math.round(hue2rgb(pp, q, h) * 255),
+    b: Math.round(hue2rgb(pp, q, h - 1 / 3) * 255),
+  };
+}
+
+/**
+ * Clamp a cover's dominant colour into the muted "library cloth" band before
+ * tinting: keeps the hue, bounds saturation and lightness so the tinted cloth
+ * stays tasteful AND keeps clearing the pipeline's thresholds — dark enough
+ * that detectBookBox still sees book pixels against the light backdrop, and
+ * dark enough (even at textured highlights) that cropToBook's flood fill
+ * never mistakes cloth for backdrop.
+ *
+ * Whether a dominant is "really" chromatic is judged by HSV saturation
+ * (chroma/max), not HSL saturation: near-white covers with a faint cast have
+ * tiny chroma but huge HSL saturation (the metric blows up as L→1), which
+ * would invent a loud hue for an essentially white cover. Dark muted colours
+ * (e.g. a rgb(56,40,40) book-cover brown) keep their hue — their chroma is
+ * small in absolute terms but large relative to their brightness. Near-neutral
+ * dominants stay neutral: a gray cloth, only lightness-clamped.
+ */
+export function clampClothTint(c: RGB): RGB {
+  const { h, s, l } = rgbToHsl(c);
+  const max = Math.max(c.r, c.g, c.b);
+  const sHsv = max === 0 ? 0 : (max - Math.min(c.r, c.g, c.b)) / max;
+  const lClamped = Math.min(0.5, Math.max(0.2, l));
+  if (sHsv < 0.12) return hslToRgb(h, 0, lClamped);
+  return hslToRgb(h, Math.min(0.5, Math.max(0.12, s)), lClamped);
+}
+
+/**
+ * Recolour a blank template's CLOTH to `tint`, preserving the weave texture
+ * and 3D lighting (per-pixel luminance is kept, scaled around the cloth's
+ * mean). Only pixels that classify as "book" — the same chroma/darkness test
+ * detectBookBox uses — are touched: the bbox corners of a rounded-corner
+ * hardcover contain light-neutral backdrop, and tinting those would leave
+ * bright chromatic specks that cropToBook's flood fill (lum > 185, chroma
+ * < 18) could no longer remove. Backdrop stays neutral, so the downstream
+ * detection and crop behave exactly as on an untinted template.
+ */
+export async function tintTemplateCloth(
+  template: Buffer,
+  tint: RGB
+): Promise<Buffer> {
+  const box = await detectBookBox(template);
+  const { data, info } = await sharp(template)
+    .removeAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const W = info.width;
+  const H = info.height;
+  const ch = info.channels;
+
+  // Same background reference + book classifier as detectBookBox.
+  const at = (x: number, y: number) => {
+    const i = (y * W + x) * ch;
+    return [data[i], data[i + 1], data[i + 2]];
+  };
+  const corners = [at(1, 1), at(W - 2, 1), at(1, H - 2), at(W - 2, H - 2)];
+  const bg = [0, 1, 2].map(
+    (k) => corners.reduce((sum, c) => sum + c[k], 0) / corners.length
+  );
+  const CHROMA = 18;
+  const DARK = 130;
+  const isBook = (i: number) => {
+    const r = data[i],
+      g = data[i + 1],
+      b = data[i + 2];
+    const chroma = Math.max(r, g, b) - Math.min(r, g, b);
+    const diff =
+      Math.abs(r - bg[0]) + Math.abs(g - bg[1]) + Math.abs(b - bg[2]);
+    return chroma > CHROMA || diff > DARK;
+  };
+
+  // Mean luminance of the cloth (book pixels inside the box).
+  let lumSum = 0;
+  let n = 0;
+  for (let y = box.top; y < box.top + box.height; y++) {
+    for (let x = box.left; x < box.left + box.width; x++) {
+      const i = (y * W + x) * ch;
+      if (!isBook(i)) continue;
+      lumSum += 0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2];
+      n++;
+    }
+  }
+  const meanLum = n > 0 ? lumSum / n : 128;
+
+  // Recolour: mean-luminance cloth maps to exactly `tint`; highlights and
+  // shadows scale around it, so the weave and lighting survive.
+  for (let y = box.top; y < box.top + box.height; y++) {
+    for (let x = box.left; x < box.left + box.width; x++) {
+      const i = (y * W + x) * ch;
+      if (!isBook(i)) continue;
+      const lum =
+        0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2];
+      const f = lum / meanLum;
+      data[i] = Math.max(0, Math.min(255, Math.round(tint.r * f)));
+      data[i + 1] = Math.max(0, Math.min(255, Math.round(tint.g * f)));
+      data[i + 2] = Math.max(0, Math.min(255, Math.round(tint.b * f)));
+    }
+  }
+
+  return sharp(Buffer.from(data), {
+    raw: { width: W, height: H, channels: ch as 3 },
+  })
+    .png()
+    .toBuffer();
+}
+
 /** Approximate text width: CJK glyphs ~1.0em, latin ~0.55em. */
 function glyphAdvance(text: string, fontSize: number): number {
   let w = 0;
@@ -347,8 +618,12 @@ async function composeCover(input: ComposeInput): Promise<Buffer> {
   return cropToBook(composited, box, MAX_COVER_HEIGHT);
 }
 
-/** Compose the spine: blank template + vertical title/author. */
-async function composeSpine(input: ComposeInput): Promise<Buffer> {
+/**
+ * Compose the spine: blank template + vertical title/author. Exported on its
+ * own for the preview page, which pairs a generated spine with the book's raw
+ * extracted cover (no cover composition involved).
+ */
+export async function composeSpine(input: ComposeInput): Promise<Buffer> {
   const { author } = input;
   const title = input.spineTitle || input.title;
 

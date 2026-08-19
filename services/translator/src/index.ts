@@ -4,18 +4,27 @@
  */
 
 import { Hono } from 'hono';
+import sharp from 'sharp';
 import { D1Client } from './d1-client.js';
 import { translateBook, activeJobs } from './translate-worker.js';
 import { processSpine, processCover } from './image-processor.js';
 import {
   composeBookImages,
+  composeSpine,
   spineThicknessFromLength,
+  salientCoverColor,
+  faceMeanColor,
+  colorDistance,
+  nearestColorKey,
+  clampClothTint,
+  tintTemplateCloth,
+  type RGB,
 } from './cover-composer.js';
 import {
   compressBookTitleForSpine,
   sanitizeBookTitle,
 } from './title-sanitizer.js';
-import { generatePreview, PREVIEW_HTML, LOGIN_HTML } from './cover-preview.js';
+import { PREVIEW_HTML, LOGIN_HTML } from './cover-preview.js';
 import { parseBook, type BookDataV2 } from './book-parser.js';
 import { settleCoverGeneration } from './upload-helpers.js';
 import { calculateBookCredits, TOKENS_PER_CREDIT } from './token-counter.js';
@@ -105,8 +114,9 @@ async function r2Delete(key: string): Promise<void> {
 }
 
 // ---- Blank cover/spine template pool ----
-// Pre-generated cloth hardcover mockups live in R2 under blanks/. A book's
-// cover/spine is composited onto a randomly-chosen colour at upload time.
+// Pre-generated cloth hardcover mockups live in R2 under blanks/. A book with
+// an embedded cover is composited onto the cloth colour nearest its cover's
+// dominant colour; coverless books get a random colour.
 // See scripts/generate-blanks.ts.
 
 interface BlankManifest {
@@ -158,6 +168,87 @@ async function pickRandomTemplate(): Promise<{
   const color = colors[Math.floor(Math.random() * colors.length)];
   const { cover, spine } = await getBlankTemplate(color);
   return { color, cover, spine };
+}
+
+// Measured cloth colour of each blank template's book face, computed once per
+// process (detection is a full-image scan; the pool is small and immutable).
+const faceColorCache = new Map<string, RGB>();
+
+async function getTemplateFaceColor(color: string): Promise<RGB> {
+  const cached = faceColorCache.get(color);
+  if (cached) return cached;
+  const { cover } = await getBlankTemplate(color);
+  const rgb = await faceMeanColor(cover);
+  faceColorCache.set(color, rgb);
+  return rgb;
+}
+
+interface TemplateCandidate {
+  key: string;
+  rgb: RGB;
+  distance: number;
+}
+
+/**
+ * Rank the blank-template pool by cloth-colour distance to the cover's
+ * dominant colour (nearest first). Colours whose template can't be fetched or
+ * measured are skipped rather than failing the ranking.
+ */
+async function rankTemplatesForCover(
+  coverDominant: RGB
+): Promise<TemplateCandidate[]> {
+  const { colors } = await getBlankManifest();
+  const candidates: TemplateCandidate[] = [];
+  for (const key of colors) {
+    try {
+      const rgb = await getTemplateFaceColor(key);
+      candidates.push({
+        key,
+        rgb,
+        distance: colorDistance(coverDominant, rgb),
+      });
+    } catch (e) {
+      console.warn(`[cover] skipping template '${key}' (unmeasurable):`, e);
+    }
+  }
+  candidates.sort((a, b) => a.distance - b.distance);
+  return candidates;
+}
+
+/**
+ * Pick the cloth template whose colour best matches the book's own cover, so
+ * the spine (typeset on the same cloth) reads as part of the same book. Books
+ * without an embedded cover — or any failure along the way — fall back to the
+ * random pick: matching must never make cover generation less reliable.
+ */
+async function pickTemplateForCover(originalCover?: Buffer | null): Promise<{
+  color: string;
+  cover: Buffer;
+  spine: Buffer;
+}> {
+  if (originalCover) {
+    try {
+      const dom = await salientCoverColor(originalCover);
+      const ranked = await rankTemplatesForCover(dom);
+      const bestKey = nearestColorKey(
+        dom,
+        ranked.map(({ key, rgb }) => ({ key, rgb }))
+      );
+      if (bestKey) {
+        const { cover, spine } = await getBlankTemplate(bestKey);
+        console.log(
+          `[cover] matched template '${bestKey}' to cover salient colour rgb(${dom.r},${dom.g},${dom.b})`
+        );
+        return { color: bestKey, cover, spine };
+      }
+    } catch (e) {
+      console.warn(
+        '[cover] template matching failed, falling back to random:',
+        e
+      );
+    }
+  }
+  return pickRandomTemplate();
 }
 
 // ---- Image rewriting helper ----
@@ -680,7 +771,9 @@ async function generateCoversForBook(
   const db = getDb();
 
   try {
-    const template = await pickRandomTemplate();
+    const template = await pickTemplateForCover(
+      coverImage ? Buffer.from(coverImage.data) : null
+    );
 
     // Derive spine thickness from how long the book is.
     let spineThickness = 1;
@@ -910,15 +1003,6 @@ app.post('/admin/regenerate-cover', async (c) => {
 
 // --- Cover Preview (debug UI) ---
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
-
-// Simple auth for preview pages — uses TRANSLATOR_SECRET as password
-function checkPreviewAuth(c: any): Response | null {
-  const cookie = c.req.header('cookie') || '';
-  if (cookie.includes('preview_auth=1')) return null; // authenticated
-  return null; // check happens in GET handler
-}
-
 app.get('/preview', (c) => {
   // Check auth cookie
   const cookie = c.req.header('cookie') || '';
@@ -942,108 +1026,115 @@ app.post('/preview/login', async (c) => {
   }
   return c.json({ error: 'Wrong password' }, 401);
 });
+// --- Preview: parse an uploaded EPUB and pair its RAW extracted cover with
+// two generated spines to compare: 方案1 — nearest existing cloth template by
+// dominant colour; 方案2 — the gray seed template's cloth tinted to the
+// cover's dominant colour (clamped to the muted library-cloth band).
+// Skips the LLM title sanitizer so the round-trip is fast and deterministic.
 app.post('/preview', async (c) => {
-  // Verify auth
   const cookie = c.req.header('cookie') || '';
   if (!cookie.includes(`preview_auth=${env.TRANSLATOR_SECRET}`)) {
     return c.json({ error: 'Unauthorized' }, 401);
-  }
-
-  const { title, author } = await c.req.json<{
-    title: string;
-    author: string;
-  }>();
-
-  if (!title || !author) {
-    return c.json({ error: 'Missing title or author' }, 400);
-  }
-
-  if (!GEMINI_API_KEY) {
-    return c.json({ error: 'GEMINI_API_KEY not configured' }, 500);
   }
 
   try {
-    const result = await generatePreview(GEMINI_API_KEY, title, author);
-    return c.json(result);
+    const body = await c.req.parseBody();
+    const file = body.file;
+    if (!(file instanceof File)) {
+      return c.json({ error: 'Missing EPUB file (form field "file")' }, 400);
+    }
+    const epubBuf = Buffer.from(await file.arrayBuffer());
+    const bookData = await parseBook(epubBuf, '.epub');
+
+    const title = bookData.title || 'Untitled';
+    const author = normalizeAuthorName(bookData.author || '');
+    const spineTitle = compressBookTitleForSpine(title);
+    const htmlLen = bookData.chapters.reduce(
+      (sum, ch) => sum + (ch.rawHtml?.length || 0),
+      0
+    );
+    const spineThickness = htmlLen > 0 ? spineThicknessFromLength(htmlLen) : 1;
+
+    const originalCover = bookData.coverImage
+      ? Buffer.from(bookData.coverImage.data)
+      : null;
+
+    // Template pick: same logic as production, but keep the intermediate
+    // ranking so the page can show how each cloth scored.
+    let dominant: RGB | null = null;
+    let candidates: TemplateCandidate[] = [];
+    if (originalCover) {
+      dominant = await salientCoverColor(originalCover);
+      candidates = await rankTemplatesForCover(dominant);
+    }
+    const template =
+      candidates.length > 0
+        ? {
+            color: candidates[0].key,
+            ...(await getBlankTemplate(candidates[0].key)),
+          }
+        : await pickRandomTemplate();
+
+    const spineInput = {
+      templateCover: template.cover,
+      originalCover: null,
+      title,
+      spineTitle,
+      author,
+      spineThickness,
+    };
+    const spineMatched = await composeSpine({
+      ...spineInput,
+      templateSpine: template.spine,
+    });
+
+    // 方案2: tint the gray seed template's cloth with the (clamped) cover
+    // dominant, then typeset the same spine on it.
+    let spineTinted: Buffer | null = null;
+    let tint: RGB | null = null;
+    if (dominant) {
+      try {
+        tint = clampClothTint(dominant);
+        const graySpine = (await getBlankTemplate('gray')).spine;
+        spineTinted = await composeSpine({
+          ...spineInput,
+          templateSpine: await tintTemplateCloth(graySpine, tint),
+        });
+      } catch (e) {
+        console.warn('[preview] tinted spine failed:', e);
+      }
+    }
+
+    // Downscale the extracted cover for display — some EPUBs embed multi-MB
+    // covers, and the dominant colour was already taken from the full buffer.
+    let originalCoverUri: string | null = null;
+    if (originalCover) {
+      const small = await sharp(originalCover)
+        .resize({ height: 600, withoutEnlargement: true })
+        .png()
+        .toBuffer();
+      originalCoverUri = `data:image/png;base64,${small.toString('base64')}`;
+    }
+
+    return c.json({
+      title,
+      author,
+      spineTitle,
+      spineThickness,
+      dominant,
+      chosenColor: template.color,
+      candidates,
+      originalCover: originalCoverUri,
+      spine: `data:image/png;base64,${spineMatched.toString('base64')}`,
+      tint,
+      spineTinted: spineTinted
+        ? `data:image/png;base64,${spineTinted.toString('base64')}`
+        : null,
+    });
   } catch (err) {
+    console.error('[preview] compose failed:', err);
     return c.json({ error: (err as Error).message }, 500);
   }
-});
-
-// --- Preview: List books ---
-app.get('/preview/books', async (c) => {
-  const cookie = c.req.header('cookie') || '';
-  if (!cookie.includes(`preview_auth=${env.TRANSLATOR_SECRET}`)) {
-    return c.json({ error: 'Unauthorized' }, 401);
-  }
-
-  const db = getDb();
-  const books = await db.all<{
-    uuid: string;
-    title: string;
-    author: string;
-    book_cover_img_url: string | null;
-    book_spine_img_url: string | null;
-  }>(
-    'SELECT uuid, title, author, book_cover_img_url, book_spine_img_url FROM books_v2 ORDER BY display_order ASC, title ASC'
-  );
-
-  return c.json({ books });
-});
-
-// --- Preview: Save cover/spine to R2 + update D1 ---
-app.post('/preview/save', async (c) => {
-  const cookie = c.req.header('cookie') || '';
-  if (!cookie.includes(`preview_auth=${env.TRANSLATOR_SECRET}`)) {
-    return c.json({ error: 'Unauthorized' }, 401);
-  }
-
-  const { bookUuid, cover, spine } = await c.req.json<{
-    bookUuid: string;
-    cover: string; // base64 data URI
-    spine: string; // base64 data URI
-  }>();
-
-  if (!bookUuid || !cover || !spine) {
-    return c.json({ error: 'Missing bookUuid, cover, or spine' }, 400);
-  }
-
-  const db = getDb();
-  const book = await db.first<{ uuid: string; title: string }>(
-    'SELECT uuid, title FROM books_v2 WHERE uuid = ?',
-    [bookUuid]
-  );
-  if (!book) {
-    return c.json({ error: 'Book not found' }, 404);
-  }
-
-  // Decode base64 data URIs
-  const coverB64 = cover.includes(',') ? cover.split(',')[1] : cover;
-  const spineB64 = spine.includes(',') ? spine.split(',')[1] : spine;
-  const coverBuf = Buffer.from(coverB64, 'base64');
-  const spineBuf = Buffer.from(spineB64, 'base64');
-
-  // Generate unique keys
-  const slug = (book.title as string)
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_|_$/g, '')
-    .slice(0, 40);
-  const uid = crypto.randomUUID().slice(0, 8);
-  const coverKey = `${slug}_${uid}_cover.png`;
-  const spineKey = `${slug}_${uid}_spine.png`;
-
-  const [coverUrl, spineUrl] = await Promise.all([
-    r2Upload(coverKey, coverBuf, 'image/png'),
-    r2Upload(spineKey, spineBuf, 'image/png'),
-  ]);
-
-  await db.run(
-    "UPDATE books_v2 SET book_cover_img_url = ?, book_spine_img_url = ?, updated_at = datetime('now') WHERE uuid = ?",
-    [coverUrl, spineUrl, bookUuid]
-  );
-
-  return c.json({ ok: true, coverUrl, spineUrl });
 });
 
 // --- Cover Processing ---

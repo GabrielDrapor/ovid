@@ -8,9 +8,17 @@ import { describe, it, expect } from 'vitest';
 import sharp from 'sharp';
 import {
   composeBookImages,
+  composeSpine,
+  salientCoverColor,
   spineThicknessFromLength,
   wrapText,
   fitWrapped,
+  dominantColor,
+  faceMeanColor,
+  nearestColorKey,
+  colorDistance,
+  clampClothTint,
+  tintTemplateCloth,
 } from '../cover-composer.js';
 
 const BG = '#dfe1e1'; // light-neutral backdrop, same family as the real mockups
@@ -276,5 +284,174 @@ describe('text fitting (no truncation)', () => {
     const { size, lines } = fitWrapped(title, 48, 240, 160);
     expect(size).toBeLessThan(48); // had to shrink
     expect(lines.join(' ')).toBe(title); // nothing truncated
+  });
+});
+
+describe('template colour matching (cover dominant → nearest cloth)', () => {
+  const CLOTHS = [
+    { key: 'gray', rgb: { r: 127, g: 138, b: 138 } },
+    { key: 'navy', rgb: { r: 35, g: 48, b: 84 } },
+    { key: 'burgundy', rgb: { r: 96, g: 42, b: 52 } },
+    { key: 'forest', rgb: { r: 46, g: 72, b: 54 } },
+    { key: 'tan', rgb: { r: 196, g: 170, b: 138 } },
+    { key: 'slate', rgb: { r: 40, g: 42, b: 46 } },
+  ];
+
+  it('nearestColorKey picks the intuitively matching cloth', () => {
+    expect(nearestColorKey({ r: 30, g: 60, b: 120 }, CLOTHS)).toBe('navy');
+    expect(nearestColorKey({ r: 140, g: 40, b: 50 }, CLOTHS)).toBe('burgundy');
+    expect(nearestColorKey({ r: 60, g: 110, b: 70 }, CLOTHS)).toBe('forest');
+    expect(nearestColorKey({ r: 230, g: 210, b: 180 }, CLOTHS)).toBe('tan');
+    expect(nearestColorKey({ r: 20, g: 20, b: 22 }, CLOTHS)).toBe('slate');
+  });
+
+  it('nearestColorKey returns null for an empty pool', () => {
+    expect(nearestColorKey({ r: 0, g: 0, b: 0 }, [])).toBeNull();
+  });
+
+  it('dominantColor finds the dominant colour of a mostly-solid cover', async () => {
+    const svg = `<svg width="200" height="300" xmlns="http://www.w3.org/2000/svg">
+      <rect width="200" height="300" fill="#204070"/>
+      <rect x="40" y="120" width="120" height="40" fill="#e0d0a0"/>
+    </svg>`;
+    const cover = await sharp(Buffer.from(svg)).png().toBuffer();
+    const dom = await dominantColor(cover);
+    expect(colorDistance(dom, { r: 0x20, g: 0x40, b: 0x70 })).toBeLessThan(40);
+  });
+
+  it('faceMeanColor measures the cloth inside the detected book box, not the backdrop', async () => {
+    const template = await fakeCoverTemplate('#2b3a55'); // navy book on light bg
+    const rgb = await faceMeanColor(template);
+    expect(colorDistance(rgb, { r: 0x2b, g: 0x3a, b: 0x55 })).toBeLessThan(20);
+  });
+
+  it('end to end: a navy cover dominant selects the navy fake template over others', async () => {
+    const covers = {
+      navy: await fakeCoverTemplate('#2b3a55'),
+      tan: await fakeCoverTemplate('#c8ab8a'),
+    };
+    const candidates = [
+      { key: 'navy', rgb: await faceMeanColor(covers.navy) },
+      { key: 'tan', rgb: await faceMeanColor(covers.tan) },
+    ];
+    const svg = `<svg width="120" height="180" xmlns="http://www.w3.org/2000/svg">
+      <rect width="120" height="180" fill="#1e3a6e"/></svg>`;
+    const dom = await dominantColor(
+      await sharp(Buffer.from(svg)).png().toBuffer()
+    );
+    expect(nearestColorKey(dom, candidates)).toBe('navy');
+  });
+});
+
+describe('cloth tinting (方案2: cover dominant → tinted gray cloth)', () => {
+  /** Rounded-corner spine mockup — the bbox corners contain backdrop. */
+  async function fakeRoundedSpineTemplate(
+    bookColor = '#7f8a8a'
+  ): Promise<Buffer> {
+    const W = 1408,
+      H = 768;
+    const bw = 90,
+      bh = 600;
+    const svg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
+      <rect width="${W}" height="${H}" fill="${BG}"/>
+      <rect x="${(W - bw) / 2}" y="${(H - bh) / 2}" width="${bw}" height="${bh}" rx="24" ry="24" fill="${bookColor}"/>
+    </svg>`;
+    return sharp(Buffer.from(svg)).png().toBuffer();
+  }
+
+  it('clampClothTint bounds lightness and saturation, keeps the hue', () => {
+    const white = clampClothTint({ r: 255, g: 255, b: 255 });
+    expect(Math.max(white.r, white.g, white.b)).toBeLessThan(160);
+    const black = clampClothTint({ r: 0, g: 0, b: 0 });
+    expect(Math.max(black.r, black.g, black.b)).toBeGreaterThan(30);
+    const red = clampClothTint({ r: 230, g: 30, b: 40 });
+    expect(red.r).toBeGreaterThan(red.g);
+    expect(red.r).toBeGreaterThan(red.b);
+  });
+
+  it('clampClothTint keeps near-neutral covers neutral instead of inventing a hue', () => {
+    // Plain light-gray cover — no hue to take.
+    const gray = clampClothTint({ r: 200, g: 200, b: 200 });
+    expect(gray.r).toBe(gray.g);
+    expect(gray.g).toBe(gray.b);
+    // Near-white with a faint warm cast: HSL saturation blows up near L=1
+    // (this input is s≈0.54) but the cover reads as white — stay neutral.
+    const warmWhite = clampClothTint({ r: 248, g: 248, b: 232 });
+    expect(Math.abs(warmWhite.r - warmWhite.b)).toBeLessThan(6);
+    // Dark muted brown (real book-cover dominant): small absolute chroma but
+    // clearly chromatic relative to its brightness — hue must survive.
+    const brown = clampClothTint({ r: 56, g: 40, b: 40 });
+    expect(brown.r).toBeGreaterThan(brown.b + 8);
+  });
+
+  it('tintTemplateCloth recolours the cloth but leaves the backdrop neutral', async () => {
+    const tpl = await fakeRoundedSpineTemplate();
+    const tint = clampClothTint({ r: 140, g: 40, b: 50 });
+    const tinted = await tintTemplateCloth(tpl, tint);
+    const center = await pixel(tinted, 1408 >> 1, 768 >> 1);
+    expect(center.r).toBeGreaterThan(center.g); // cloth is now reddish
+    expect(center.r).toBeGreaterThan(center.b);
+    const backdrop = await pixel(tinted, 4, 4);
+    expect(Math.abs(backdrop.r - backdrop.g)).toBeLessThan(6); // still neutral
+    expect(backdrop.r).toBeGreaterThan(200); // still light
+  });
+
+  it('tinted rounded spine still crops with transparent corners, opaque tinted body', async () => {
+    const tpl = await fakeRoundedSpineTemplate();
+    const tint = clampClothTint({ r: 140, g: 40, b: 50 });
+    const spine = await composeSpine({
+      templateCover: await fakeCoverTemplate(),
+      templateSpine: await tintTemplateCloth(tpl, tint),
+      originalCover: null,
+      title: 'Tinted',
+      author: 'A',
+    });
+    const m = await sharp(spine).metadata();
+    expect(m.width!).toBeLessThan(140); // box stayed on the spine
+    const corner = await pixel(spine, 1, 1);
+    expect(corner.a).toBe(0); // rounded corner backdrop flood-filled away
+    const center = await pixel(spine, m.width! >> 1, m.height! >> 1);
+    expect(center.a).toBe(255);
+    expect(center.r).toBeGreaterThan(center.g); // body carries the tint
+  });
+});
+
+describe('salientCoverColor (the colour a cover reads as, not the biggest area)', () => {
+  it('picks the chromatic accent over a light background (cream cover, green type)', async () => {
+    const svg = `<svg width="200" height="300" xmlns="http://www.w3.org/2000/svg">
+      <rect width="200" height="300" fill="#f8f8e8"/>
+      <rect x="10" y="10" width="24" height="280" fill="#6abf3a"/>
+      <rect x="60" y="120" width="100" height="30" fill="#6abf3a"/>
+    </svg>`;
+    const c = await salientCoverColor(
+      await sharp(Buffer.from(svg)).png().toBuffer()
+    );
+    expect(c.g).toBeGreaterThan(c.r); // green, not cream
+    expect(c.g).toBeGreaterThan(c.b);
+  });
+
+  it('picks the coloured cloth over a large grayscale photo (burlap cover)', async () => {
+    const svg = `<svg width="200" height="300" xmlns="http://www.w3.org/2000/svg">
+      <rect width="200" height="150" fill="#9a9a9a"/>
+      <rect y="150" width="200" height="150" fill="#6e5236"/>
+      <rect x="40" y="180" width="120" height="24" fill="#e8709a"/>
+    </svg>`;
+    const c = await salientCoverColor(
+      await sharp(Buffer.from(svg)).png().toBuffer()
+    );
+    expect(c.r).toBeGreaterThan(c.b + 20); // warm brown, not photo gray
+    expect(c.r).toBeGreaterThan(c.g);
+  });
+
+  it('falls back to the raw dominant for a genuinely monochrome cover', async () => {
+    const svg = `<svg width="200" height="300" xmlns="http://www.w3.org/2000/svg">
+      <rect width="200" height="300" fill="#c8c8c8"/>
+      <rect x="40" y="130" width="120" height="40" fill="#404040"/>
+    </svg>`;
+    const c = await salientCoverColor(
+      await sharp(Buffer.from(svg)).png().toBuffer()
+    );
+    expect(Math.abs(c.r - c.g)).toBeLessThan(8); // stays neutral
+    expect(Math.abs(c.g - c.b)).toBeLessThan(8);
   });
 });

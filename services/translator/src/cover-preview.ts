@@ -1,210 +1,19 @@
 /**
  * Cover preview debug tool.
- * Generates cover + spine via Gemini, processes spine (crop + despill + resize),
- * returns final images for preview.
+ *
+ * Upload an EPUB → the page shows the RAW extracted cover next to TWO spines
+ * generated for it, side by side: 方案1 — nearest existing cloth template by
+ * the cover's dominant colour; 方案2 — the gray seed template's cloth tinted
+ * to the dominant colour itself (clamped to the muted library-cloth band).
+ * No cover composition happens here — the pairing under evaluation is "the
+ * book's own cover as-is + a matched spine". The dominant/tint swatches and
+ * the per-template distance ranking are shown so the matching can be tuned.
+ *
+ * The HTML below is served by index.ts (`GET /preview`); the matching API is
+ * `POST /preview` (multipart, field `file`). Note: the preview skips the LLM
+ * title sanitizer (it needs an OpenAI round-trip), so a book whose title gets
+ * sanitized at upload time may typeset slightly differently in production.
  */
-
-import sharp from 'sharp';
-import { processSpine, processCover } from './image-processor.js';
-
-const GEMINI_MODEL = 'gemini-3.1-flash-image-preview';
-const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
-
-interface PreviewResult {
-  cover: string;       // data URI
-  spine: string;       // data URI (processed)
-  spineRaw: string;    // data URI (green screen original)
-  description: { color: string; style: string; accent: string };
-}
-
-async function callGemini(apiKey: string, parts: any[], responseModalities: string[] = ['TEXT', 'IMAGE']): Promise<any> {
-  const resp = await fetch(`${GEMINI_API_URL}?key=${apiKey}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{ parts }],
-      generationConfig: { responseModalities },
-    }),
-  });
-
-  if (!resp.ok) {
-    const errText = await resp.text();
-    throw new Error(`Gemini error ${resp.status}: ${errText.slice(0, 200)}`);
-  }
-
-  return resp.json();
-}
-
-interface ImageResult {
-  data: string;      // base64
-  mimeType: string;  // e.g. 'image/png', 'image/jpeg'
-}
-
-async function generateImageB64(apiKey: string, prompt: string, maxRetries = 2): Promise<ImageResult> {
-  let lastError: Error | null = null;
-
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try {
-      const data = await callGemini(apiKey, [{ text: prompt }]);
-      for (const candidate of data.candidates || []) {
-        for (const part of candidate.content?.parts || []) {
-          if (part.inlineData?.data) {
-            const b64 = part.inlineData.data;
-            const mimeType = part.inlineData.mimeType || 'image/png';
-
-            // Validate: decode and check it's a non-trivial buffer
-            const buf = Buffer.from(b64, 'base64');
-            if (buf.length < 1000) {
-              throw new Error(`Image too small (${buf.length} bytes), likely invalid`);
-            }
-
-            // Check magic bytes to identify actual format
-            const magic = buf.slice(0, 4).toString('hex');
-            console.log(`[cover-preview] attempt=${attempt} mimeType=${mimeType} bufSize=${buf.length} magic=${magic}`);
-
-            // Validate with sharp
-            const meta = await sharp(buf).metadata();
-            if (!meta.width || !meta.height) {
-              throw new Error('Sharp cannot read image dimensions');
-            }
-            console.log(`[cover-preview] validated format=${meta.format} ${meta.width}x${meta.height}`);
-
-            return { data: b64, mimeType };
-          }
-        }
-      }
-      throw new Error('No image in Gemini response');
-    } catch (err) {
-      console.error(`[cover-preview] attempt=${attempt} error:`, (err as Error).message);
-      lastError = err as Error;
-      if (attempt < maxRetries) {
-        await new Promise(r => setTimeout(r, (attempt + 1) * 1000));
-      }
-    }
-  }
-  throw lastError || new Error('Image generation failed');
-}
-
-async function describeCover(apiKey: string, coverB64: string): Promise<{ color: string; style: string; accent: string }> {
-  const data = await callGemini(apiKey, [
-    { inlineData: { mimeType: 'image/png', data: coverB64 } },
-    {
-      text: `Describe this book cover in exactly 3 lines:
-Line 1: The primary background color (e.g. "deep midnight blue", "burnt orange")
-Line 2: The overall design style in a few words (e.g. "Art Deco geometric", "gothic ornamental")
-Line 3: The accent/text color (e.g. "gold", "cream", "silver")
-Respond with ONLY these 3 lines, nothing else.`,
-    },
-  ], ['TEXT']);
-
-  const defaults = { color: 'a distinctive thematic color', style: 'elegant', accent: 'gold' };
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-  const lines = text.trim().split('\n').filter((l: string) => l.trim());
-
-  return {
-    color: lines[0]?.trim() || defaults.color,
-    style: lines[1]?.trim() || defaults.style,
-    accent: lines[2]?.trim() || defaults.accent,
-  };
-}
-
-export async function generatePreview(apiKey: string, title: string, author: string): Promise<PreviewResult> {
-  // Step 1: Generate cover
-  const coverPrompt = `Book cover for "${title}" by ${author}. Portrait orientation, approximately 3:4 ratio.
-
-Design a visually striking, elegant book cover with a style that fits the book's themes and era. Be creative — Art Deco, gothic, minimalist, impressionist, or any style that suits the book.
-
-Requirements:
-- Title "${title.toUpperCase()}" prominently displayed in elegant typography
-- Author "${author.toUpperCase()}" at the bottom in smaller text
-- The design must fill the ENTIRE image edge to edge with NO white borders
-- Rich, atmospheric, visually compelling`;
-
-  const coverResult = await generateImageB64(apiKey, coverPrompt);
-  const coverB64 = coverResult.data;
-
-  // Step 2: Describe cover
-  const description = await describeCover(apiKey, coverB64);
-
-  // Step 3: Generate spine using reference images
-  const refSpineUrls = [
-    'https://assets.ovid.jrd.pub/ref/spine_stud.png',
-    'https://assets.ovid.jrd.pub/ref/spine_advs_02.png',
-    'https://assets.ovid.jrd.pub/ref/spine_stranger_v2_spine.png',
-  ];
-
-  // Fetch reference spines and encode as base64
-  const refSpines = await Promise.all(
-    refSpineUrls.map(async (url) => {
-      const resp = await fetch(url);
-      if (!resp.ok) return null;
-      const buf = Buffer.from(await resp.arrayBuffer());
-      return buf.toString('base64');
-    }),
-  );
-  const validRefs = refSpines.filter((r): r is string => r !== null);
-
-  const spinePrompt = `Generate a book spine image for "${title}" by ${author} on a bright solid lime green (#00FF00) background. The spine is a narrow vertical rectangle, centered, with green space on all sides.
-
-The LAST image is the book's FRONT COVER — your spine MUST match its exact color palette, typography style, and visual mood.
-
-The other images are reference book spines showing the correct FORMAT:
-- NARROW VERTICAL rectangles (approximately 114px wide × 607px tall)
-- Text runs VERTICALLY from top to bottom
-- Title in LARGE BOLD serif capitals, rotated 90° (reading bottom-to-top)
-- Author name at the bottom, smaller
-- A small thematic icon/motif at the very top
-- Solid colored background, clean and minimal
-- NO borders, NO 3D effects, just a flat colored rectangle
-
-Generate a spine that:
-- Uses the SAME colors and design style as the front cover
-- Follows the SAME narrow vertical format as the reference spines
-- Title: "${title.toUpperCase()}"
-- Author: "${author.toUpperCase()}"
-- A small icon at the top matching the cover's theme
-- The output should be a narrow vertical rectangle on bright solid lime green (#00FF00) background, NOT a square
-- Sharp edges, no shadows, no 3D effects, no page edges visible`;
-
-  // Build parts: reference spines + cover image + text prompt
-  const spineParts: any[] = [];
-  for (const ref of validRefs) {
-    spineParts.push({ inlineData: { mimeType: 'image/png', data: ref } });
-  }
-  // Include the generated cover so Gemini can match its style
-  spineParts.push({ inlineData: { mimeType: 'image/png', data: coverB64 } });
-  spineParts.push({ text: spinePrompt });
-
-  const spineData = await callGemini(apiKey, spineParts);
-  let spineB64 = '';
-  for (const candidate of spineData.candidates || []) {
-    for (const part of candidate.content?.parts || []) {
-      if (part.inlineData?.data) {
-        spineB64 = part.inlineData.data;
-        break;
-      }
-    }
-    if (spineB64) break;
-  }
-  if (!spineB64) throw new Error('No spine image in Gemini response');
-
-  // Step 4: Process images with sharp
-  const coverBuf = await sharp(Buffer.from(coverB64, 'base64')).png().toBuffer();
-  const spineBuf = await sharp(Buffer.from(spineB64, 'base64')).png().toBuffer();
-
-  // Use the same processSpine pipeline as production (crop + despill + resize)
-  const [finalCover, finalSpine] = await Promise.all([
-    processCover(coverBuf),
-    processSpine(spineBuf),
-  ]);
-
-  return {
-    cover: `data:image/png;base64,${finalCover.toString('base64')}`,
-    spine: `data:image/png;base64,${finalSpine.toString('base64')}`,
-    spineRaw: `data:image/png;base64,${spineB64}`,
-    description,
-  };
-}
 
 export const LOGIN_HTML = `<!DOCTYPE html>
 <html lang="en">
@@ -274,24 +83,13 @@ export const PREVIEW_HTML = `<!DOCTYPE html>
     background: #1a1a2e; color: #e0e0e0;
     min-height: 100vh; padding: 2rem;
   }
-  h1 { font-size: 1.5rem; margin-bottom: 1.5rem; color: #fff; }
-  .book-select {
-    margin-bottom: 1rem; display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;
+  h1 { font-size: 1.5rem; margin-bottom: 0.5rem; color: #fff; }
+  .sub { font-size: 0.85rem; color: #888; margin-bottom: 1.5rem; }
+  .form { display: flex; gap: 0.75rem; margin-bottom: 2rem; flex-wrap: wrap; align-items: center; }
+  input[type=file] {
+    padding: 0.5rem; border-radius: 8px; border: 1px dashed #445;
+    background: #16213e; color: #ccc; font-size: 0.9rem; flex: 1; min-width: 260px;
   }
-  .book-select select {
-    padding: 0.6rem 1rem; border-radius: 8px; border: 1px solid #333;
-    background: #16213e; color: #fff; font-size: 1rem; flex: 1; min-width: 200px;
-    cursor: pointer;
-  }
-  .book-select select option { background: #16213e; }
-  .current-cover { font-size: 0.8rem; color: #666; }
-  .current-cover img { height: 40px; border-radius: 3px; vertical-align: middle; margin-left: 0.5rem; }
-  .form { display: flex; gap: 0.75rem; margin-bottom: 2rem; flex-wrap: wrap; }
-  input {
-    padding: 0.6rem 1rem; border-radius: 8px; border: 1px solid #333;
-    background: #16213e; color: #fff; font-size: 1rem; flex: 1; min-width: 200px;
-  }
-  input::placeholder { color: #666; }
   button {
     padding: 0.6rem 1.5rem; border-radius: 8px; border: none;
     background: #e94560; color: #fff; font-size: 1rem; cursor: pointer;
@@ -299,10 +97,23 @@ export const PREVIEW_HTML = `<!DOCTYPE html>
   }
   button:hover { opacity: 0.85; }
   button:disabled { opacity: 0.5; cursor: not-allowed; }
-  .btn-save {
-    background: #4ecca3; color: #1a1a2e; margin-top: 1.5rem; padding: 0.8rem 2rem;
-    font-size: 1.1rem;
+  .status { padding: 0.75rem 1rem; border-radius: 8px; margin-bottom: 1rem; font-size: 0.9rem; }
+  .status.loading { background: #1a3a5c; color: #7ec8e3; }
+  .status.error { background: #3c1418; color: #e94560; }
+  .status.success { background: #1a3c2a; color: #4ecca3; }
+  .meta {
+    background: #0f3460; padding: 0.75rem 1rem; border-radius: 8px;
+    font-size: 0.85rem; margin-bottom: 1rem; line-height: 1.6;
   }
+  .meta span { color: #7ec8e3; }
+  .swatch {
+    display: inline-block; width: 14px; height: 14px; border-radius: 3px;
+    vertical-align: -2px; margin-right: 4px; border: 1px solid rgba(255,255,255,0.25);
+  }
+  table { border-collapse: collapse; margin-bottom: 1.5rem; font-size: 0.85rem; }
+  th, td { padding: 0.35rem 0.9rem; text-align: left; border-bottom: 1px solid #223; }
+  th { color: #889; font-weight: 600; text-transform: uppercase; font-size: 0.72rem; letter-spacing: 0.05em; }
+  tr.chosen td { color: #4ecca3; font-weight: 600; }
   .results { display: flex; gap: 2rem; flex-wrap: wrap; align-items: flex-start; }
   .card {
     background: #16213e; border-radius: 12px; padding: 1rem;
@@ -310,118 +121,54 @@ export const PREVIEW_HTML = `<!DOCTYPE html>
   }
   .card h3 { font-size: 0.9rem; color: #999; text-transform: uppercase; letter-spacing: 0.05em; }
   .card img { border-radius: 4px; }
-  .cover-img { max-width: 300px; }
-  .spine-raw { max-height: 300px; }
-  .spine-final { height: 300px; image-rendering: auto; }
-  .status { padding: 0.75rem 1rem; border-radius: 8px; margin-bottom: 1rem; font-size: 0.9rem; }
-  .status.loading { background: #1a3a5c; color: #7ec8e3; }
-  .status.error { background: #3c1418; color: #e94560; }
-  .status.success { background: #1a3c2a; color: #4ecca3; }
-  .description {
-    background: #0f3460; padding: 0.75rem 1rem; border-radius: 8px;
-    font-size: 0.85rem; margin-bottom: 1rem; line-height: 1.5;
-  }
-  .description span { color: #7ec8e3; }
+  .card .none { color: #667; font-size: 0.85rem; padding: 2rem 1rem; }
+  .cover-img { max-height: 320px; max-width: 300px; }
+  .spine-img { height: 320px; }
 </style>
 </head>
 <body>
 <h1>Cover Preview</h1>
-
-<div class="book-select">
-  <select id="bookSelect" onchange="onBookSelect()">
-    <option value="">— Custom (enter manually) —</option>
-  </select>
-  <span id="currentCover" class="current-cover"></span>
-</div>
+<div class="sub">Upload an EPUB — shows its raw embedded cover next to two generated spines: nearest existing cloth (方案1) and cover-tinted cloth (方案2). Title is NOT LLM-sanitized here.</div>
 
 <div class="form">
-  <input id="title" placeholder="Book title" value="The Great Gatsby">
-  <input id="author" placeholder="Author" value="F. Scott Fitzgerald">
-  <button id="btn" onclick="generate()">Generate</button>
+  <input id="file" type="file" accept=".epub,application/epub+zip">
+  <button id="btn" onclick="generate()">Compose</button>
 </div>
 
 <div id="status"></div>
-<div id="desc"></div>
+<div id="meta"></div>
+<div id="candidates"></div>
 <div id="results" class="results"></div>
-<div id="saveArea"></div>
 
 <script>
-let books = [];
-let lastResult = null;
-let selectedBookUuid = null;
-
-// Load books on page load
-(async function loadBooks() {
-  try {
-    const resp = await fetch('/preview/books');
-    const data = await resp.json();
-    books = data.books || [];
-    const sel = document.getElementById('bookSelect');
-    books.forEach(b => {
-      const opt = document.createElement('option');
-      opt.value = b.uuid;
-      opt.textContent = b.title + ' — ' + b.author;
-      sel.appendChild(opt);
-    });
-  } catch (e) {
-    console.error('Failed to load books:', e);
-  }
-})();
-
-function onBookSelect() {
-  const sel = document.getElementById('bookSelect');
-  const uuid = sel.value;
-  selectedBookUuid = uuid || null;
-  const book = books.find(b => b.uuid === uuid);
-  if (book) {
-    document.getElementById('title').value = book.title || '';
-    document.getElementById('author').value = book.author || '';
-    // Show current cover/spine if exists
-    const cc = document.getElementById('currentCover');
-    let html = '';
-    if (book.book_cover_img_url) html += 'Current: <img src="' + book.book_cover_img_url + '">';
-    if (book.book_spine_img_url) html += '<img src="' + book.book_spine_img_url + '">';
-    cc.innerHTML = html;
-  } else {
-    document.getElementById('currentCover').innerHTML = '';
-  }
-  // Clear previous results
-  document.getElementById('results').innerHTML = '';
-  document.getElementById('saveArea').innerHTML = '';
-  document.getElementById('status').className = '';
-  document.getElementById('status').textContent = '';
-  document.getElementById('desc').innerHTML = '';
-}
+function rgbCss(c) { return 'rgb(' + c.r + ',' + c.g + ',' + c.b + ')'; }
+function swatch(c) { return '<span class="swatch" style="background:' + rgbCss(c) + '"></span>'; }
 
 async function generate() {
-  const title = document.getElementById('title').value.trim();
-  const author = document.getElementById('author').value.trim();
-  if (!title || !author) return;
+  const fileInput = document.getElementById('file');
+  const file = fileInput.files && fileInput.files[0];
+  if (!file) return;
 
   const btn = document.getElementById('btn');
   const status = document.getElementById('status');
+  const meta = document.getElementById('meta');
+  const candidates = document.getElementById('candidates');
   const results = document.getElementById('results');
-  const desc = document.getElementById('desc');
-  const saveArea = document.getElementById('saveArea');
 
   btn.disabled = true;
-  btn.textContent = 'Generating...';
+  btn.textContent = 'Composing...';
   status.className = 'status loading';
-  status.textContent = '⏳ Generating cover and spine... (this takes 30-60s)';
+  status.textContent = 'Parsing EPUB and composing images...';
+  meta.innerHTML = '';
+  candidates.innerHTML = '';
   results.innerHTML = '';
-  desc.innerHTML = '';
-  saveArea.innerHTML = '';
-  lastResult = null;
 
   const start = Date.now();
 
   try {
-    const resp = await fetch('/preview', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title, author }),
-    });
-
+    const fd = new FormData();
+    fd.append('file', file);
+    const resp = await fetch('/preview', { method: 'POST', body: fd });
     const data = await resp.json();
     const elapsed = ((Date.now() - start) / 1000).toFixed(1);
 
@@ -431,83 +178,56 @@ async function generate() {
       return;
     }
 
-    lastResult = data;
     status.className = 'status success';
-    status.textContent = 'Generated in ' + elapsed + 's';
+    status.textContent = 'Composed in ' + elapsed + 's';
 
-    if (data.description) {
-      desc.className = 'description';
-      desc.innerHTML = 'Cover style → <span>' + data.description.color +
-        '</span> · <span>' + data.description.style +
-        '</span> · <span>' + data.description.accent + '</span>';
+    let m = '<b>' + data.title + '</b> — ' + (data.author || 'unknown author') +
+      ' · spine title: <span>' + data.spineTitle + '</span>' +
+      ' · thickness: <span>' + data.spineThickness.toFixed(2) + '×</span>';
+    if (data.dominant) {
+      m += '<br>Cover salient colour: ' + swatch(data.dominant) +
+        '<span>rgb(' + data.dominant.r + ',' + data.dominant.g + ',' + data.dominant.b + ')</span>' +
+        ' → matched template: <span>' + data.chosenColor + '</span>';
+      if (data.tint) {
+        m += ' · cloth tint: ' + swatch(data.tint) +
+          '<span>rgb(' + data.tint.r + ',' + data.tint.g + ',' + data.tint.b + ')</span>';
+      }
+    } else {
+      m += '<br>No embedded cover — template chosen at random: <span>' + data.chosenColor + '</span>';
+    }
+    meta.className = 'meta';
+    meta.innerHTML = m;
+
+    if (data.candidates && data.candidates.length) {
+      let rows = '';
+      data.candidates.forEach(function (c) {
+        rows += '<tr class="' + (c.key === data.chosenColor ? 'chosen' : '') + '">' +
+          '<td>' + swatch(c.rgb) + c.key + '</td>' +
+          '<td>rgb(' + c.rgb.r + ',' + c.rgb.g + ',' + c.rgb.b + ')</td>' +
+          '<td>' + c.distance.toFixed(1) + '</td></tr>';
+      });
+      candidates.innerHTML =
+        '<table><tr><th>Template</th><th>Cloth colour</th><th>Distance</th></tr>' + rows + '</table>';
     }
 
     results.innerHTML =
-      '<div class="card">' +
-        '<h3>Cover (437×606)</h3>' +
-        '<img class="cover-img" src="' + data.cover + '">' +
+      '<div class="card"><h3>Extracted cover</h3>' +
+        (data.originalCover
+          ? '<img class="cover-img" src="' + data.originalCover + '">'
+          : '<div class="none">No embedded cover in this EPUB</div>') +
       '</div>' +
-      '<div class="card">' +
-        '<h3>Spine processed (114×607)</h3>' +
-        '<img class="spine-final" src="' + data.spine + '">' +
-      '</div>' +
-      '<div class="card">' +
-        '<h3>Spine raw</h3>' +
-        '<img class="spine-raw" src="' + data.spineRaw + '">' +
-      '</div>';
-
-    // Show save button if a book is selected
-    if (selectedBookUuid) {
-      saveArea.innerHTML =
-        '<button class="btn-save" onclick="saveToBook()">Save to book</button>';
-    }
+      '<div class="card"><h3>Spine — nearest cloth (方案1)</h3>' +
+        '<img class="spine-img" src="' + data.spine + '"></div>' +
+      (data.spineTinted
+        ? '<div class="card"><h3>Spine — cover-tinted cloth (方案2)</h3>' +
+          '<img class="spine-img" src="' + data.spineTinted + '"></div>'
+        : '');
   } catch (err) {
     status.className = 'status error';
     status.textContent = err.message;
   } finally {
     btn.disabled = false;
-    btn.textContent = 'Generate';
-  }
-}
-
-async function saveToBook() {
-  if (!lastResult || !selectedBookUuid) return;
-
-  const saveArea = document.getElementById('saveArea');
-  const status = document.getElementById('status');
-  saveArea.innerHTML = '<button class="btn-save" disabled>Saving...</button>';
-
-  try {
-    const resp = await fetch('/preview/save', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        bookUuid: selectedBookUuid,
-        cover: lastResult.cover,
-        spine: lastResult.spine,
-      }),
-    });
-    const data = await resp.json();
-    if (data.error) {
-      status.className = 'status error';
-      status.textContent = 'Save failed: ' + data.error;
-      saveArea.innerHTML = '<button class="btn-save" onclick="saveToBook()">Retry save</button>';
-      return;
-    }
-    status.className = 'status success';
-    status.textContent = 'Saved! Cover: ' + data.coverUrl;
-    saveArea.innerHTML = '<button class="btn-save" disabled style="background:#666;">Saved</button>';
-
-    // Update the book in local list
-    const book = books.find(b => b.uuid === selectedBookUuid);
-    if (book) {
-      book.book_cover_img_url = data.coverUrl;
-      book.book_spine_img_url = data.spineUrl;
-    }
-  } catch (err) {
-    status.className = 'status error';
-    status.textContent = 'Save error: ' + err.message;
-    saveArea.innerHTML = '<button class="btn-save" onclick="saveToBook()">Retry save</button>';
+    btn.textContent = 'Compose';
   }
 }
 </script>
