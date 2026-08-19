@@ -202,6 +202,78 @@ async function faceLuminance(buffer: Buffer, box: Box): Promise<number> {
   return sum / n;
 }
 
+export interface RGB {
+  r: number;
+  g: number;
+  b: number;
+}
+
+/**
+ * Dominant colour of a book's own (embedded) cover — used to pick the cloth
+ * template whose colour matches the cover best, so the spine reads as
+ * belonging to the same book. Sharp's 4096-bin histogram dominant is cheap
+ * (milliseconds) and deterministic.
+ */
+export async function dominantColor(cover: Buffer): Promise<RGB> {
+  const { dominant } = await sharp(cover).stats();
+  return dominant;
+}
+
+/**
+ * Mean cloth colour inside a blank template's detected book face — the
+ * per-template reference point that cover dominants are matched against.
+ */
+export async function faceMeanColor(templateCover: Buffer): Promise<RGB> {
+  const box = await detectBookBox(templateCover);
+  const { data, info } = await sharp(templateCover)
+    .extract({
+      left: box.left,
+      top: box.top,
+      width: Math.max(1, box.width),
+      height: Math.max(1, box.height),
+    })
+    .resize(40, 40, { fit: 'fill' })
+    .removeAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const ch = info.channels;
+  const n = info.width * info.height;
+  let r = 0,
+    g = 0,
+    b = 0;
+  for (let i = 0; i < n; i++) {
+    r += data[i * ch];
+    g += data[i * ch + 1];
+    b += data[i * ch + 2];
+  }
+  return { r: Math.round(r / n), g: Math.round(g / n), b: Math.round(b / n) };
+}
+
+export function colorDistance(a: RGB, b: RGB): number {
+  return Math.sqrt((a.r - b.r) ** 2 + (a.g - b.g) ** 2 + (a.b - b.b) ** 2);
+}
+
+/**
+ * Nearest template colour to a cover's dominant, by RGB distance. The pool is
+ * six muted cloths, so plain Euclidean is discriminating enough; returns null
+ * only for an empty candidate list.
+ */
+export function nearestColorKey(
+  target: RGB,
+  candidates: { key: string; rgb: RGB }[]
+): string | null {
+  let best: string | null = null;
+  let bestDist = Infinity;
+  for (const c of candidates) {
+    const d = colorDistance(target, c.rgb);
+    if (d < bestDist) {
+      bestDist = d;
+      best = c.key;
+    }
+  }
+  return best;
+}
+
 /** Approximate text width: CJK glyphs ~1.0em, latin ~0.55em. */
 function glyphAdvance(text: string, fontSize: number): number {
   let w = 0;

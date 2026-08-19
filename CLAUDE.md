@@ -51,7 +51,9 @@ TypeScript-first across frontend, backend, CLI, and translator service.
     UNIQUE constraint, so this is what keeps resume idempotent)
   - Generates each book's cover + spine by compositing onto a pre-made blank
     cloth-hardcover template (pure Sharp, no AI at request time) — see
-    `cover-composer.ts`. Spine width scales with book length.
+    `cover-composer.ts`. Spine width scales with book length. Books with an
+    embedded cover get the cloth colour nearest the cover's dominant colour
+    (deterministic); coverless books get a random cloth.
 - **CLI Scripts** (`scripts/`) — import-book, list-books, remove-book, sync-remote-book, generate-blanks
 - **D1 SQLite** — Users, sessions, books/chapters/translations (v2 tables), translation jobs, credits, reading progress
 - **R2 Storage** — Cover images, spine images, in-book images (`books/{uuid}/images/`). CORS enabled (`GET`/`HEAD` from `*`) — the 3D shelf loads these as WebGL textures
@@ -75,8 +77,8 @@ TypeScript-first across frontend, backend, CLI, and translator service.
 - `services/translator/src/d1-client.ts` — D1 REST API client
 - `services/translator/src/cover-composer.ts` — Composes cover + spine onto blank cloth templates (Sharp): book-face detection, original-cover inset, title/author typesetting, length-based spine thickness
 - `services/translator/src/book-parser.ts` — EPUB parsing; also extracts the embedded cover (used as the cover inset). Chapter extraction is TOC-first: when the EPUB has a usable nav.xhtml/NCX, files it references take its titles; tiny nav-referenced half-title pages (bare part/chapter numbers) are dropped and donate their nav title to the next unreferenced file (donated nav title > own h1 > inheritance); substantial unreferenced files with a leading h1 are chapters the TOC skipped and take their own h1, headingless ones inherit the preceding entry's title (split-chapter continuations); tiny text-only pages outside the TOC's range (publisher ads/filler) are dropped, and `linear="no"` spine items are skipped per spec; untitled front/back matter falls back through OPF `<guide>` roles → filename patterns → headings → short-block derivation (prose/dialogue lines are rejected), with "Chapter N" as the true last resort. Resolves internal links across spine files to `(chapter, xpath)` coordinates (`data-ov-chapter`/`data-ov-xpath` attributes in `raw_html`) and classifies footnote references (`data-ov-note`) across the common EPUB shapes: EPUB3 `epub:type="noteref"` + `<aside epub:type="footnote">` (aside hidden via `data-ov-hidden`, still translated), separate endnotes pages (heading + backlink-ratio heuristic), Gutenberg-style same-file anchor pairs (note-label echo heuristic), plus plain cross-references; note labels are stripped from the `text` sent to translation. Mirrored in `src/utils/book-processor.ts` (CLI fallback importer) — keep the two in sync
-- `services/translator/src/image-processor.ts` — Legacy cover/spine image processing (Sharp), used by the cover-preview debug page
-- `services/translator/src/cover-preview.ts` — Password-protected cover preview page
+- `services/translator/src/image-processor.ts` — Legacy cover/spine image processing (Sharp), used by the legacy `/process-cover` endpoint
+- `services/translator/src/cover-preview.ts` — Password-protected cover-preview debug page: upload an EPUB, see the extracted cover, the template-colour ranking, and the composed cover + spine
 
 ## API Endpoints
 

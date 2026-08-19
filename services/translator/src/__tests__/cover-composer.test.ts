@@ -11,6 +11,10 @@ import {
   spineThicknessFromLength,
   wrapText,
   fitWrapped,
+  dominantColor,
+  faceMeanColor,
+  nearestColorKey,
+  colorDistance,
 } from '../cover-composer.js';
 
 const BG = '#dfe1e1'; // light-neutral backdrop, same family as the real mockups
@@ -276,5 +280,61 @@ describe('text fitting (no truncation)', () => {
     const { size, lines } = fitWrapped(title, 48, 240, 160);
     expect(size).toBeLessThan(48); // had to shrink
     expect(lines.join(' ')).toBe(title); // nothing truncated
+  });
+});
+
+describe('template colour matching (cover dominant → nearest cloth)', () => {
+  const CLOTHS = [
+    { key: 'gray', rgb: { r: 127, g: 138, b: 138 } },
+    { key: 'navy', rgb: { r: 35, g: 48, b: 84 } },
+    { key: 'burgundy', rgb: { r: 96, g: 42, b: 52 } },
+    { key: 'forest', rgb: { r: 46, g: 72, b: 54 } },
+    { key: 'tan', rgb: { r: 196, g: 170, b: 138 } },
+    { key: 'slate', rgb: { r: 40, g: 42, b: 46 } },
+  ];
+
+  it('nearestColorKey picks the intuitively matching cloth', () => {
+    expect(nearestColorKey({ r: 30, g: 60, b: 120 }, CLOTHS)).toBe('navy');
+    expect(nearestColorKey({ r: 140, g: 40, b: 50 }, CLOTHS)).toBe('burgundy');
+    expect(nearestColorKey({ r: 60, g: 110, b: 70 }, CLOTHS)).toBe('forest');
+    expect(nearestColorKey({ r: 230, g: 210, b: 180 }, CLOTHS)).toBe('tan');
+    expect(nearestColorKey({ r: 20, g: 20, b: 22 }, CLOTHS)).toBe('slate');
+  });
+
+  it('nearestColorKey returns null for an empty pool', () => {
+    expect(nearestColorKey({ r: 0, g: 0, b: 0 }, [])).toBeNull();
+  });
+
+  it('dominantColor finds the dominant colour of a mostly-solid cover', async () => {
+    const svg = `<svg width="200" height="300" xmlns="http://www.w3.org/2000/svg">
+      <rect width="200" height="300" fill="#204070"/>
+      <rect x="40" y="120" width="120" height="40" fill="#e0d0a0"/>
+    </svg>`;
+    const cover = await sharp(Buffer.from(svg)).png().toBuffer();
+    const dom = await dominantColor(cover);
+    expect(colorDistance(dom, { r: 0x20, g: 0x40, b: 0x70 })).toBeLessThan(40);
+  });
+
+  it('faceMeanColor measures the cloth inside the detected book box, not the backdrop', async () => {
+    const template = await fakeCoverTemplate('#2b3a55'); // navy book on light bg
+    const rgb = await faceMeanColor(template);
+    expect(colorDistance(rgb, { r: 0x2b, g: 0x3a, b: 0x55 })).toBeLessThan(20);
+  });
+
+  it('end to end: a navy cover dominant selects the navy fake template over others', async () => {
+    const covers = {
+      navy: await fakeCoverTemplate('#2b3a55'),
+      tan: await fakeCoverTemplate('#c8ab8a'),
+    };
+    const candidates = [
+      { key: 'navy', rgb: await faceMeanColor(covers.navy) },
+      { key: 'tan', rgb: await faceMeanColor(covers.tan) },
+    ];
+    const svg = `<svg width="120" height="180" xmlns="http://www.w3.org/2000/svg">
+      <rect width="120" height="180" fill="#1e3a6e"/></svg>`;
+    const dom = await dominantColor(
+      await sharp(Buffer.from(svg)).png().toBuffer()
+    );
+    expect(nearestColorKey(dom, candidates)).toBe('navy');
   });
 });
