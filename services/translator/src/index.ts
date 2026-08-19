@@ -16,6 +16,8 @@ import {
   faceMeanColor,
   colorDistance,
   nearestColorKey,
+  clampClothTint,
+  tintTemplateCloth,
   type RGB,
 } from './cover-composer.js';
 import {
@@ -1025,8 +1027,9 @@ app.post('/preview/login', async (c) => {
   return c.json({ error: 'Wrong password' }, 401);
 });
 // --- Preview: parse an uploaded EPUB and pair its RAW extracted cover with
-// a spine generated on the cloth template matched to the cover's dominant
-// colour — the pairing being evaluated is "book's own cover + matched spine".
+// two generated spines to compare: 方案1 — nearest existing cloth template by
+// dominant colour; 方案2 — the gray seed template's cloth tinted to the
+// cover's dominant colour (clamped to the muted library-cloth band).
 // Skips the LLM title sanitizer so the round-trip is fast and deterministic.
 app.post('/preview', async (c) => {
   const cookie = c.req.header('cookie') || '';
@@ -1072,15 +1075,35 @@ app.post('/preview', async (c) => {
           }
         : await pickRandomTemplate();
 
-    const spine = await composeSpine({
+    const spineInput = {
       templateCover: template.cover,
-      templateSpine: template.spine,
       originalCover: null,
       title,
       spineTitle,
       author,
       spineThickness,
+    };
+    const spineMatched = await composeSpine({
+      ...spineInput,
+      templateSpine: template.spine,
     });
+
+    // 方案2: tint the gray seed template's cloth with the (clamped) cover
+    // dominant, then typeset the same spine on it.
+    let spineTinted: Buffer | null = null;
+    let tint: RGB | null = null;
+    if (dominant) {
+      try {
+        tint = clampClothTint(dominant);
+        const graySpine = (await getBlankTemplate('gray')).spine;
+        spineTinted = await composeSpine({
+          ...spineInput,
+          templateSpine: await tintTemplateCloth(graySpine, tint),
+        });
+      } catch (e) {
+        console.warn('[preview] tinted spine failed:', e);
+      }
+    }
 
     // Downscale the extracted cover for display — some EPUBs embed multi-MB
     // covers, and the dominant colour was already taken from the full buffer.
@@ -1102,7 +1125,11 @@ app.post('/preview', async (c) => {
       chosenColor: template.color,
       candidates,
       originalCover: originalCoverUri,
-      spine: `data:image/png;base64,${spine.toString('base64')}`,
+      spine: `data:image/png;base64,${spineMatched.toString('base64')}`,
+      tint,
+      spineTinted: spineTinted
+        ? `data:image/png;base64,${spineTinted.toString('base64')}`
+        : null,
     });
   } catch (err) {
     console.error('[preview] compose failed:', err);

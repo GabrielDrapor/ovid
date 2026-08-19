@@ -8,6 +8,7 @@ import { describe, it, expect } from 'vitest';
 import sharp from 'sharp';
 import {
   composeBookImages,
+  composeSpine,
   spineThicknessFromLength,
   wrapText,
   fitWrapped,
@@ -15,6 +16,8 @@ import {
   faceMeanColor,
   nearestColorKey,
   colorDistance,
+  clampClothTint,
+  tintTemplateCloth,
 } from '../cover-composer.js';
 
 const BG = '#dfe1e1'; // light-neutral backdrop, same family as the real mockups
@@ -336,5 +339,63 @@ describe('template colour matching (cover dominant → nearest cloth)', () => {
       await sharp(Buffer.from(svg)).png().toBuffer()
     );
     expect(nearestColorKey(dom, candidates)).toBe('navy');
+  });
+});
+
+describe('cloth tinting (方案2: cover dominant → tinted gray cloth)', () => {
+  /** Rounded-corner spine mockup — the bbox corners contain backdrop. */
+  async function fakeRoundedSpineTemplate(
+    bookColor = '#7f8a8a'
+  ): Promise<Buffer> {
+    const W = 1408,
+      H = 768;
+    const bw = 90,
+      bh = 600;
+    const svg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
+      <rect width="${W}" height="${H}" fill="${BG}"/>
+      <rect x="${(W - bw) / 2}" y="${(H - bh) / 2}" width="${bw}" height="${bh}" rx="24" ry="24" fill="${bookColor}"/>
+    </svg>`;
+    return sharp(Buffer.from(svg)).png().toBuffer();
+  }
+
+  it('clampClothTint bounds lightness and saturation, keeps the hue', () => {
+    const white = clampClothTint({ r: 255, g: 255, b: 255 });
+    expect(Math.max(white.r, white.g, white.b)).toBeLessThan(160);
+    const black = clampClothTint({ r: 0, g: 0, b: 0 });
+    expect(Math.max(black.r, black.g, black.b)).toBeGreaterThan(30);
+    const red = clampClothTint({ r: 230, g: 30, b: 40 });
+    expect(red.r).toBeGreaterThan(red.g);
+    expect(red.r).toBeGreaterThan(red.b);
+  });
+
+  it('tintTemplateCloth recolours the cloth but leaves the backdrop neutral', async () => {
+    const tpl = await fakeRoundedSpineTemplate();
+    const tint = clampClothTint({ r: 140, g: 40, b: 50 });
+    const tinted = await tintTemplateCloth(tpl, tint);
+    const center = await pixel(tinted, 1408 >> 1, 768 >> 1);
+    expect(center.r).toBeGreaterThan(center.g); // cloth is now reddish
+    expect(center.r).toBeGreaterThan(center.b);
+    const backdrop = await pixel(tinted, 4, 4);
+    expect(Math.abs(backdrop.r - backdrop.g)).toBeLessThan(6); // still neutral
+    expect(backdrop.r).toBeGreaterThan(200); // still light
+  });
+
+  it('tinted rounded spine still crops with transparent corners, opaque tinted body', async () => {
+    const tpl = await fakeRoundedSpineTemplate();
+    const tint = clampClothTint({ r: 140, g: 40, b: 50 });
+    const spine = await composeSpine({
+      templateCover: await fakeCoverTemplate(),
+      templateSpine: await tintTemplateCloth(tpl, tint),
+      originalCover: null,
+      title: 'Tinted',
+      author: 'A',
+    });
+    const m = await sharp(spine).metadata();
+    expect(m.width!).toBeLessThan(140); // box stayed on the spine
+    const corner = await pixel(spine, 1, 1);
+    expect(corner.a).toBe(0); // rounded corner backdrop flood-filled away
+    const center = await pixel(spine, m.width! >> 1, m.height! >> 1);
+    expect(center.a).toBe(255);
+    expect(center.r).toBeGreaterThan(center.g); // body carries the tint
   });
 });

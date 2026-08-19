@@ -274,6 +274,141 @@ export function nearestColorKey(
   return best;
 }
 
+function rgbToHsl({ r, g, b }: RGB): { h: number; s: number; l: number } {
+  const rn = r / 255,
+    gn = g / 255,
+    bn = b / 255;
+  const max = Math.max(rn, gn, bn);
+  const min = Math.min(rn, gn, bn);
+  const l = (max + min) / 2;
+  if (max === min) return { h: 0, s: 0, l };
+  const d = max - min;
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  let h: number;
+  if (max === rn) h = ((gn - bn) / d + (gn < bn ? 6 : 0)) / 6;
+  else if (max === gn) h = ((bn - rn) / d + 2) / 6;
+  else h = ((rn - gn) / d + 4) / 6;
+  return { h, s, l };
+}
+
+function hslToRgb(h: number, s: number, l: number): RGB {
+  if (s === 0) {
+    const v = Math.round(l * 255);
+    return { r: v, g: v, b: v };
+  }
+  const hue2rgb = (p: number, q: number, t: number): number => {
+    if (t < 0) t += 1;
+    if (t > 1) t -= 1;
+    if (t < 1 / 6) return p + (q - p) * 6 * t;
+    if (t < 1 / 2) return q;
+    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+    return p;
+  };
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  const pp = 2 * l - q;
+  return {
+    r: Math.round(hue2rgb(pp, q, h + 1 / 3) * 255),
+    g: Math.round(hue2rgb(pp, q, h) * 255),
+    b: Math.round(hue2rgb(pp, q, h - 1 / 3) * 255),
+  };
+}
+
+/**
+ * Clamp a cover's dominant colour into the muted "library cloth" band before
+ * tinting: keeps the hue, bounds saturation and lightness so the tinted cloth
+ * stays tasteful AND keeps clearing the pipeline's thresholds — dark enough
+ * that detectBookBox still sees book pixels against the light backdrop, and
+ * dark enough (even at textured highlights) that cropToBook's flood fill
+ * never mistakes cloth for backdrop.
+ */
+export function clampClothTint(c: RGB): RGB {
+  const { h, s, l } = rgbToHsl(c);
+  return hslToRgb(
+    h,
+    Math.min(0.5, Math.max(0.12, s)),
+    Math.min(0.5, Math.max(0.2, l))
+  );
+}
+
+/**
+ * Recolour a blank template's CLOTH to `tint`, preserving the weave texture
+ * and 3D lighting (per-pixel luminance is kept, scaled around the cloth's
+ * mean). Only pixels that classify as "book" — the same chroma/darkness test
+ * detectBookBox uses — are touched: the bbox corners of a rounded-corner
+ * hardcover contain light-neutral backdrop, and tinting those would leave
+ * bright chromatic specks that cropToBook's flood fill (lum > 185, chroma
+ * < 18) could no longer remove. Backdrop stays neutral, so the downstream
+ * detection and crop behave exactly as on an untinted template.
+ */
+export async function tintTemplateCloth(
+  template: Buffer,
+  tint: RGB
+): Promise<Buffer> {
+  const box = await detectBookBox(template);
+  const { data, info } = await sharp(template)
+    .removeAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const W = info.width;
+  const H = info.height;
+  const ch = info.channels;
+
+  // Same background reference + book classifier as detectBookBox.
+  const at = (x: number, y: number) => {
+    const i = (y * W + x) * ch;
+    return [data[i], data[i + 1], data[i + 2]];
+  };
+  const corners = [at(1, 1), at(W - 2, 1), at(1, H - 2), at(W - 2, H - 2)];
+  const bg = [0, 1, 2].map(
+    (k) => corners.reduce((sum, c) => sum + c[k], 0) / corners.length
+  );
+  const CHROMA = 18;
+  const DARK = 130;
+  const isBook = (i: number) => {
+    const r = data[i],
+      g = data[i + 1],
+      b = data[i + 2];
+    const chroma = Math.max(r, g, b) - Math.min(r, g, b);
+    const diff =
+      Math.abs(r - bg[0]) + Math.abs(g - bg[1]) + Math.abs(b - bg[2]);
+    return chroma > CHROMA || diff > DARK;
+  };
+
+  // Mean luminance of the cloth (book pixels inside the box).
+  let lumSum = 0;
+  let n = 0;
+  for (let y = box.top; y < box.top + box.height; y++) {
+    for (let x = box.left; x < box.left + box.width; x++) {
+      const i = (y * W + x) * ch;
+      if (!isBook(i)) continue;
+      lumSum += 0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2];
+      n++;
+    }
+  }
+  const meanLum = n > 0 ? lumSum / n : 128;
+
+  // Recolour: mean-luminance cloth maps to exactly `tint`; highlights and
+  // shadows scale around it, so the weave and lighting survive.
+  for (let y = box.top; y < box.top + box.height; y++) {
+    for (let x = box.left; x < box.left + box.width; x++) {
+      const i = (y * W + x) * ch;
+      if (!isBook(i)) continue;
+      const lum =
+        0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2];
+      const f = lum / meanLum;
+      data[i] = Math.max(0, Math.min(255, Math.round(tint.r * f)));
+      data[i + 1] = Math.max(0, Math.min(255, Math.round(tint.g * f)));
+      data[i + 2] = Math.max(0, Math.min(255, Math.round(tint.b * f)));
+    }
+  }
+
+  return sharp(Buffer.from(data), {
+    raw: { width: W, height: H, channels: ch as 3 },
+  })
+    .png()
+    .toBuffer();
+}
+
 /** Approximate text width: CJK glyphs ~1.0em, latin ~0.55em. */
 function glyphAdvance(text: string, fontSize: number): number {
   let w = 0;

@@ -1,12 +1,13 @@
 /**
  * Cover preview debug tool.
  *
- * Upload an EPUB → the page shows the RAW extracted cover next to the spine
- * generated for it (方案1: cover dominant colour → nearest cloth template,
- * title/author typeset on that cloth). The pairing under evaluation is "the
- * book's own cover as-is + a matched spine" — no cover composition happens
- * here. The dominant swatch and the per-template distance ranking are shown
- * so the matching can be tuned.
+ * Upload an EPUB → the page shows the RAW extracted cover next to TWO spines
+ * generated for it, side by side: 方案1 — nearest existing cloth template by
+ * the cover's dominant colour; 方案2 — the gray seed template's cloth tinted
+ * to the dominant colour itself (clamped to the muted library-cloth band).
+ * No cover composition happens here — the pairing under evaluation is "the
+ * book's own cover as-is + a matched spine". The dominant/tint swatches and
+ * the per-template distance ranking are shown so the matching can be tuned.
  *
  * The HTML below is served by index.ts (`GET /preview`); the matching API is
  * `POST /preview` (multipart, field `file`). Note: the preview skips the LLM
@@ -127,7 +128,7 @@ export const PREVIEW_HTML = `<!DOCTYPE html>
 </head>
 <body>
 <h1>Cover Preview</h1>
-<div class="sub">Upload an EPUB — shows its raw embedded cover next to the spine generated for it (nearest cloth template by dominant colour, title/author typeset on it). Title is NOT LLM-sanitized here.</div>
+<div class="sub">Upload an EPUB — shows its raw embedded cover next to two generated spines: nearest existing cloth (方案1) and cover-tinted cloth (方案2). Title is NOT LLM-sanitized here.</div>
 
 <div class="form">
   <input id="file" type="file" accept=".epub,application/epub+zip">
@@ -187,6 +188,10 @@ async function generate() {
       m += '<br>Cover dominant: ' + swatch(data.dominant) +
         '<span>rgb(' + data.dominant.r + ',' + data.dominant.g + ',' + data.dominant.b + ')</span>' +
         ' → matched template: <span>' + data.chosenColor + '</span>';
+      if (data.tint) {
+        m += ' · cloth tint: ' + swatch(data.tint) +
+          '<span>rgb(' + data.tint.r + ',' + data.tint.g + ',' + data.tint.b + ')</span>';
+      }
     } else {
       m += '<br>No embedded cover — template chosen at random: <span>' + data.chosenColor + '</span>';
     }
@@ -211,8 +216,12 @@ async function generate() {
           ? '<img class="cover-img" src="' + data.originalCover + '">'
           : '<div class="none">No embedded cover in this EPUB</div>') +
       '</div>' +
-      '<div class="card"><h3>Generated spine</h3>' +
-        '<img class="spine-img" src="' + data.spine + '"></div>';
+      '<div class="card"><h3>Spine — nearest cloth (方案1)</h3>' +
+        '<img class="spine-img" src="' + data.spine + '"></div>' +
+      (data.spineTinted
+        ? '<div class="card"><h3>Spine — cover-tinted cloth (方案2)</h3>' +
+          '<img class="spine-img" src="' + data.spineTinted + '"></div>'
+        : '');
   } catch (err) {
     status.className = 'status error';
     status.textContent = err.message;
