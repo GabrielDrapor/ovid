@@ -12,7 +12,7 @@ import {
   composeBookImages,
   composeSpine,
   spineThicknessFromLength,
-  dominantColor,
+  salientCoverColor,
   faceMeanColor,
   colorDistance,
   nearestColorKey,
@@ -228,7 +228,7 @@ async function pickTemplateForCover(originalCover?: Buffer | null): Promise<{
 }> {
   if (originalCover) {
     try {
-      const dom = await dominantColor(originalCover);
+      const dom = await salientCoverColor(originalCover);
       const ranked = await rankTemplatesForCover(dom);
       const bestKey = nearestColorKey(
         dom,
@@ -237,7 +237,7 @@ async function pickTemplateForCover(originalCover?: Buffer | null): Promise<{
       if (bestKey) {
         const { cover, spine } = await getBlankTemplate(bestKey);
         console.log(
-          `[cover] matched template '${bestKey}' to cover dominant rgb(${dom.r},${dom.g},${dom.b})`
+          `[cover] matched template '${bestKey}' to cover salient colour rgb(${dom.r},${dom.g},${dom.b})`
         );
         return { color: bestKey, cover, spine };
       }
@@ -1064,7 +1064,7 @@ app.post('/preview', async (c) => {
     let dominant: RGB | null = null;
     let candidates: TemplateCandidate[] = [];
     if (originalCover) {
-      dominant = await dominantColor(originalCover);
+      dominant = await salientCoverColor(originalCover);
       candidates = await rankTemplatesForCover(dominant);
     }
     const template =

@@ -249,6 +249,62 @@ export async function faceMeanColor(templateCover: Buffer): Promise<RGB> {
   return { r: Math.round(r / n), g: Math.round(g / n), b: Math.round(b / n) };
 }
 
+/**
+ * The colour a cover READS as, rather than the colour covering the most area.
+ * `stats().dominant` picks the modal histogram bin, which for covers with a
+ * light background (or a big black-and-white photo) is the background — a
+ * cream cover with green typography came out cream, a burlap cover with a
+ * grayscale photo came out gray. Instead: consider only chromatic pixels
+ * (HSV saturation ≥ 0.2, value inside [0.12, 0.97] to drop near-black and
+ * blown-out whites), weight them by saturation, and take the weighted mean
+ * colour of the winning hue bin. Covers that are genuinely monochrome (< 3%
+ * chromatic pixels) fall back to the raw dominant, which the tint clamp then
+ * keeps neutral.
+ */
+export async function salientCoverColor(cover: Buffer): Promise<RGB> {
+  const { data, info } = await sharp(cover)
+    .resize(64, 64, { fit: 'fill' })
+    .removeAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const ch = info.channels;
+  const total = info.width * info.height;
+
+  const BINS = 12;
+  const weight = new Float64Array(BINS);
+  const sumR = new Float64Array(BINS);
+  const sumG = new Float64Array(BINS);
+  const sumB = new Float64Array(BINS);
+  let chromatic = 0;
+
+  for (let i = 0; i < total; i++) {
+    const r = data[i * ch],
+      g = data[i * ch + 1],
+      b = data[i * ch + 2];
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    const v = max / 255;
+    const sat = max === 0 ? 0 : (max - min) / max;
+    if (sat < 0.2 || v < 0.12 || v > 0.97) continue;
+    chromatic++;
+    const bin = Math.min(BINS - 1, Math.floor(rgbToHsl({ r, g, b }).h * BINS));
+    weight[bin] += sat;
+    sumR[bin] += r * sat;
+    sumG[bin] += g * sat;
+    sumB[bin] += b * sat;
+  }
+
+  if (chromatic / total < 0.03) return dominantColor(cover);
+
+  let best = 0;
+  for (let k = 1; k < BINS; k++) if (weight[k] > weight[best]) best = k;
+  return {
+    r: Math.round(sumR[best] / weight[best]),
+    g: Math.round(sumG[best] / weight[best]),
+    b: Math.round(sumB[best] / weight[best]),
+  };
+}
+
 export function colorDistance(a: RGB, b: RGB): number {
   return Math.sqrt((a.r - b.r) ** 2 + (a.g - b.g) ** 2 + (a.b - b.b) ** 2);
 }

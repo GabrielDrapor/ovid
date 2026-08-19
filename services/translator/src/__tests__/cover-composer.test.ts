@@ -9,6 +9,7 @@ import sharp from 'sharp';
 import {
   composeBookImages,
   composeSpine,
+  salientCoverColor,
   spineThicknessFromLength,
   wrapText,
   fitWrapped,
@@ -412,5 +413,45 @@ describe('cloth tinting (方案2: cover dominant → tinted gray cloth)', () => 
     const center = await pixel(spine, m.width! >> 1, m.height! >> 1);
     expect(center.a).toBe(255);
     expect(center.r).toBeGreaterThan(center.g); // body carries the tint
+  });
+});
+
+describe('salientCoverColor (the colour a cover reads as, not the biggest area)', () => {
+  it('picks the chromatic accent over a light background (cream cover, green type)', async () => {
+    const svg = `<svg width="200" height="300" xmlns="http://www.w3.org/2000/svg">
+      <rect width="200" height="300" fill="#f8f8e8"/>
+      <rect x="10" y="10" width="24" height="280" fill="#6abf3a"/>
+      <rect x="60" y="120" width="100" height="30" fill="#6abf3a"/>
+    </svg>`;
+    const c = await salientCoverColor(
+      await sharp(Buffer.from(svg)).png().toBuffer()
+    );
+    expect(c.g).toBeGreaterThan(c.r); // green, not cream
+    expect(c.g).toBeGreaterThan(c.b);
+  });
+
+  it('picks the coloured cloth over a large grayscale photo (burlap cover)', async () => {
+    const svg = `<svg width="200" height="300" xmlns="http://www.w3.org/2000/svg">
+      <rect width="200" height="150" fill="#9a9a9a"/>
+      <rect y="150" width="200" height="150" fill="#6e5236"/>
+      <rect x="40" y="180" width="120" height="24" fill="#e8709a"/>
+    </svg>`;
+    const c = await salientCoverColor(
+      await sharp(Buffer.from(svg)).png().toBuffer()
+    );
+    expect(c.r).toBeGreaterThan(c.b + 20); // warm brown, not photo gray
+    expect(c.r).toBeGreaterThan(c.g);
+  });
+
+  it('falls back to the raw dominant for a genuinely monochrome cover', async () => {
+    const svg = `<svg width="200" height="300" xmlns="http://www.w3.org/2000/svg">
+      <rect width="200" height="300" fill="#c8c8c8"/>
+      <rect x="40" y="130" width="120" height="40" fill="#404040"/>
+    </svg>`;
+    const c = await salientCoverColor(
+      await sharp(Buffer.from(svg)).png().toBuffer()
+    );
+    expect(Math.abs(c.r - c.g)).toBeLessThan(8); // stays neutral
+    expect(Math.abs(c.g - c.b)).toBeLessThan(8);
   });
 });

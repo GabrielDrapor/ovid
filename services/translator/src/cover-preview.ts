@@ -185,7 +185,7 @@ async function generate() {
       ' · spine title: <span>' + data.spineTitle + '</span>' +
       ' · thickness: <span>' + data.spineThickness.toFixed(2) + '×</span>';
     if (data.dominant) {
-      m += '<br>Cover dominant: ' + swatch(data.dominant) +
+      m += '<br>Cover salient colour: ' + swatch(data.dominant) +
         '<span>rgb(' + data.dominant.r + ',' + data.dominant.g + ',' + data.dominant.b + ')</span>' +
         ' → matched template: <span>' + data.chosenColor + '</span>';
       if (data.tint) {
