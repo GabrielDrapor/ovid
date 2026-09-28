@@ -63,7 +63,6 @@ TypeScript-first across frontend, backend, CLI, and translator service.
 - `src/worker/book-handlers.ts` — Book CRUD, upload, chapter content
 - `src/worker/credits.ts` — Credit balance, Stripe checkout/webhooks
 - `src/worker/db.ts` — Database helpers, migrations
-- `src/worker/translation/` — Cloudflare Workflows translation backend (jobs with `backend='cf'`): `translate-core.ts` mirrors the LLM-facing logic of `services/translator/src/translate-worker.ts` **verbatim — keep the two in sync**; orchestration is idempotent per-chapter Workflow steps (row-count check + partial wipe on entry). `workflow.ts` is the logic-free `TranslateBookWorkflow` entrypoint (sliding window of 5 chapter steps); `d1-binding-client.ts` adapts the D1 binding to the REST client's surface. Started only via secret-guarded `POST /api/internal/translate-cf`, which refuses jobs whose `backend` isn't `'cf'`
 - `src/components/BilingualReaderV2.tsx` — Main reader (scroll nav, paragraph toggle, progress). Internal links resolved by the parser (`a[data-ov-chapter][data-ov-xpath]`) navigate in-app: note references (`data-ov-note`) open a bilingual footnote popover (cross-chapter notes fetched via the chapter cache), other links jump via `loadChapter` with a floating "return to reading" chip (stack lives in AppV2); note markers are re-appended after translated text so they stay tappable in translated view
 - `src/components/BookShelf.tsx` — Library UI: hosts the 3D closet (default). Falls back to a classic 2D wall when WebGL is unavailable, but that fallback is legacy/deprecated — it has no upload entry point (upload only happens by clicking an empty slot in the 3D closet) and is slated for removal
 - `src/components/shelf3d/BookShelf3D.tsx` — 3D closet view (three + @react-three/fiber, lazy-loaded): gaze/zoom camera, click-to-fly-out book with info panel, click-empty-slot-to-upload. Requires CORS on the R2 assets domain (configured on bucket `ovid`)
@@ -89,7 +88,7 @@ TypeScript-first across frontend, backend, CLI, and translator service.
 ### Books
 - `GET /api/books` (alias `/api/v2/books`) — List books (public + user's private)
 - `POST /api/books/estimate` — Parse an EPUB via Railway and return a translation cost estimate
-- `POST /api/books/upload` — Upload EPUB (auth required, deducts credits; Railway handles the rest via `/upload-and-parse`). Accepts an optional shelf target (`shelfSlotId`, or `shelfRow`/`shelfCol` to create one on the fly) from clicking an empty slot in the 3D closet. The handler picks the translation backend per user (`chooseTranslationBackend`: `CF_TRANSLATION_ALLOWLIST` emails → `'cf'`, `CF_TRANSLATION_DEFAULT=1` → everyone; else `'railway'`) and passes it to Railway, which parses either way but for `'cf'` jobs hands translation to the Workflow via `POST /api/internal/translate-cf` (falling back to translating on Railway — after flipping job ownership — if the trigger fails)
+- `POST /api/books/upload` — Upload EPUB (auth required, deducts credits; Railway handles the rest via `/upload-and-parse`). Accepts an optional shelf target (`shelfSlotId`, or `shelfRow`/`shelfCol` to create one on the fly) from clicking an empty slot in the 3D closet.
 - `GET /api/book/:uuid/status` — Parsing/translation progress (polled by the shelf)
 - `GET /api/book/:uuid/chapters` — Chapter list
 - `GET /api/book/:uuid/chapter/:number` — Chapter content (XPath-mapped paragraphs)
@@ -124,7 +123,7 @@ Production runs the **v2 schema** (`database/schema_v2.sql` + `database/migratio
 - **books_v2** — `id, uuid, title, original_title, author, language_pair, styles, book_cover_img_url, book_spine_img_url, user_id, status, display_order, created_at, updated_at`
 - **chapters_v2** — `id, book_id, chapter_number, title, original_title, raw_html (original EPUB HTML), text_nodes_json, order_index`
 - **translations_v2** — `id, chapter_id, xpath, original_text, original_html, translated_text, order_index` (XPath-mapped onto the chapter's raw HTML)
-- **translation_jobs** — `book_uuid, source/target_language, total/completed_chapters, current_chapter, current_item_offset, glossary_json, glossary_extracted, translated_title, status, error_message, backend` (checkpoint + progress state per book; `backend` — 'railway' or 'cf' — names the only service allowed to write the job, and the Railway stalled-job scanner filters on it)
+- **translation_jobs** — `book_uuid, source/target_language, total/completed_chapters, current_chapter, current_item_offset, glossary_json, glossary_extracted, translated_title, status, error_message, backend` (checkpoint + progress state per book; `backend` names the service that owns the job — always 'railway' now; historic rows may say 'cf' — and the Railway stalled-job scanner filters on it)
 
 ### User Data
 - **user_book_progress** — `id, user_id, book_uuid, is_completed, completed_at, last_read_at, chapter_number, paragraph_xpath, show_original` (UNIQUE user_id + book_uuid)

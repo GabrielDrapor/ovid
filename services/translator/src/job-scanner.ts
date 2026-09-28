@@ -2,10 +2,10 @@
  * Query construction for the stalled-job scanner and startup recovery.
  *
  * The backend filter is a hard isolation invariant: this Railway service may
- * only ever resume jobs it owns (backend = 'railway'). Jobs translated by
- * Cloudflare Workflows carry backend = 'cf'; picking one of those up here
- * would mean two writers on the same book, and translations_v2 has no
- * UNIQUE(chapter_id, xpath) constraint to stop the resulting duplicate rows.
+ * only ever resume jobs it owns (backend = 'railway'). The column dates from
+ * the removed Cloudflare Workflows backend (historic rows may say 'cf');
+ * translations_v2 has no UNIQUE(chapter_id, xpath) constraint, so resuming a
+ * job some other writer owns would produce duplicate rows.
  */
 
 /** Job statuses that indicate unfinished work eligible for resume */
@@ -29,8 +29,9 @@ export function resumableJobsQuery(extraWhere = ''): string {
 
 /**
  * Normalize the backend requested by the Worker's upload handler. Anything
- * other than an explicit 'cf' collapses to 'railway' — an old Worker deploy
- * that doesn't send the field must keep translating here.
+ * other than an explicit 'cf' collapses to 'railway'. The upload path now
+ * ignores a 'cf' request (sent only by a Worker deployed before the
+ * Workflow backend was removed) and always creates railway-owned jobs.
  */
 export function resolveRequestedBackend(requested: unknown): 'railway' | 'cf' {
   return requested === 'cf' ? 'cf' : 'railway';

@@ -47,21 +47,19 @@ describe('resolveRequestedBackend', () => {
   });
 });
 
-describe('cf hand-off wiring in index.ts', () => {
+describe('job creation wiring in index.ts', () => {
   const indexSrc = fs.readFileSync(
     path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'index.ts'),
     'utf-8'
   );
 
-  it('creates jobs with the resolved backend column', () => {
-    expect(indexSrc).toContain('resolveRequestedBackend(req.backend)');
+  it('always creates jobs owned by railway, even when an old Worker requests cf', () => {
     expect(indexSrc).toMatch(/INSERT INTO translation_jobs[\s\S]*?backend\)/);
+    expect(indexSrc).toContain('OWN_BACKEND,');
   });
 
-  it('falls back to railway ownership before translating locally', () => {
-    // The fallback must flip job ownership FIRST — a stranded cf job is
-    // invisible to the scanner and would never translate
-    expect(indexSrc).toContain("SET backend = 'railway'");
-    expect(indexSrc).toContain('/api/internal/translate-cf');
+  it('no longer hands translation off to the Cloudflare Workflow', () => {
+    expect(indexSrc).not.toContain('/api/internal/translate-cf');
+    expect(indexSrc).not.toContain('triggerCfTranslation');
   });
 });

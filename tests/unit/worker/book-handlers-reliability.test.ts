@@ -79,8 +79,8 @@ describe('Book Handlers Reliability', () => {
       expect(scannerCode).toContain(
         "['pending', 'translating', 'extracting_glossary']"
       );
-      // Railway must only ever resume jobs it owns — the CF Workflows
-      // backend writes the same tables and there is no UNIQUE constraint
+      // Railway must only ever resume jobs it owns — there is no UNIQUE
+      // constraint on translations_v2 to stop a second writer's duplicates
       expect(scannerCode).toContain("OWN_BACKEND = 'railway'");
     });
   });

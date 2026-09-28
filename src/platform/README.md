@@ -31,7 +31,5 @@ handlers are unchanged.
 3. **Keep SQL portable SQLite.** The self-host target is SQLite, so D1's
    dialect is the shared baseline. `json_extract`/`json_each` are fine;
    Postgres-only or D1-only syntax is not.
-4. **Don't reach for `cloudflare:` imports in shared code.** The one place
-   that does (`worker/translation/workflow.ts`, the optional Workflows
-   translation backend) is deliberately isolated and is not part of the
-   self-host path.
+4. **Don't reach for `cloudflare:` imports in shared code.** The self-host
+   build has no `cloudflare:workers` module to resolve them against.

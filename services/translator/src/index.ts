@@ -20,7 +20,7 @@ import { parseBook, type BookDataV2 } from './book-parser.js';
 import { settleCoverGeneration } from './upload-helpers.js';
 import { calculateBookCredits, TOKENS_PER_CREDIT } from './token-counter.js';
 import { detectLanguage } from './language-detect.js';
-import { resumableJobsQuery, resolveRequestedBackend } from './job-scanner.js';
+import { resumableJobsQuery, resolveRequestedBackend, OWN_BACKEND } from './job-scanner.js';
 
 const app = new Hono();
 
@@ -251,7 +251,10 @@ interface UploadAndParseRequest {
   userId: number;
   secret: string;
   skipTranslation?: boolean;
-  /** 'railway' (default) translates here; 'cf' hands off to the CF Workflow */
+  /**
+   * Legacy: the Worker used to send 'cf' to hand translation to a Cloudflare
+   * Workflow. That backend is gone; Railway always translates what it parses.
+   */
   backend?: string;
 }
 
@@ -273,42 +276,6 @@ app.post('/upload-and-parse', async (c) => {
 
   return c.json({ status: 'started', bookUuid: body.bookUuid });
 });
-
-/** Worker base URL for starting cf-backend translations */
-const WORKER_URL = process.env.WORKER_URL || 'https://ovid.ink';
-
-/**
- * Ask the Worker to start a translate-book Workflow for this job.
- * Returns false after exhausting retries (caller falls back to railway).
- */
-async function triggerCfTranslation(bookUuid: string): Promise<boolean> {
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    try {
-      const res = await fetch(`${WORKER_URL}/api/internal/translate-cf`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ bookUuid, secret: env.TRANSLATOR_SECRET }),
-      });
-      if (res.ok) {
-        console.log(`[upload] CF workflow started for ${bookUuid}`);
-        return true;
-      }
-      const text = await res.text();
-      console.warn(
-        `[upload] CF trigger attempt ${attempt} for ${bookUuid}: ${res.status} ${text.slice(0, 200)}`
-      );
-      // 4xx won't heal on retry (bad secret, backend mismatch) — bail early
-      if (res.status >= 400 && res.status < 500) return false;
-    } catch (err) {
-      console.warn(
-        `[upload] CF trigger attempt ${attempt} for ${bookUuid} failed:`,
-        (err as Error).message
-      );
-    }
-    if (attempt < 3) await new Promise((r) => setTimeout(r, attempt * 2000));
-  }
-  return false;
-}
 
 async function processUpload(req: UploadAndParseRequest): Promise<void> {
   const db = getDb();
@@ -510,8 +477,14 @@ async function processUpload(req: UploadAndParseRequest): Promise<void> {
         `[upload] Book ${bookUuid} imported without translation; preparing cover/spine`
       );
     } else {
-      // 6. Create translation job, owned by the backend the Worker chose
-      const backend = resolveRequestedBackend(req.backend);
+      // 6. Create translation job. Railway always owns it; a 'cf' request
+      // from a Worker deployed before the Workflow backend was removed is
+      // ignored so the stalled-job scanner can still resume the job.
+      if (resolveRequestedBackend(req.backend) === 'cf') {
+        console.warn(
+          `[upload] Ignoring cf backend request for ${bookUuid}; translating on railway`
+        );
+      }
       await db.run(
         `INSERT INTO translation_jobs (book_id, book_uuid, source_language, target_language, total_chapters, status, backend)
          VALUES (?, ?, ?, ?, ?, 'pending', ?)`,
@@ -521,41 +494,19 @@ async function processUpload(req: UploadAndParseRequest): Promise<void> {
           sourceLanguage,
           targetLanguage,
           bookData.chapters.length,
-          backend,
+          OWN_BACKEND,
         ]
       );
 
       console.log(
-        `[upload] Book shell inserted, starting translation for ${bookUuid} (backend: ${backend})`
+        `[upload] Book shell inserted, starting translation for ${bookUuid}`
       );
 
-      // 7. Start translation on the owning backend
-      if (backend === 'cf') {
-        // Hand off to the Cloudflare Workflow. On persistent trigger failure,
-        // fall back to translating here so the user's book never strands —
-        // flip ownership first, then translate (the cf job would otherwise
-        // sit pending forever: the scanner ignores non-railway jobs).
-        triggerCfTranslation(bookUuid)
-          .then(async (ok) => {
-            if (ok) return;
-            console.warn(
-              `[upload] CF workflow trigger failed for ${bookUuid} — falling back to railway backend`
-            );
-            await db.run(
-              "UPDATE translation_jobs SET backend = 'railway', updated_at = CURRENT_TIMESTAMP WHERE book_uuid = ?",
-              [bookUuid]
-            );
-            await translateBook(db, getLlmConfig(), bookUuid);
-          })
-          .catch((err) => {
-            console.error(`[upload] Translation failed for ${bookUuid}:`, err);
-          });
-      } else {
-        const llmConfig = getLlmConfig();
-        translateBook(db, llmConfig, bookUuid).catch((err) => {
-          console.error(`[upload] Translation failed for ${bookUuid}:`, err);
-        });
-      }
+      // 7. Start translation
+      const llmConfig = getLlmConfig();
+      translateBook(db, llmConfig, bookUuid).catch((err) => {
+        console.error(`[upload] Translation failed for ${bookUuid}:`, err);
+      });
     }
 
     // 8. Generate cover images from sanitized metadata. The spine can use a
