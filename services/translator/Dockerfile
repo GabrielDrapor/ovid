@@ -10,7 +10,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 COPY package.json ./
-RUN npm install
+# --legacy-peer-deps: npm arborist crashes resolving vitest's optional peers on Linux (2026-09-28)
+RUN npm install --legacy-peer-deps
 
 COPY tsconfig.json ./
 COPY src/ ./src/
