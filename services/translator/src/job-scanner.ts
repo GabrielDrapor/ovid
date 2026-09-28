@@ -26,13 +26,3 @@ export function resumableJobsQuery(extraWhere = ''): string {
      ${extraWhere}
      ORDER BY updated_at ASC`;
 }
-
-/**
- * Normalize the backend requested by the Worker's upload handler. Anything
- * other than an explicit 'cf' collapses to 'railway'. The upload path now
- * ignores a 'cf' request (sent only by a Worker deployed before the
- * Workflow backend was removed) and always creates railway-owned jobs.
- */
-export function resolveRequestedBackend(requested: unknown): 'railway' | 'cf' {
-  return requested === 'cf' ? 'cf' : 'railway';
-}

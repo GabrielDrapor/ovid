@@ -20,7 +20,7 @@ import { parseBook, type BookDataV2 } from './book-parser.js';
 import { settleCoverGeneration } from './upload-helpers.js';
 import { calculateBookCredits, TOKENS_PER_CREDIT } from './token-counter.js';
 import { detectLanguage } from './language-detect.js';
-import { resumableJobsQuery, resolveRequestedBackend, OWN_BACKEND } from './job-scanner.js';
+import { resumableJobsQuery, OWN_BACKEND } from './job-scanner.js';
 
 const app = new Hono();
 
@@ -251,11 +251,6 @@ interface UploadAndParseRequest {
   userId: number;
   secret: string;
   skipTranslation?: boolean;
-  /**
-   * Legacy: the Worker used to send 'cf' to hand translation to a Cloudflare
-   * Workflow. That backend is gone; Railway always translates what it parses.
-   */
-  backend?: string;
 }
 
 app.post('/upload-and-parse', async (c) => {
@@ -477,14 +472,7 @@ async function processUpload(req: UploadAndParseRequest): Promise<void> {
         `[upload] Book ${bookUuid} imported without translation; preparing cover/spine`
       );
     } else {
-      // 6. Create translation job. Railway always owns it; a 'cf' request
-      // from a Worker deployed before the Workflow backend was removed is
-      // ignored so the stalled-job scanner can still resume the job.
-      if (resolveRequestedBackend(req.backend) === 'cf') {
-        console.warn(
-          `[upload] Ignoring cf backend request for ${bookUuid}; translating on railway`
-        );
-      }
+      // 6. Create translation job, owned by this service
       await db.run(
         `INSERT INTO translation_jobs (book_id, book_uuid, source_language, target_language, total_chapters, status, backend)
          VALUES (?, ?, ?, ?, ?, 'pending', ?)`,
