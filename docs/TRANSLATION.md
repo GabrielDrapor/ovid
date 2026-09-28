@@ -8,6 +8,8 @@ Ovid translates books paragraph-by-paragraph using LLMs. Translation is offloade
 
 CF Workers have a 30-second CPU time limit (even with `waitUntil`). Translating a full book takes minutes to hours. The Railway service runs as a long-lived Node.js process with no such limits.
 
+The Cloudflare Workflow backend (`backend='cf'` jobs, `src/worker/translation/`) runs with `[limits] cpu_ms = 300_000` in `wrangler.toml` (inherited by staging): at the 30-second default a 58-chapter book failed every remaining chapter step with "Worker exceeded CPU time limit" after ~27 chapters, because CPU accumulates across all chapter steps of one Workflow invocation.
+
 ## Flow
 
 ```

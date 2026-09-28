@@ -29,6 +29,14 @@ name = "translate-book"
 binding = "TRANSLATE_WORKFLOW"
 class_name = "TranslateBookWorkflow"
 
+# CPU budget per invocation (max 300s; default 30s). The translate-book
+# Workflow accumulates JS-side CPU across all chapter steps of one invocation
+# (JSON parsing of chapter node arrays, residue-detection regexes, batch/SQL
+# construction); a 58-chapter book exhausted the 30s default after 27 chapters.
+# Inherited by [env.staging].
+[limits]
+cpu_ms = 300_000
+
 # Workers Logs: persist console output + invocation metrics in the dashboard
 # (Observability → Logs). Full sampling — volume is well within plan limits.
 [observability]
