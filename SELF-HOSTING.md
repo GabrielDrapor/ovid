@@ -69,7 +69,7 @@ All settings are environment variables in `.env` (see `.env.example`):
 | Database | Cloudflare D1 | SQLite file (`node:sqlite`, no native modules) |
 | Object storage | R2 | Local filesystem |
 | Static assets | Workers Assets | Served by the same Node process |
-| Translation backend | Railway service or Cloudflare Workflows | Translator container |
+| Translation backend | Railway service | Translator container |
 | Credits/Stripe | Enabled | Inactive — credit checks still run, so give yourself a balance if a book won't import (see below) |
 
 Handler code is identical on both: they talk to the platform interfaces in

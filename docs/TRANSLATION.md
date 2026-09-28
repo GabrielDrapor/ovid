@@ -8,6 +8,8 @@ Ovid translates books paragraph-by-paragraph using LLMs. Translation is offloade
 
 CF Workers have a 30-second CPU time limit (even with `waitUntil`). Translating a full book takes minutes to hours. The Railway service runs as a long-lived Node.js process with no such limits.
 
+A Cloudflare Workflows translation backend was tried and removed on 2026-09-28: the account's Workers Free plan caps its CPU time, and Railway must stay up regardless for parsing, covers, estimates and the stalled-job scanner.
+
 ## Flow
 
 ```
