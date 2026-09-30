@@ -58,11 +58,11 @@ TypeScript-first across frontend, backend, CLI, and translator service.
 - **PWA** — Installable (manifest + iOS metas); `src/sw-register.ts` registers the service worker and shows a refresh toast on new deploys. iOS standalone quirk: use `100dvh`/`safe-area-inset-bottom` for full-screen layouts, not bare `100vh`
 
 ### Key Files
-- `src/worker/index.ts` — Main Worker entry, routing, middleware
+- `src/worker/index.ts` — Main Worker entry, routing, middleware, D1 schema migrations (run once per isolate; only `/api` requests wait on them)
 - `src/worker/auth.ts` — Google OAuth flow
 - `src/worker/book-handlers.ts` — Book CRUD, upload, chapter content
 - `src/worker/credits.ts` — Credit balance, Stripe checkout/webhooks
-- `src/worker/db.ts` — Database helpers, migrations
+- `src/worker/db.ts` — Database helpers
 - `src/components/BilingualReaderV2.tsx` — Main reader (scroll nav, paragraph toggle, progress). Internal links resolved by the parser (`a[data-ov-chapter][data-ov-xpath]`) navigate in-app: note references (`data-ov-note`) open a bilingual footnote popover (cross-chapter notes fetched via the chapter cache), other links jump via `loadChapter` with a floating "return to reading" chip (stack lives in AppV2); note markers are re-appended after translated text so they stay tappable in translated view
 - `src/components/BookShelf.tsx` — Library UI: hosts the 3D closet (default). Falls back to a classic 2D wall when WebGL is unavailable, but that fallback is legacy/deprecated — it has no upload entry point (upload only happens by clicking an empty slot in the 3D closet) and is slated for removal
 - `src/components/shelf3d/BookShelf3D.tsx` — 3D closet view (three + @react-three/fiber, lazy-loaded): gaze/zoom camera, click-to-fly-out book with info panel, click-empty-slot-to-upload. Requires CORS on the R2 assets domain (configured on bucket `ovid`)

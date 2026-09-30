@@ -59,8 +59,6 @@ const API_RATE_LIMIT = 600; // requests per minute
 const UPLOAD_RATE_LIMIT = 5; // uploads per hour
 const MAX_UPLOAD_SIZE = 50 * 1024 * 1024; // 50MB
 
-let migrationsRan = false;
-
 const createRequestId = () => {
   try {
     return crypto.randomUUID();
@@ -91,6 +89,179 @@ const logEvent = (payload: Record<string, unknown>) => {
   console.log(JSON.stringify({ ts: new Date().toISOString(), ...payload }));
 };
 
+// Idempotent schema migrations, tracked in _migrations. The list and order
+// here must stay stable: each entry runs at most once per database.
+async function runMigrations(env: Env): Promise<void> {
+    await env.DB.prepare(
+      `CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY)`
+    ).run();
+    const runMigration = async (name: string, sql: string) => {
+      const done = await env.DB.prepare(`SELECT 1 FROM _migrations WHERE name = ?`).bind(name).first();
+      if (!done) {
+        await env.DB.prepare(sql).run().catch(() => {});
+        await env.DB.prepare(`INSERT INTO _migrations (name) VALUES (?)`).bind(name).run();
+      }
+    };
+    await runMigration('books_v2_user_id', 'ALTER TABLE books_v2 ADD COLUMN user_id INTEGER');
+    await runMigration('books_v2_status', "ALTER TABLE books_v2 ADD COLUMN status TEXT DEFAULT 'ready'");
+    await runMigration('create_translation_jobs', `CREATE TABLE IF NOT EXISTS translation_jobs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      book_id INTEGER NOT NULL,
+      book_uuid TEXT NOT NULL,
+      source_language TEXT NOT NULL DEFAULT 'en',
+      target_language TEXT NOT NULL DEFAULT 'zh',
+      total_chapters INTEGER NOT NULL,
+      completed_chapters INTEGER NOT NULL DEFAULT 0,
+      current_chapter INTEGER NOT NULL DEFAULT 0,
+      current_item_offset INTEGER NOT NULL DEFAULT 0,
+      glossary_json TEXT,
+      glossary_extracted INTEGER NOT NULL DEFAULT 0,
+      title_translated INTEGER NOT NULL DEFAULT 0,
+      translated_title TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      error_message TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`);
+    await runMigration('chapters_v2_text_nodes', 'ALTER TABLE chapters_v2 ADD COLUMN text_nodes_json TEXT');
+    await runMigration('books_v2_display_order', 'ALTER TABLE books_v2 ADD COLUMN display_order INTEGER DEFAULT 0');
+    await runMigration('create_user_book_progress', `CREATE TABLE IF NOT EXISTS user_book_progress (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      book_uuid TEXT NOT NULL,
+      is_completed INTEGER NOT NULL DEFAULT 0,
+      reading_progress INTEGER,
+      completed_at DATETIME,
+      last_read_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(user_id, book_uuid)
+    )`);
+    await runMigration('books_v2_share_token', 'ALTER TABLE books_v2 ADD COLUMN share_token TEXT');
+    await runMigration('progress_chapter_xpath', `
+      ALTER TABLE user_book_progress ADD COLUMN chapter_number INTEGER;
+    `);
+    await runMigration('progress_paragraph_xpath', `
+      ALTER TABLE user_book_progress ADD COLUMN paragraph_xpath TEXT;
+    `);
+    await runMigration('progress_show_original', `
+      ALTER TABLE user_book_progress ADD COLUMN show_original INTEGER NOT NULL DEFAULT 1;
+    `);
+    await runMigration('create_book_shelves', `CREATE TABLE IF NOT EXISTS book_shelves (
+      shelf_id TEXT NOT NULL,
+      book_id INTEGER NOT NULL,
+      position INTEGER NOT NULL DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (shelf_id, book_id),
+      FOREIGN KEY (book_id) REFERENCES books_v2(id) ON DELETE CASCADE
+    )`);
+    await runMigration('book_shelves_position_index', 'CREATE INDEX IF NOT EXISTS idx_book_shelves_shelf_position ON book_shelves(shelf_id, position, book_id)');
+    await runMigration('book_shelves_book_index', 'CREATE INDEX IF NOT EXISTS idx_book_shelves_book ON book_shelves(book_id)');
+    await runMigration('create_shelf_slots', `CREATE TABLE IF NOT EXISTS shelf_slots (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      shelf_id TEXT NOT NULL,
+      row INTEGER NOT NULL,
+      col INTEGER NOT NULL,
+      sort_order INTEGER NOT NULL,
+      label TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(shelf_id, row, col),
+      UNIQUE(shelf_id, sort_order)
+    )`);
+    await runMigration('create_book_shelf_slots', `CREATE TABLE IF NOT EXISTS book_shelf_slots (
+      book_id INTEGER PRIMARY KEY,
+      slot_id INTEGER NOT NULL,
+      position INTEGER NOT NULL DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (book_id) REFERENCES books_v2(id) ON DELETE CASCADE,
+      FOREIGN KEY (slot_id) REFERENCES shelf_slots(id) ON DELETE CASCADE
+    )`);
+    await runMigration('book_shelf_slots_slot_position_index', 'CREATE INDEX IF NOT EXISTS idx_book_shelf_slots_slot_position ON book_shelf_slots(slot_id, position, book_id)');
+    await runMigration('shelf_slots_is_public', 'ALTER TABLE shelf_slots ADD COLUMN is_public INTEGER NOT NULL DEFAULT 0');
+    // Slots holding the seeded public collection (Gutenberg) are locked:
+    // books can be neither dragged into nor out of a public shelf.
+    await runMigration('shelf_slots_mark_public_collection', `UPDATE shelf_slots SET is_public = 1 WHERE id IN (
+      SELECT DISTINCT bss.slot_id FROM book_shelf_slots bss
+      JOIN books_v2 b ON b.id = bss.book_id
+      WHERE b.user_id IS NULL
+    )`);
+    // Shelf labels on private (non-public) slots become per-user: each
+    // owner sees and edits only their own label, so a signed-out visitor
+    // or another user no longer sees someone else's private shelf labels.
+    await runMigration('create_user_shelf_slot_labels', `CREATE TABLE IF NOT EXISTS user_shelf_slot_labels (
+      user_id INTEGER NOT NULL,
+      slot_id INTEGER NOT NULL,
+      label TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (user_id, slot_id),
+      FOREIGN KEY (slot_id) REFERENCES shelf_slots(id) ON DELETE CASCADE
+    )`);
+    await runMigration('migrate_private_labels_to_users', `INSERT OR IGNORE INTO user_shelf_slot_labels (user_id, slot_id, label)
+      SELECT DISTINCT b.user_id, ss.id, ss.label
+      FROM shelf_slots ss
+      JOIN book_shelf_slots bss ON bss.slot_id = ss.id
+      JOIN books_v2 b ON b.id = bss.book_id
+      WHERE ss.is_public = 0 AND ss.label IS NOT NULL AND ss.label != '' AND b.user_id IS NOT NULL`);
+    // Only clear labels that provably made it into the per-user table: if
+    // the backfill above silently failed (runMigration swallows errors) or
+    // a labeled slot had no owning books to migrate to, the global label
+    // survives untouched instead of being destroyed.
+    await runMigration('clear_private_global_labels', `UPDATE shelf_slots SET label = NULL
+      WHERE is_public = 0 AND id IN (SELECT slot_id FROM user_shelf_slot_labels)`);
+    // Which service owns a translation job. Only 'railway' is written now
+    // (the Cloudflare Workflows backend was removed); the Railway
+    // stalled-job scanner still resumes only jobs it owns.
+    await runMigration('translation_jobs_backend', "ALTER TABLE translation_jobs ADD COLUMN backend TEXT NOT NULL DEFAULT 'railway'");
+    // Multi-provider auth: identities live in their own table; users.google_id
+    // stays as-is for compatibility (email-created users get a sentinel).
+    await runMigration('create_user_identities', `CREATE TABLE IF NOT EXISTS user_identities (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      provider TEXT NOT NULL,
+      provider_id TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(provider, provider_id),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )`);
+    await runMigration('user_identities_backfill_google', `INSERT OR IGNORE INTO user_identities (user_id, provider, provider_id)
+      SELECT id, 'google', google_id FROM users WHERE google_id IS NOT NULL AND google_id NOT LIKE 'email:%'`);
+    await runMigration('user_identities_user_index', 'CREATE INDEX IF NOT EXISTS idx_user_identities_user ON user_identities(user_id)');
+    await runMigration('create_login_codes', `CREATE TABLE IF NOT EXISTS login_codes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      email TEXT NOT NULL,
+      abuse_key TEXT NOT NULL,
+      code_hash TEXT NOT NULL,
+      expires_at DATETIME NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      consumed_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`);
+    await runMigration('login_codes_email_index', 'CREATE INDEX IF NOT EXISTS idx_login_codes_email ON login_codes(email, created_at)');
+    await runMigration('login_codes_abuse_index', 'CREATE INDEX IF NOT EXISTS idx_login_codes_abuse ON login_codes(abuse_key, created_at)');
+    await runMigration('login_codes_ip', 'ALTER TABLE login_codes ADD COLUMN ip TEXT');
+    await runMigration('login_codes_ip_index', 'CREATE INDEX IF NOT EXISTS idx_login_codes_ip ON login_codes(ip, created_at)');
+}
+
+// One in-flight migration run per isolate: concurrent requests on a fresh
+// isolate share this promise instead of each re-running the whole sequence
+// against D1. A failed run clears it so a later request retries.
+let migrationsPromise: Promise<void> | null = null;
+
+const ensureMigrations = (env: Env, ctx: ExecutionContext): Promise<void> => {
+  if (!migrationsPromise) {
+    migrationsPromise = runMigrations(env).catch((error) => {
+      migrationsPromise = null;
+      throw error;
+    });
+    ctx.waitUntil(migrationsPromise.catch(() => {}));
+  }
+  return migrationsPromise;
+};
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
@@ -99,163 +270,6 @@ export default {
     // Check config on startup
     checkOAuthConfig(env);
     checkStripeConfig(env);
-
-    // Run migrations only once per worker instance lifetime
-    if (!migrationsRan) {
-      await env.DB.prepare(
-        `CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY)`
-      ).run();
-      const runMigration = async (name: string, sql: string) => {
-        const done = await env.DB.prepare(`SELECT 1 FROM _migrations WHERE name = ?`).bind(name).first();
-        if (!done) {
-          await env.DB.prepare(sql).run().catch(() => {});
-          await env.DB.prepare(`INSERT INTO _migrations (name) VALUES (?)`).bind(name).run();
-        }
-      };
-      await runMigration('books_v2_user_id', 'ALTER TABLE books_v2 ADD COLUMN user_id INTEGER');
-      await runMigration('books_v2_status', "ALTER TABLE books_v2 ADD COLUMN status TEXT DEFAULT 'ready'");
-      await runMigration('create_translation_jobs', `CREATE TABLE IF NOT EXISTS translation_jobs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        book_id INTEGER NOT NULL,
-        book_uuid TEXT NOT NULL,
-        source_language TEXT NOT NULL DEFAULT 'en',
-        target_language TEXT NOT NULL DEFAULT 'zh',
-        total_chapters INTEGER NOT NULL,
-        completed_chapters INTEGER NOT NULL DEFAULT 0,
-        current_chapter INTEGER NOT NULL DEFAULT 0,
-        current_item_offset INTEGER NOT NULL DEFAULT 0,
-        glossary_json TEXT,
-        glossary_extracted INTEGER NOT NULL DEFAULT 0,
-        title_translated INTEGER NOT NULL DEFAULT 0,
-        translated_title TEXT,
-        status TEXT NOT NULL DEFAULT 'pending',
-        error_message TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )`);
-      await runMigration('chapters_v2_text_nodes', 'ALTER TABLE chapters_v2 ADD COLUMN text_nodes_json TEXT');
-      await runMigration('books_v2_display_order', 'ALTER TABLE books_v2 ADD COLUMN display_order INTEGER DEFAULT 0');
-      await runMigration('create_user_book_progress', `CREATE TABLE IF NOT EXISTS user_book_progress (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER NOT NULL,
-        book_uuid TEXT NOT NULL,
-        is_completed INTEGER NOT NULL DEFAULT 0,
-        reading_progress INTEGER,
-        completed_at DATETIME,
-        last_read_at DATETIME,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(user_id, book_uuid)
-      )`);
-      await runMigration('books_v2_share_token', 'ALTER TABLE books_v2 ADD COLUMN share_token TEXT');
-      await runMigration('progress_chapter_xpath', `
-        ALTER TABLE user_book_progress ADD COLUMN chapter_number INTEGER;
-      `);
-      await runMigration('progress_paragraph_xpath', `
-        ALTER TABLE user_book_progress ADD COLUMN paragraph_xpath TEXT;
-      `);
-      await runMigration('progress_show_original', `
-        ALTER TABLE user_book_progress ADD COLUMN show_original INTEGER NOT NULL DEFAULT 1;
-      `);
-      await runMigration('create_book_shelves', `CREATE TABLE IF NOT EXISTS book_shelves (
-        shelf_id TEXT NOT NULL,
-        book_id INTEGER NOT NULL,
-        position INTEGER NOT NULL DEFAULT 0,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        PRIMARY KEY (shelf_id, book_id),
-        FOREIGN KEY (book_id) REFERENCES books_v2(id) ON DELETE CASCADE
-      )`);
-      await runMigration('book_shelves_position_index', 'CREATE INDEX IF NOT EXISTS idx_book_shelves_shelf_position ON book_shelves(shelf_id, position, book_id)');
-      await runMigration('book_shelves_book_index', 'CREATE INDEX IF NOT EXISTS idx_book_shelves_book ON book_shelves(book_id)');
-      await runMigration('create_shelf_slots', `CREATE TABLE IF NOT EXISTS shelf_slots (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        shelf_id TEXT NOT NULL,
-        row INTEGER NOT NULL,
-        col INTEGER NOT NULL,
-        sort_order INTEGER NOT NULL,
-        label TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(shelf_id, row, col),
-        UNIQUE(shelf_id, sort_order)
-      )`);
-      await runMigration('create_book_shelf_slots', `CREATE TABLE IF NOT EXISTS book_shelf_slots (
-        book_id INTEGER PRIMARY KEY,
-        slot_id INTEGER NOT NULL,
-        position INTEGER NOT NULL DEFAULT 0,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (book_id) REFERENCES books_v2(id) ON DELETE CASCADE,
-        FOREIGN KEY (slot_id) REFERENCES shelf_slots(id) ON DELETE CASCADE
-      )`);
-      await runMigration('book_shelf_slots_slot_position_index', 'CREATE INDEX IF NOT EXISTS idx_book_shelf_slots_slot_position ON book_shelf_slots(slot_id, position, book_id)');
-      await runMigration('shelf_slots_is_public', 'ALTER TABLE shelf_slots ADD COLUMN is_public INTEGER NOT NULL DEFAULT 0');
-      // Slots holding the seeded public collection (Gutenberg) are locked:
-      // books can be neither dragged into nor out of a public shelf.
-      await runMigration('shelf_slots_mark_public_collection', `UPDATE shelf_slots SET is_public = 1 WHERE id IN (
-        SELECT DISTINCT bss.slot_id FROM book_shelf_slots bss
-        JOIN books_v2 b ON b.id = bss.book_id
-        WHERE b.user_id IS NULL
-      )`);
-      // Shelf labels on private (non-public) slots become per-user: each
-      // owner sees and edits only their own label, so a signed-out visitor
-      // or another user no longer sees someone else's private shelf labels.
-      await runMigration('create_user_shelf_slot_labels', `CREATE TABLE IF NOT EXISTS user_shelf_slot_labels (
-        user_id INTEGER NOT NULL,
-        slot_id INTEGER NOT NULL,
-        label TEXT NOT NULL,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        PRIMARY KEY (user_id, slot_id),
-        FOREIGN KEY (slot_id) REFERENCES shelf_slots(id) ON DELETE CASCADE
-      )`);
-      await runMigration('migrate_private_labels_to_users', `INSERT OR IGNORE INTO user_shelf_slot_labels (user_id, slot_id, label)
-        SELECT DISTINCT b.user_id, ss.id, ss.label
-        FROM shelf_slots ss
-        JOIN book_shelf_slots bss ON bss.slot_id = ss.id
-        JOIN books_v2 b ON b.id = bss.book_id
-        WHERE ss.is_public = 0 AND ss.label IS NOT NULL AND ss.label != '' AND b.user_id IS NOT NULL`);
-      // Only clear labels that provably made it into the per-user table: if
-      // the backfill above silently failed (runMigration swallows errors) or
-      // a labeled slot had no owning books to migrate to, the global label
-      // survives untouched instead of being destroyed.
-      await runMigration('clear_private_global_labels', `UPDATE shelf_slots SET label = NULL
-        WHERE is_public = 0 AND id IN (SELECT slot_id FROM user_shelf_slot_labels)`);
-      // Which service owns a translation job. Only 'railway' is written now
-      // (the Cloudflare Workflows backend was removed); the Railway
-      // stalled-job scanner still resumes only jobs it owns.
-      await runMigration('translation_jobs_backend', "ALTER TABLE translation_jobs ADD COLUMN backend TEXT NOT NULL DEFAULT 'railway'");
-      // Multi-provider auth: identities live in their own table; users.google_id
-      // stays as-is for compatibility (email-created users get a sentinel).
-      await runMigration('create_user_identities', `CREATE TABLE IF NOT EXISTS user_identities (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER NOT NULL,
-        provider TEXT NOT NULL,
-        provider_id TEXT NOT NULL,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(provider, provider_id),
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-      )`);
-      await runMigration('user_identities_backfill_google', `INSERT OR IGNORE INTO user_identities (user_id, provider, provider_id)
-        SELECT id, 'google', google_id FROM users WHERE google_id IS NOT NULL AND google_id NOT LIKE 'email:%'`);
-      await runMigration('user_identities_user_index', 'CREATE INDEX IF NOT EXISTS idx_user_identities_user ON user_identities(user_id)');
-      await runMigration('create_login_codes', `CREATE TABLE IF NOT EXISTS login_codes (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        email TEXT NOT NULL,
-        abuse_key TEXT NOT NULL,
-        code_hash TEXT NOT NULL,
-        expires_at DATETIME NOT NULL,
-        attempts INTEGER NOT NULL DEFAULT 0,
-        consumed_at DATETIME,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )`);
-      await runMigration('login_codes_email_index', 'CREATE INDEX IF NOT EXISTS idx_login_codes_email ON login_codes(email, created_at)');
-      await runMigration('login_codes_abuse_index', 'CREATE INDEX IF NOT EXISTS idx_login_codes_abuse ON login_codes(abuse_key, created_at)');
-      await runMigration('login_codes_ip', 'ALTER TABLE login_codes ADD COLUMN ip TEXT');
-      await runMigration('login_codes_ip_index', 'CREATE INDEX IF NOT EXISTS idx_login_codes_ip ON login_codes(ip, created_at)');
-      migrationsRan = true;
-    }
 
     // Handle API routes
     if (url.pathname.startsWith('/api/')) {
@@ -348,6 +362,29 @@ export default {
             'X-RateLimit-Reset': String(uploadRate.resetAfterSeconds),
           });
         }
+      }
+
+      // Only API routes wait on migrations; the SPA shell, static assets and
+      // unknown paths (e.g. scanner traffic) are served without touching them.
+      try {
+        await ensureMigrations(env, ctx);
+      } catch (error) {
+        logEvent({
+          level: 'error',
+          type: 'migration_error',
+          requestId,
+          method: request.method,
+          path: url.pathname,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return jsonResponse({
+          error: 'Service temporarily unavailable, please retry.',
+          code: 'MIGRATIONS_UNAVAILABLE',
+        }, {
+          status: 503,
+        }, requestId, {
+          'Retry-After': '5',
+        });
       }
 
       try {
