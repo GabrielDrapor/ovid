@@ -251,12 +251,13 @@ async function runMigrations(env: Env): Promise<void> {
 // against D1. A failed run clears it so a later request retries.
 let migrationsPromise: Promise<void> | null = null;
 
-const ensureMigrations = (env: Env): Promise<void> => {
+const ensureMigrations = (env: Env, ctx: ExecutionContext): Promise<void> => {
   if (!migrationsPromise) {
     migrationsPromise = runMigrations(env).catch((error) => {
       migrationsPromise = null;
       throw error;
     });
+    ctx.waitUntil(migrationsPromise.catch(() => {}));
   }
   return migrationsPromise;
 };
@@ -366,7 +367,7 @@ export default {
       // Only API routes wait on migrations; the SPA shell, static assets and
       // unknown paths (e.g. scanner traffic) are served without touching them.
       try {
-        await ensureMigrations(env);
+        await ensureMigrations(env, ctx);
       } catch (error) {
         logEvent({
           level: 'error',

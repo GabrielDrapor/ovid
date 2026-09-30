@@ -46,10 +46,14 @@ async function loadWorker() {
   return (await import('../../../src/worker/index')).default;
 }
 
-const ctx = { waitUntil: vi.fn(), passThroughOnException: vi.fn() } as any;
+const createCtx = () =>
+  ({ waitUntil: vi.fn(), passThroughOnException: vi.fn() }) as any;
 
 describe('worker migrations', () => {
+  let ctx: any;
+
   beforeEach(() => {
+    ctx = createCtx();
     vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -72,14 +76,18 @@ describe('worker migrations', () => {
 
     expect(responses.map((r) => r.status)).toEqual(Array(8).fill(404));
     expect(migrationsTableRuns(db)).toBe(1);
+    expect(ctx.waitUntil).toHaveBeenCalledTimes(1);
+    await expect(ctx.waitUntil.mock.calls[0][0]).resolves.toBeUndefined();
 
+    const laterCtx = createCtx();
     const preparesBefore = db.prepare.mock.calls.length;
     await worker.fetch(
       new Request('https://ovid.ink/api/does-not-exist'),
       env,
-      ctx
+      laterCtx
     );
     expect(db.prepare.mock.calls.length).toBe(preparesBefore);
+    expect(laterCtx.waitUntil).not.toHaveBeenCalled();
   });
 
   it('serves non-API unknown paths without touching D1', async () => {
@@ -115,6 +123,8 @@ describe('worker migrations', () => {
     const body = (await failed.json()) as Record<string, unknown>;
     expect(body.code).toBe('MIGRATIONS_UNAVAILABLE');
     expect(body.requestId).toBeTruthy();
+    expect(ctx.waitUntil).toHaveBeenCalledTimes(1);
+    await expect(ctx.waitUntil.mock.calls[0][0]).resolves.toBeUndefined();
     expect(console.log).toHaveBeenCalledWith(
       expect.stringContaining('D1_ERROR: Network connection lost.')
     );
