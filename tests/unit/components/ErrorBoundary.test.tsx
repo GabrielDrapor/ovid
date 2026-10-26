@@ -31,7 +31,7 @@ describe('ErrorBoundary', () => {
       </ErrorBoundary>
     );
     expect(screen.getByText('Something went wrong')).toBeInTheDocument();
-    expect(screen.getByText('Try Again')).toBeInTheDocument();
+    expect(screen.getByText('Try again')).toBeInTheDocument();
   });
 
   it('retry button resets error state', () => {
@@ -46,7 +46,7 @@ describe('ErrorBoundary', () => {
     // Click retry — ErrorBoundary resets, but same children re-render
     // We can't easily swap children in class component test, but we can
     // verify the button triggers state reset by checking it doesn't crash
-    fireEvent.click(screen.getByText('Try Again'));
+    fireEvent.click(screen.getByText('Try again'));
 
     // After retry, the component will try to re-render children.
     // Since ThrowingChild still throws, it'll show error again.
