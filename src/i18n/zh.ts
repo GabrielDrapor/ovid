@@ -15,7 +15,6 @@ export const zh: Messages = {
   },
 
   shelf: {
-    unableToLoadBooks: '无法加载书籍',
     signIn: '登录',
     logout: '退出登录',
     credits: '点数',
@@ -26,7 +25,12 @@ export const zh: Messages = {
     nextPage: '下一页书架',
     byAuthor: (author: string) => `作者：${author}`,
     removeBook: '移除书籍',
-    confirmRemove: '确定要移除这本书吗？',
+    removeTitle: '移除这本书？',
+    // The title may already carry 《》 (older translations do); don't double them.
+    removeMessage: (title: string) =>
+      `《${title.replace(/^《(.*)》$/, '$1')}》会从书架上移除，删除后无法恢复。`,
+    loadFailedTitle: '书架没能加载出来',
+    loadFailedMessage: '请检查网络后重试。',
     translationFailed: '翻译失败',
     translating: '翻译中…',
     translatingProgress: (done: number, total: number, pct: number) =>
@@ -83,8 +87,8 @@ export const zh: Messages = {
     form2No: '表格 2',
     form2Kind: '编目',
     loginRequired: '请先登录再上传书籍',
-    estimateFailed: '估算书籍费用失败',
-    reEstimateFailed: '重新估算失败',
+    estimateFailed: '没能读取这本书',
+    reEstimateFailed: '没能重新估算',
     uploading: '正在上传…',
     startingTranslation: '正在启动翻译…',
     analyzing: '正在分析书籍…',
@@ -195,15 +199,20 @@ export const zh: Messages = {
 
   book: {
     loadingContent: '正在加载书籍内容…',
-    loadChapterFailed: '加载章节失败',
+    loadChapterFailed: '这一章没能加载出来',
+    loadFailedMessage: '请检查网络后重试。',
+    notFoundTitle: '找不到这本书',
+    notFoundMessage: '它可能已经被删除，或者需要登录后才能打开。',
+    markReadFailed: '没能保存，请重试。',
     createShareFailed: '创建分享链接失败',
     revokeShareFailed: '取消分享失败',
   },
 
   shared: {
-    linkInvalid: '该分享链接已失效。',
-    loadBookFailed: '加载书籍失败。',
-    loadChapterFailed: '加载章节失败。',
+    linkInvalid: '这个分享链接已失效',
+    linkInvalidMessage: '分享者可能已经取消了分享。',
+    loadBookFailed: '这本书没能加载出来',
+    loadChapterFailed: '这一章没能加载出来',
     goToLibrary: '前往书架',
     loadingSharedBook: '正在加载分享的书籍…',
   },
@@ -213,9 +222,9 @@ export const zh: Messages = {
     unexpectedError: '发生了意外错误，请重试。',
     tryAgain: '重试',
     fetchBooksFailed: '获取书籍失败',
-    deleteBookFailed: '删除书籍失败',
-    saveLabelFailed: '保存标签失败',
-    moveBookFailed: '移动书籍失败',
+    deleteBookFailed: '没能移除这本书',
+    saveLabelFailed: '没能保存标签',
+    moveBookFailed: '没能移动这本书',
   },
 
   pwa: {

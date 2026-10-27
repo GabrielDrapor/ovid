@@ -1,0 +1,196 @@
+/* Confirm dialog and toast (Dialogs.tsx). Paper and ink colours from the
+   shelf's cards; a screen can override the --ov-dialog-* tokens. */
+
+.ov-dialog-overlay {
+  --ov-dialog-paper: #f6f4ed;
+  --ov-dialog-ink: #2b241a;
+  --ov-dialog-muted: #625a41;
+  --ov-dialog-line: rgba(43, 36, 26, 0.5);
+  --ov-dialog-danger: #b4533c;
+
+  position: fixed;
+  inset: 0;
+  z-index: 2500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(10, 7, 5, 0.6);
+  animation: ov-dialog-fade 0.15s ease both;
+}
+
+.ov-dialog {
+  width: min(380px, 100%);
+  padding: 24px 24px 20px;
+  border-radius: 12px;
+  background: var(--ov-dialog-paper);
+  color: var(--ov-dialog-ink);
+  font-family: 'Literata', Georgia, 'Songti SC', serif;
+  box-shadow:
+    0 24px 60px rgba(0, 0, 0, 0.5),
+    0 4px 12px rgba(0, 0, 0, 0.3);
+  animation: ov-dialog-in 0.2s ease both;
+}
+
+.ov-dialog-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.ov-dialog-message {
+  margin: 10px 0 0;
+  font-size: 14.5px;
+  line-height: 1.6;
+  color: var(--ov-dialog-muted);
+  overflow-wrap: anywhere;
+}
+
+.ov-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 24px;
+}
+
+.ov-dialog-btn {
+  min-width: 88px;
+  height: 40px;
+  padding: 0 16px;
+  border: 1.5px solid var(--ov-dialog-line);
+  border-radius: 8px;
+  background: none;
+  color: var(--ov-dialog-ink);
+  font-family: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    opacity 0.15s ease;
+}
+
+.ov-dialog-btn-primary {
+  border-color: var(--ov-dialog-ink);
+  background: var(--ov-dialog-ink);
+  color: var(--ov-dialog-paper);
+  font-weight: 600;
+}
+
+.ov-dialog-btn-danger {
+  border-color: var(--ov-dialog-danger);
+  background: var(--ov-dialog-danger);
+}
+
+@media (hover: hover) {
+  .ov-dialog-btn:hover {
+    background: rgba(43, 36, 26, 0.06);
+  }
+
+  .ov-dialog-btn-primary:hover {
+    background: var(--ov-dialog-ink);
+    opacity: 0.88;
+  }
+
+  .ov-dialog-btn-danger:hover {
+    background: var(--ov-dialog-danger);
+  }
+}
+
+.ov-dialog-btn:focus-visible {
+  outline: 2px solid var(--ov-dialog-danger);
+  outline-offset: 2px;
+}
+
+@keyframes ov-dialog-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes ov-dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+}
+
+/* Toast: above the shelf dock and the reader's menu button. */
+.ov-toast {
+  position: fixed;
+  z-index: 3000;
+  left: 50%;
+  bottom: calc(84px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: max-content;
+  max-width: min(440px, calc(100vw - 32px));
+  padding: 12px 10px 12px 16px;
+  border-radius: 10px;
+  background: #2b241a;
+  color: #f6f4ed;
+  font-family: 'Literata', Georgia, 'Songti SC', serif;
+  font-size: 14px;
+  line-height: 1.5;
+  box-shadow:
+    0 12px 32px rgba(0, 0, 0, 0.35),
+    0 0 0 1px rgba(255, 244, 228, 0.12);
+  animation: ov-toast-in 0.2s ease both;
+}
+
+.ov-toast-error {
+  border-left: 3px solid #e0846c;
+}
+
+.ov-toast-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding-top: 2px;
+  overflow-wrap: anywhere;
+}
+
+.ov-toast-detail {
+  font-size: 12.5px;
+  color: rgba(246, 244, 237, 0.68);
+}
+
+.ov-toast-close {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  color: rgba(246, 244, 237, 0.7);
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .ov-toast-close:hover {
+    background: rgba(246, 244, 237, 0.1);
+    color: #f6f4ed;
+  }
+}
+
+@keyframes ov-toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(8px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ov-dialog-overlay,
+  .ov-dialog,
+  .ov-toast {
+    animation: none;
+  }
+}

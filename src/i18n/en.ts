@@ -14,7 +14,6 @@ export const en = {
   },
 
   shelf: {
-    unableToLoadBooks: 'Unable to load books',
     signIn: 'Sign in',
     logout: 'Log out',
     credits: 'Credits',
@@ -25,7 +24,11 @@ export const en = {
     nextPage: 'Next shelf page',
     byAuthor: (author: string) => `By ${author}`,
     removeBook: 'Remove book',
-    confirmRemove: 'Are you sure you want to remove this book?',
+    removeTitle: 'Remove this book?',
+    removeMessage: (title: string) =>
+      `“${title}” will be removed from your shelf. This can't be undone.`,
+    loadFailedTitle: "Couldn't load the shelf",
+    loadFailedMessage: 'Check your connection and try again.',
     translationFailed: 'Translation failed',
     translating: 'Translating…',
     translatingProgress: (done: number, total: number, pct: number) =>
@@ -84,8 +87,8 @@ export const en = {
     form2No: 'Form 2',
     form2Kind: 'Catalogue',
     loginRequired: 'Please sign in to upload books',
-    estimateFailed: 'Failed to estimate book',
-    reEstimateFailed: 'Failed to re-estimate',
+    estimateFailed: "Couldn't read this book",
+    reEstimateFailed: "Couldn't update the estimate",
     uploading: 'Uploading…',
     startingTranslation: 'Starting translation…',
     analyzing: 'analyzing book…',
@@ -199,15 +202,21 @@ export const en = {
 
   book: {
     loadingContent: 'Loading book content…',
-    loadChapterFailed: 'Failed to load chapter',
+    loadChapterFailed: "Couldn't load this chapter",
+    loadFailedMessage: 'Check your connection and try again.',
+    notFoundTitle: 'Book not found',
+    notFoundMessage:
+      'It may have been removed, or you may need to sign in to open it.',
+    markReadFailed: "Couldn't save. Please try again.",
     createShareFailed: 'Failed to create share link',
     revokeShareFailed: 'Failed to revoke share',
   },
 
   shared: {
-    linkInvalid: 'This shared link is no longer valid.',
-    loadBookFailed: 'Failed to load book.',
-    loadChapterFailed: 'Failed to load chapter.',
+    linkInvalid: 'This link no longer works',
+    linkInvalidMessage: 'The owner may have stopped sharing this book.',
+    loadBookFailed: "Couldn't load the book",
+    loadChapterFailed: "Couldn't load this chapter",
     goToLibrary: 'Go to library',
     loadingSharedBook: 'Loading shared book…',
   },
@@ -217,9 +226,9 @@ export const en = {
     unexpectedError: 'An unexpected error occurred. Please try again.',
     tryAgain: 'Try again',
     fetchBooksFailed: 'Failed to fetch books',
-    deleteBookFailed: 'Failed to delete book',
-    saveLabelFailed: 'Failed to save label',
-    moveBookFailed: 'Failed to move book',
+    deleteBookFailed: "Couldn't remove the book",
+    saveLabelFailed: "Couldn't save the label",
+    moveBookFailed: "Couldn't move the book",
   },
 
   pwa: {

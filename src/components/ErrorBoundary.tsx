@@ -1,6 +1,7 @@
 // @ts-nocheck
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { detectLocale, getMessages } from '../i18n';
+import ReaderStatus from './ReaderStatus';
 
 interface Props {
   children?: ReactNode;
@@ -35,39 +36,24 @@ class ErrorBoundary extends Component<Props, State> {
       // directly. This screen renders rarely, so no need for reactivity.
       const t = getMessages(detectLocale());
       return (
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            minHeight: '100vh',
-            padding: '20px',
-            textAlign: 'center',
-            fontFamily: 'system-ui, -apple-system, sans-serif',
-          }}
+        <ReaderStatus
+          title={t.errors.somethingWentWrong}
+          actions={
+            <>
+              <button
+                className="reader-status-btn reader-status-btn-primary"
+                onClick={this.handleRetry}
+              >
+                {t.errors.tryAgain}
+              </button>
+              <a className="reader-status-btn" href="/">
+                {t.common.goHome}
+              </a>
+            </>
+          }
         >
-          <h1 style={{ fontSize: '24px', marginBottom: '12px' }}>
-            {t.errors.somethingWentWrong}
-          </h1>
-          <p style={{ color: '#666', marginBottom: '24px', maxWidth: '400px' }}>
-            {t.errors.unexpectedError}
-          </p>
-          <button
-            onClick={this.handleRetry}
-            style={{
-              padding: '10px 24px',
-              fontSize: '16px',
-              borderRadius: '8px',
-              border: 'none',
-              background: '#4f46e5',
-              color: 'white',
-              cursor: 'pointer',
-            }}
-          >
-            {t.errors.tryAgain}
-          </button>
-        </div>
+          {t.errors.unexpectedError}
+        </ReaderStatus>
       );
     }
 

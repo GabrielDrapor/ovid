@@ -47,27 +47,33 @@ function SharedBookView({ shareToken }: SharedBookViewProps) {
   );
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  // 'invalid': the link was revoked or never existed (the API answers 404).
+  // 'book': the chapter list failed. { chapter }: that chapter failed. The
+  // last two can be retried.
+  const [error, setError] = useState<
+    'invalid' | 'book' | { chapter: number } | null
+  >(null);
   const [currentChapter, setCurrentChapter] = useState(1);
+
+  const loadChapters = async () => {
+    try {
+      const response = await fetchWithRetry(
+        `/api/shared/${shareToken}/chapters`
+      );
+      if (response.status === 404) {
+        setError('invalid');
+        return;
+      }
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      setChapters(data as Chapter[]);
+    } catch (err) {
+      setError((prev) => prev ?? 'book');
+    }
+  };
 
   // Load chapters list
   useEffect(() => {
-    const loadChapters = async () => {
-      try {
-        const response = await fetchWithRetry(
-          `/api/shared/${shareToken}/chapters`
-        );
-        if (response.status === 404) {
-          setError(t.shared.linkInvalid);
-          return;
-        }
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const data = await response.json();
-        setChapters(data as Chapter[]);
-      } catch (err) {
-        setError(t.shared.loadBookFailed);
-      }
-    };
     loadChapters();
   }, [shareToken]);
 
@@ -77,13 +83,20 @@ function SharedBookView({ shareToken }: SharedBookViewProps) {
       const response = await fetchWithRetry(
         `/api/shared/${shareToken}/chapter/${chapterNumber}`
       );
+      if (response.status === 404) {
+        setError('invalid');
+        return;
+      }
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
       setChapterContent(data as ChapterContent);
       setCurrentChapter(chapterNumber);
       window.scrollTo(0, 0);
     } catch (err) {
-      setError(t.shared.loadChapterFailed);
+      // An invalid link wins over a chapter error from the same failure.
+      setError((prev) =>
+        prev === 'invalid' ? prev : { chapter: chapterNumber }
+      );
     } finally {
       setLoading(false);
     }
@@ -101,23 +114,49 @@ function SharedBookView({ shareToken }: SharedBookViewProps) {
     [shareToken]
   );
 
-  if (error) {
+  if (error === 'invalid') {
     return (
-      <div className="App">
-        <div style={{ textAlign: 'center', padding: '50px' }}>
-          <div>{error}</div>
-          <a
-            href="/"
-            style={{
-              color: '#666',
-              marginTop: '20px',
-              display: 'inline-block',
-            }}
-          >
+      <ReaderStatus
+        title={t.shared.linkInvalid}
+        actions={
+          <a className="reader-status-btn reader-status-btn-primary" href="/">
             {t.shared.goToLibrary}
           </a>
-        </div>
-      </div>
+        }
+      >
+        {t.shared.linkInvalidMessage}
+      </ReaderStatus>
+    );
+  }
+
+  if (error) {
+    return (
+      <ReaderStatus
+        title={
+          error === 'book'
+            ? t.shared.loadBookFailed
+            : t.shared.loadChapterFailed
+        }
+        actions={
+          <>
+            <button
+              className="reader-status-btn reader-status-btn-primary"
+              onClick={() => {
+                setError(null);
+                if (error === 'book' || chapters.length === 0) loadChapters();
+                loadChapter(error === 'book' ? currentChapter : error.chapter);
+              }}
+            >
+              {t.errors.tryAgain}
+            </button>
+            <a className="reader-status-btn" href="/">
+              {t.shared.goToLibrary}
+            </a>
+          </>
+        }
+      >
+        {t.book.loadFailedMessage}
+      </ReaderStatus>
     );
   }
 
