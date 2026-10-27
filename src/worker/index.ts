@@ -1078,26 +1078,26 @@ export default {
     if (bookUrlMatch) {
       const bookUuid = bookUrlMatch[1];
       if (bookUuid) {
+        let found = true;
         try {
-          const book = await env.DB.prepare('SELECT uuid FROM books_v2 WHERE uuid = ?')
+          found = !!(await env.DB.prepare('SELECT uuid FROM books_v2 WHERE uuid = ?')
             .bind(bookUuid)
-            .first();
-
-          if (book) {
-            try {
-              return env.ASSETS.fetch(new Request(new URL('/index.html', request.url)));
-            } catch {
-              return new Response(
-                `<!DOCTYPE html><html><head><title>Ovid - Reading ${bookUuid}</title></head><body><div id="root">Loading...</div></body></html>`,
-                { headers: { 'Content-Type': 'text/html' } }
-              );
-            }
-          }
+            .first());
         } catch {
-          // Fall through to redirect
+          // Can't tell; serve the app and let its API calls decide.
         }
-        // Book not found — redirect to home
-        return Response.redirect(new URL('/', request.url).toString(), 302);
+        try {
+          const app = await env.ASSETS.fetch(new Request(new URL('/index.html', request.url)));
+          // An unknown book still gets the app, which says the book wasn't
+          // found (it used to redirect to the shelf without a word); the 404
+          // status tells crawlers and link previews the same.
+          return found ? app : new Response(app.body, { status: 404, headers: app.headers });
+        } catch {
+          return new Response(
+            `<!DOCTYPE html><html><head><title>Ovid - Reading ${bookUuid}</title></head><body><div id="root">Loading...</div></body></html>`,
+            { status: found ? 200 : 404, headers: { 'Content-Type': 'text/html' } }
+          );
+        }
       }
     }
 
