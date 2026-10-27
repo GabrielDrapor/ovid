@@ -122,6 +122,7 @@ export const en = {
     affixHere: 'drop or pick a book',
     acceptedFormats: 'epub · mobi · azw3',
     unsupportedFile: 'Only EPUB, MOBI and AZW3 files can be uploaded',
+    chooseAgain: 'Please choose the book again',
     languagesNextForm: 'languages chosen on the next form',
   },
 
@@ -132,6 +133,12 @@ export const en = {
     creditsSuffix: 'credits',
     packageUnit: 'credits',
     info: 'Credits are used for book translations.',
+    needMore: (amount: string) => `This book needs ${amount} more credits`,
+    checkoutFailed: "Couldn't open the payment page",
+    added: (amount: string) => `${amount} credits added`,
+    addedNoAmount: 'Payment complete — your credits are in',
+    pending:
+      'Your payment is still processing. Credits are added when it completes.',
   },
 
   reader: {

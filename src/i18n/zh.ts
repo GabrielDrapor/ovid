@@ -121,6 +121,7 @@ export const zh: Messages = {
     affixHere: '拖入或点选书籍',
     acceptedFormats: 'epub · mobi · azw3',
     unsupportedFile: '只能上传 EPUB、MOBI 或 AZW3 文件',
+    chooseAgain: '请重新选择这本书',
     languagesNextForm: '语言将在下一张表格中选择',
   },
 
@@ -131,6 +132,11 @@ export const zh: Messages = {
     creditsSuffix: '点数',
     packageUnit: '点数',
     info: '点数用于书籍翻译。',
+    needMore: (amount: string) => `这本书还差 ${amount} 点数`,
+    checkoutFailed: '没能打开付款页面',
+    added: (amount: string) => `已到账 ${amount} 点数`,
+    addedNoAmount: '付款完成，点数已到账',
+    pending: '付款还在处理中，完成后点数会自动到账。',
   },
 
   reader: {
