@@ -106,6 +106,7 @@ export const en = {
     creditsUnit: 'credits',
     shelfField: 'shelf',
     selectedShelf: 'Selected shelf',
+    slotPosition: (row: number, col: number) => `Row ${row}, bay ${col}`,
     modeAria: 'Upload mode',
     translateThisBook: 'Translate this book',
     bilingualNote: 'bilingual',
@@ -118,7 +119,9 @@ export const en = {
       'source and target language are the same — change one to continue',
     confirmTranslate: 'Confirm & translate',
     importWithoutTranslation: 'Import without translation',
-    affixHere: 'affix epub here',
+    affixHere: 'drop or pick a book',
+    acceptedFormats: 'epub · mobi · azw3',
+    unsupportedFile: 'Only EPUB, MOBI and AZW3 files can be uploaded',
     languagesNextForm: 'languages chosen on the next form',
   },
 

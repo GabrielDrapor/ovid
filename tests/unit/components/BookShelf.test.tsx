@@ -138,19 +138,6 @@ describe('BookShelf Component', () => {
     });
   });
 
-  describe('Upload flow', () => {
-    it('shows estimate before confirming upload', () => {
-      // The component flow: handleFileSelect -> estimate state -> confirm/cancel
-      // This is a structural assertion about the component's state machine
-      expect(true).toBe(true);
-    });
-
-    it('shows insufficient credits error with buy option', () => {
-      // When upload returns 402, uploadError is set with { message, required, available }
-      expect(true).toBe(true);
-    });
-  });
-
   describe('Removing a book', () => {
     it('asks in an in-app dialog and does nothing on Cancel', async () => {
       setupFetch(MOCK_USER_BOOKS);

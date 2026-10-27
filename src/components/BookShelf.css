@@ -259,6 +259,15 @@
   }
 }
 
+/* The upload forms change height between steps (Form 1 → Form 2). Pinning
+   the paper's top edge keeps it from jumping up and down as it does; a
+   form taller than the screen scrolls. */
+.upload-modal-overlay--form {
+  align-items: flex-start;
+  padding-top: max(16px, 12vh);
+  overflow-y: auto;
+}
+
 /* Solid dark chrome card — only the credits-purchase modal uses this now. */
 .upload-modal-content {
   background: #1a140f;
@@ -479,6 +488,13 @@
   cursor: not-allowed;
 }
 
+.uf-btn-busy {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 400;
+}
+
 .uf-btn-quiet {
   flex: 1;
   font-family: var(--uf-serif);
@@ -537,32 +553,6 @@
    always an inner wrapper (never the doc root) so the form-number line
    stays pinned at the top of the paper instead of being pulled into the
    vertical centering. */
-/* Grid-exact slot (5 lines), stacked from the top — no justify-content
-   centering and no gap, since flex centering/gap let the children float
-   between rule lines rather than landing on them. Layout, top to bottom:
-   one blank line (the container's own top padding), the spinner's slot
-   (exactly 2 lines / 56px, spinner vertically centered inside via its own
-   margin), the status text as a normal 28px line-height row sitting on
-   its own rule band, then a trailing blank line (bottom padding). */
-.uf-doc-status {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  height: calc(var(--uf-line) * 5);
-  padding: var(--uf-line) 0;
-  box-sizing: border-box;
-  text-align: center;
-}
-
-/* The spinner is a decorative glyph (like the affix box's + icon) so its
-   own diameter isn't grid-audited, but the 56px slot it centers within is:
-   12px margin + 32px spinner + 12px margin = 56px, exactly two rule lines.
-   Margin (not padding) so border-radius: 50% keeps drawing a circle around
-   the 32x32 box rather than an ellipse around a taller padded one. */
-.uf-doc-status .uf-spinner {
-  margin: 12px 0;
-}
-
 .uf-spinner {
   width: 32px;
   height: 32px;
@@ -640,18 +630,50 @@
   box-sizing: border-box;
 }
 
-.uf-doc-affix:hover .uf-affix-box {
+.uf-doc-affix:hover .uf-affix-box,
+.uf-doc-affix.is-dragover .uf-affix-box {
   transform: translateY(-4px);
   border-color: var(--uf-stamp);
 }
 
-.uf-doc-affix:hover .uf-plus {
+.uf-doc-affix:hover .uf-plus,
+.uf-doc-affix.is-dragover .uf-plus {
   border-color: var(--uf-stamp);
   color: var(--uf-stamp);
 }
 
+/* A file is being dragged over the form: the box reads as the place to
+   drop it. */
+.uf-doc-affix.is-dragover .uf-affix-box {
+  border-style: solid;
+  background: rgba(180, 83, 60, 0.06);
+}
+
+/* Analyzing / uploading: the same rows as the picker, with the box swapped
+   for a status block exactly as tall as the box and its margins (8 rule
+   lines), so the paper keeps its height. Spinner slot (2 lines) and text
+   (1 line) start two lines down, landing on rules. */
+.uf-doc-affix-busy {
+  cursor: default;
+}
+
+.uf-affix-status {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: calc(var(--uf-line) * 8);
+  padding-top: calc(var(--uf-line) * 2);
+  box-sizing: border-box;
+  text-align: center;
+}
+
+.uf-affix-status .uf-spinner {
+  margin: 12px 0;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .uf-doc-affix:hover .uf-affix-box {
+  .uf-doc-affix:hover .uf-affix-box,
+  .uf-doc-affix.is-dragover .uf-affix-box {
     transform: none;
   }
 

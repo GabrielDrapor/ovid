@@ -229,6 +229,15 @@ describe('layoutBooks', () => {
       -BAY_INNER / 2,
       4
     );
+    // The upload form names a bay by where it is drawn, counted from the
+    // top left of the wall, ring included.
+    const at = (row: number, col: number) =>
+      layout.uploadTargets.find(
+        (target) => target.rowCoord === row && target.colCoord === col
+      )!;
+    expect([at(0, -2).visualRow, at(0, -2).visualCol]).toEqual([0, 0]);
+    expect([at(1, -1).visualRow, at(1, -1).visualCol]).toEqual([1, 1]);
+    expect([at(2, 0).visualRow, at(2, 0).visualCol]).toEqual([2, 2]);
   });
 
   it('packs books with no slot of their own into a stable block below existing physical slots', () => {

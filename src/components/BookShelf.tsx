@@ -9,7 +9,7 @@ import React, {
 import { SUPPORTED_LANGUAGES } from '../utils/translator';
 import { useI18n } from '../i18n';
 import { useUser } from '../contexts/UserContext';
-import { ApiError, fetchApi } from '../utils/api';
+import { ApiError, fetchApi, parseApiError } from '../utils/api';
 import {
   Book,
   ShelfMoveTarget,
@@ -30,6 +30,8 @@ import './BookShelf.css';
 const BookShelf3D = React.lazy(() => import('./shelf3d/BookShelf3D'));
 
 const DEFAULT_TARGET_LANGUAGE = 'zh';
+// What the upload form accepts (the server converts mobi/azw3 to epub).
+const BOOK_FILE_PATTERN = /\.(epub|mobi|azw3)$/i;
 const BOOKS_PER_ROW = 8;
 
 function isWebGLAvailable(): boolean {
@@ -212,6 +214,13 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
     refreshCredits,
   } = useUser();
 
+  // Each estimate request takes a new number; a response whose number is no
+  // longer current (the form was closed, or a newer request went out) is
+  // dropped instead of overwriting newer state.
+  const estimateRequestRef = useRef(0);
+  const estimateAbortRef = useRef<AbortController | null>(null);
+  const [fileDragOver, setFileDragOver] = useState(false);
+
   const openUploadModal = useCallback((target?: ShelfUploadTarget) => {
     setUploadTarget(target ?? null);
     setUploadError(null);
@@ -221,6 +230,12 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
   }, []);
 
   const closeUploadModal = useCallback(() => {
+    estimateRequestRef.current++;
+    estimateAbortRef.current?.abort();
+    estimateAbortRef.current = null;
+    setEstimating(false);
+    setReEstimating(false);
+    setFileDragOver(false);
     setShowUploadModal(false);
     setUploadTarget(null);
     setUploadError(null);
@@ -668,6 +683,9 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
 
     setEstimating(true);
     setUploadError(null);
+    const requestId = ++estimateRequestRef.current;
+    const controller = new AbortController();
+    estimateAbortRef.current = controller;
 
     try {
       const formData = new FormData();
@@ -677,6 +695,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
       const response = await fetchApi('/api/books/estimate', {
         method: 'POST',
         body: formData,
+        signal: controller.signal,
       });
 
       const estimateData = (await response.json()) as {
@@ -692,6 +711,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
         detectedSourceLanguage?: string;
       };
 
+      if (requestId !== estimateRequestRef.current) return;
       const raw = estimateData.detectedSourceLanguage || 'en';
       const detected = SUPPORTED_LANGUAGES[raw] ? raw : 'en';
       setEstimate({
@@ -702,19 +722,40 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
         sourceLanguage: detected,
       });
     } catch (err) {
+      // Cancelled, or superseded: nothing to report.
+      if (requestId !== estimateRequestRef.current) return;
       showToast({
         tone: 'error',
         message: t.upload.estimateFailed,
         detail: errorDetail(err),
       });
     } finally {
-      setEstimating(false);
+      if (requestId === estimateRequestRef.current) {
+        setEstimating(false);
+        estimateAbortRef.current = null;
+      }
     }
+  };
+
+  // A file picked in the dialog or dropped on the form.
+  const acceptBookFile = (file: File) => {
+    if (!BOOK_FILE_PATTERN.test(file.name)) {
+      showToast({ tone: 'error', message: t.upload.unsupportedFile });
+      return;
+    }
+    handleFileSelect(file);
   };
 
   const handleChangeTargetLanguage = async (newTarget: string) => {
     if (!estimate || newTarget === estimate.targetLanguage) return;
 
+    // Show the new language straight away; the cost fields read "—" until
+    // the new estimate arrives, and a failure puts the old language back.
+    const previousTarget = estimate.targetLanguage;
+    const requestId = ++estimateRequestRef.current;
+    setEstimate((prev) =>
+      prev ? { ...prev, targetLanguage: newTarget } : prev
+    );
     setReEstimating(true);
     try {
       let response: Response;
@@ -735,6 +776,10 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
             method: 'POST',
             body: formData,
           });
+        } else if (!response.ok) {
+          // Without this a failed estimate was read as a result, and the
+          // form showed NaN credits for the new language.
+          throw await parseApiError(response);
         }
       } else {
         const formData = new FormData();
@@ -759,6 +804,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
         detectedSourceLanguage?: string;
       };
 
+      if (requestId !== estimateRequestRef.current) return;
       setEstimate((prev) =>
         prev
           ? {
@@ -772,13 +818,17 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
           : prev
       );
     } catch (err) {
+      if (requestId !== estimateRequestRef.current) return;
+      setEstimate((prev) =>
+        prev ? { ...prev, targetLanguage: previousTarget } : prev
+      );
       showToast({
         tone: 'error',
         message: t.upload.reEstimateFailed,
         detail: errorDetail(err),
       });
     } finally {
-      setReEstimating(false);
+      if (requestId === estimateRequestRef.current) setReEstimating(false);
     }
   };
 
@@ -920,12 +970,6 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
             }
       );
     }
-  };
-
-  const handleCancelEstimate = () => {
-    setEstimate(null);
-    setUploadError(null);
-    setSkipTranslation(false);
   };
 
   const handleDeleteBook = async (bookUuid: string) => {
@@ -1891,7 +1935,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
           been parsed. */}
       {showUploadModal && (
         <div
-          className="upload-modal-overlay"
+          className="upload-modal-overlay upload-modal-overlay--form"
           onClick={() =>
             !uploading &&
             !estimating &&
@@ -1899,6 +1943,10 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
             !estimate &&
             closeUploadModal()
           }
+          // A file dropped outside the form would otherwise be opened (or
+          // downloaded) by the browser, leaving the app.
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => e.preventDefault()}
         >
           {uploadError ? (
             <div
@@ -1972,288 +2020,328 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
               <p className="uf-card-title">{estimate.title}</p>
               <p className="uf-card-author">{estimate.author}</p>
 
-              {uploading ? (
-                <div className="uf-doc-status">
-                  <div className="uf-spinner" />
-                  <p className="uf-print">{uploadProgress}</p>
-                </div>
-              ) : (
-                <>
-                  <div className="uf-gap" />
-                  <div
-                    className="uf-mode-selector"
-                    role="radiogroup"
-                    aria-label={t.upload.modeAria}
+              {/* While uploading the form stays as it is (so it doesn't
+                  change height); the main button shows the progress. */}
+              <>
+                <div className="uf-gap" />
+                <div
+                  className="uf-mode-selector"
+                  role="radiogroup"
+                  aria-label={t.upload.modeAria}
+                >
+                  <label
+                    className={`uf-mode-row ${!skipTranslation ? 'checked' : 'dim'}`}
                   >
-                    <label
-                      className={`uf-mode-row ${!skipTranslation ? 'checked' : 'dim'}`}
-                    >
-                      <input
-                        type="radio"
-                        name="upload-mode"
-                        className="uf-sr-only"
-                        checked={!skipTranslation}
-                        disabled={reEstimating}
-                        onChange={() => setSkipTranslation(false)}
-                      />
-                      <span className="uf-box" aria-hidden="true" />
-                      <span className="uf-entry">
-                        {t.upload.translateThisBook}
-                      </span>
-                      <span className="uf-mode-note uf-print">
-                        {t.upload.bilingualNote}
-                      </span>
-                    </label>
-                    <label
-                      className={`uf-mode-row ${skipTranslation ? 'checked' : 'dim'}`}
-                    >
-                      <input
-                        type="radio"
-                        name="upload-mode"
-                        className="uf-sr-only"
-                        checked={skipTranslation}
-                        disabled={reEstimating}
-                        onChange={() => setSkipTranslation(true)}
-                      />
-                      <span className="uf-box" aria-hidden="true" />
-                      <span className="uf-entry">
-                        {t.upload.importOriginalOnly}
-                      </span>
-                      <span className="uf-mode-note uf-print">
-                        {t.upload.freeNote}
-                      </span>
-                    </label>
-                  </div>
-                  {!skipTranslation && (
-                    <div className="uf-row uf-lang-line">
-                      <span className="uf-print">
-                        {t.upload.languagesField}
-                      </span>
-                      <span className="uf-lang-fields">
-                        <select
-                          id="estimate-source-language"
-                          aria-label={t.upload.sourceLanguage}
-                          value={estimate.sourceLanguage}
-                          disabled={reEstimating}
-                          onChange={(e) =>
-                            handleChangeSourceLanguage(e.target.value)
-                          }
-                        >
-                          {Object.entries(SUPPORTED_LANGUAGES).map(
-                            ([code, label]) => (
-                              <option key={code} value={code}>
-                                {t.languageNames[code] || label}
-                              </option>
-                            )
-                          )}
-                        </select>
-                        <span className="uf-print uf-arrow">→</span>
-                        <select
-                          id="estimate-target-language"
-                          aria-label={t.upload.targetLanguage}
-                          value={estimate.targetLanguage}
-                          disabled={reEstimating}
-                          onChange={(e) =>
-                            handleChangeTargetLanguage(e.target.value)
-                          }
-                        >
-                          {Object.entries(SUPPORTED_LANGUAGES).map(
-                            ([code, label]) => (
-                              <option key={code} value={code}>
-                                {t.languageNames[code] || label}
-                              </option>
-                            )
-                          )}
-                        </select>
-                      </span>
-                    </div>
-                  )}
-
-                  {!skipTranslation && (
-                    <>
-                      <div className="uf-gap" />
-                      <div className="uf-fee-zone">
-                        <div className="uf-fee-lines">
-                          <div className="uf-row">
-                            <span className="uf-print">
-                              {t.upload.balanceField}
-                            </span>
-                            <span className="uf-entry uf-num">
-                              {estimate.availableCredits.toLocaleString()}
-                            </span>
-                          </div>
-                          <div className="uf-row">
-                            <span className="uf-print">
-                              {t.upload.afterField}
-                            </span>
-                            <span className="uf-entry uf-num">
-                              {reEstimating
-                                ? '—'
-                                : (
-                                    estimate.availableCredits -
-                                    estimate.requiredCredits
-                                  ).toLocaleString()}
-                            </span>
-                          </div>
-                          {!estimate.canAfford && !reEstimating && (
-                            <p className="uf-print uf-stamp-text uf-need-more">
-                              {t.upload.needMore(
-                                (
-                                  estimate.requiredCredits -
-                                  estimate.availableCredits
-                                ).toLocaleString()
-                              )}
-                            </p>
-                          )}
-                        </div>
-                        <div className="uf-stamp">
-                          <div className="uf-stamp-num">
-                            {reEstimating
-                              ? '…'
-                              : estimate.requiredCredits.toLocaleString()}
-                          </div>
-                          <div className="uf-stamp-unit">
-                            {t.upload.creditsUnit}
-                          </div>
-                        </div>
-                      </div>
-                    </>
-                  )}
-                  {!skipTranslation &&
-                    estimate.sourceLanguage === estimate.targetLanguage && (
-                      <p className="uf-print uf-stamp-text uf-lang-warning">
-                        {t.upload.sameLanguageWarning}
-                      </p>
-                    )}
-                  <div className="uf-actions">
-                    {skipTranslation ? (
-                      <button
-                        className="uf-btn-primary"
-                        onClick={handleConfirmUpload}
-                        disabled={uploading || reEstimating}
-                      >
-                        {t.upload.importWithoutTranslation}
-                      </button>
-                    ) : estimate.canAfford ? (
-                      <button
-                        className="uf-btn-primary"
-                        onClick={handleConfirmUpload}
-                        disabled={
-                          uploading ||
-                          reEstimating ||
-                          estimate.sourceLanguage === estimate.targetLanguage
+                    <input
+                      type="radio"
+                      name="upload-mode"
+                      className="uf-sr-only"
+                      checked={!skipTranslation}
+                      disabled={reEstimating || uploading}
+                      onChange={() => setSkipTranslation(false)}
+                    />
+                    <span className="uf-box" aria-hidden="true" />
+                    <span className="uf-entry">
+                      {t.upload.translateThisBook}
+                    </span>
+                    <span className="uf-mode-note uf-print">
+                      {t.upload.bilingualNote}
+                    </span>
+                  </label>
+                  <label
+                    className={`uf-mode-row ${skipTranslation ? 'checked' : 'dim'}`}
+                  >
+                    <input
+                      type="radio"
+                      name="upload-mode"
+                      className="uf-sr-only"
+                      checked={skipTranslation}
+                      disabled={reEstimating || uploading}
+                      onChange={() => setSkipTranslation(true)}
+                    />
+                    <span className="uf-box" aria-hidden="true" />
+                    <span className="uf-entry">
+                      {t.upload.importOriginalOnly}
+                    </span>
+                    <span className="uf-mode-note uf-print">
+                      {t.upload.freeNote}
+                    </span>
+                  </label>
+                </div>
+                {!skipTranslation && (
+                  <div className="uf-row uf-lang-line">
+                    <span className="uf-print">{t.upload.languagesField}</span>
+                    <span className="uf-lang-fields">
+                      <select
+                        id="estimate-source-language"
+                        aria-label={t.upload.sourceLanguage}
+                        value={estimate.sourceLanguage}
+                        disabled={reEstimating || uploading}
+                        onChange={(e) =>
+                          handleChangeSourceLanguage(e.target.value)
                         }
                       >
-                        {t.upload.confirmTranslate}
-                      </button>
-                    ) : (
-                      <button
-                        className="uf-btn-primary"
-                        onClick={() => {
-                          closeUploadModal();
-                          setShowCreditsModal(true);
-                        }}
-                        disabled={reEstimating}
+                        {Object.entries(SUPPORTED_LANGUAGES).map(
+                          ([code, label]) => (
+                            <option key={code} value={code}>
+                              {t.languageNames[code] || label}
+                            </option>
+                          )
+                        )}
+                      </select>
+                      <span className="uf-print uf-arrow">→</span>
+                      <select
+                        id="estimate-target-language"
+                        aria-label={t.upload.targetLanguage}
+                        value={estimate.targetLanguage}
+                        disabled={reEstimating || uploading}
+                        onChange={(e) =>
+                          handleChangeTargetLanguage(e.target.value)
+                        }
                       >
-                        {t.shelf.buyCredits}
-                      </button>
-                    )}
-                    <button
-                      className="uf-btn-quiet-paper"
-                      onClick={handleCancelEstimate}
-                      disabled={reEstimating}
-                    >
-                      {t.common.cancel}
-                    </button>
-                  </div>
-                </>
-              )}
-              <div className="uf-hole" />
-            </div>
-          ) : estimating ? (
-            <div
-              className="uf-doc"
-              role="dialog"
-              aria-label={uploadDialogLabel}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="uf-form-no">
-                {t.upload.form1No} <small>· {t.upload.form1Kind}</small>
-              </div>
-              <div className="uf-doc-status">
-                <div className="uf-spinner" />
-                <p className="uf-print">{t.upload.analyzing}</p>
-              </div>
-              <div className="uf-hole" />
-            </div>
-          ) : uploading ? (
-            <div
-              className="uf-doc"
-              role="dialog"
-              aria-label={uploadDialogLabel}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="uf-form-no">
-                {t.upload.form1No} <small>· {t.upload.form1Kind}</small>
-              </div>
-              <div className="uf-doc-status">
-                <div className="uf-spinner" />
-                <p className="uf-print">{uploadProgress}</p>
-              </div>
-              <div className="uf-hole" />
-            </div>
-          ) : (
-            <div
-              className="uf-doc"
-              role="dialog"
-              aria-label={uploadDialogLabel}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="uf-form-no">
-                {t.upload.form1No} <small>· {t.upload.form1Kind}</small>
-              </div>
-              <label htmlFor="epub-file-input" className="uf-doc-affix">
-                {uploadTarget && (
-                  <div className="uf-row">
-                    <span className="uf-print">{t.upload.shelfField}</span>
-                    <span className="uf-entry">
-                      {uploadTarget.label || t.upload.selectedShelf}
+                        {Object.entries(SUPPORTED_LANGUAGES).map(
+                          ([code, label]) => (
+                            <option key={code} value={code}>
+                              {t.languageNames[code] || label}
+                            </option>
+                          )
+                        )}
+                      </select>
                     </span>
                   </div>
                 )}
-                <div className="uf-row">
-                  <span className="uf-print">{t.upload.creditsUnit}</span>
-                  <span className="uf-entry uf-num">
-                    {credits?.toLocaleString() ?? '—'}
-                  </span>
+
+                {!skipTranslation && (
+                  <>
+                    <div className="uf-gap" />
+                    <div className="uf-fee-zone">
+                      <div className="uf-fee-lines">
+                        <div className="uf-row">
+                          <span className="uf-print">
+                            {t.upload.balanceField}
+                          </span>
+                          <span className="uf-entry uf-num">
+                            {estimate.availableCredits.toLocaleString()}
+                          </span>
+                        </div>
+                        <div className="uf-row">
+                          <span className="uf-print">
+                            {t.upload.afterField}
+                          </span>
+                          <span className="uf-entry uf-num">
+                            {reEstimating
+                              ? '—'
+                              : (
+                                  estimate.availableCredits -
+                                  estimate.requiredCredits
+                                ).toLocaleString()}
+                          </span>
+                        </div>
+                        {!estimate.canAfford && !reEstimating && (
+                          <p className="uf-print uf-stamp-text uf-need-more">
+                            {t.upload.needMore(
+                              (
+                                estimate.requiredCredits -
+                                estimate.availableCredits
+                              ).toLocaleString()
+                            )}
+                          </p>
+                        )}
+                      </div>
+                      <div className="uf-stamp">
+                        <div className="uf-stamp-num">
+                          {reEstimating
+                            ? '…'
+                            : estimate.requiredCredits.toLocaleString()}
+                        </div>
+                        <div className="uf-stamp-unit">
+                          {t.upload.creditsUnit}
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                )}
+                {!skipTranslation &&
+                  estimate.sourceLanguage === estimate.targetLanguage && (
+                    <p className="uf-print uf-stamp-text uf-lang-warning">
+                      {t.upload.sameLanguageWarning}
+                    </p>
+                  )}
+                <div className="uf-actions">
+                  {uploading ? (
+                    <button className="uf-btn-primary" disabled>
+                      <span className="uf-btn-busy">
+                        <Spinner />
+                        {uploadProgress}
+                      </span>
+                    </button>
+                  ) : skipTranslation ? (
+                    <button
+                      className="uf-btn-primary"
+                      onClick={handleConfirmUpload}
+                      disabled={reEstimating}
+                    >
+                      {t.upload.importWithoutTranslation}
+                    </button>
+                  ) : estimate.canAfford ? (
+                    <button
+                      className="uf-btn-primary"
+                      onClick={handleConfirmUpload}
+                      disabled={
+                        reEstimating ||
+                        estimate.sourceLanguage === estimate.targetLanguage
+                      }
+                    >
+                      {t.upload.confirmTranslate}
+                    </button>
+                  ) : (
+                    <button
+                      className="uf-btn-primary"
+                      onClick={() => {
+                        closeUploadModal();
+                        setShowCreditsModal(true);
+                      }}
+                      disabled={reEstimating}
+                    >
+                      {t.shelf.buyCredits}
+                    </button>
+                  )}
+                  {/* Cancel closes the form, like every other Cancel
+                        here; pick another file by opening it again. */}
+                  <button
+                    className="uf-btn-quiet-paper"
+                    onClick={closeUploadModal}
+                    disabled={uploading}
+                  >
+                    {t.common.cancel}
+                  </button>
                 </div>
-                <input
-                  type="file"
-                  accept=".epub,.mobi,.azw3"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) {
-                      handleFileSelect(file);
-                    }
-                  }}
-                  id="epub-file-input"
-                  style={{ display: 'none' }}
-                />
-                <div className="uf-affix-box">
-                  <div className="uf-plus" aria-hidden="true">
-                    +
+              </>
+              <div className="uf-hole" />
+            </div>
+          ) : (
+            /* Form 1. Picking, analyzing and uploading share one layout, so
+               the paper keeps its height between them. */
+            <div
+              className="uf-doc"
+              role="dialog"
+              aria-label={uploadDialogLabel}
+              onClick={(e) => e.stopPropagation()}
+              onDragOver={(e) => {
+                e.preventDefault();
+                if (estimating || uploading) {
+                  e.dataTransfer.dropEffect = 'none';
+                  return;
+                }
+                e.dataTransfer.dropEffect = 'copy';
+                setFileDragOver(true);
+              }}
+              onDragLeave={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget as Node | null))
+                  setFileDragOver(false);
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                setFileDragOver(false);
+                const file = e.dataTransfer.files?.[0];
+                if (file && !estimating && !uploading) acceptBookFile(file);
+              }}
+            >
+              <div className="uf-form-no">
+                {t.upload.form1No} <small>· {t.upload.form1Kind}</small>
+              </div>
+              {(() => {
+                const rows = (
+                  <>
+                    {uploadTarget && (
+                      <div className="uf-row">
+                        <span className="uf-print">{t.upload.shelfField}</span>
+                        <span className="uf-entry">
+                          {uploadTarget.label ||
+                            (uploadTarget.position
+                              ? t.upload.slotPosition(
+                                  uploadTarget.position.row,
+                                  uploadTarget.position.col
+                                )
+                              : t.upload.selectedShelf)}
+                        </span>
+                      </div>
+                    )}
+                    <div className="uf-row">
+                      <span className="uf-print">{t.upload.creditsUnit}</span>
+                      <span className="uf-entry uf-num">
+                        {credits?.toLocaleString() ?? '—'}
+                      </span>
+                    </div>
+                  </>
+                );
+                const footer = (
+                  <>
+                    <div
+                      className="uf-row"
+                      style={{ justifyContent: 'center' }}
+                    >
+                      <span className="uf-print">
+                        {t.upload.acceptedFormats}
+                      </span>
+                    </div>
+                    <div
+                      className="uf-row"
+                      style={{ justifyContent: 'center' }}
+                    >
+                      <span className="uf-print">
+                        {t.upload.languagesNextForm}
+                      </span>
+                    </div>
+                  </>
+                );
+                return estimating || uploading ? (
+                  <div className="uf-doc-affix uf-doc-affix-busy">
+                    {rows}
+                    <div className="uf-affix-status" role="status">
+                      <div className="uf-spinner" />
+                      <p className="uf-print">
+                        {estimating ? t.upload.analyzing : uploadProgress}
+                      </p>
+                    </div>
+                    {footer}
                   </div>
-                  <div className="uf-affix-note">{t.upload.affixHere}</div>
-                </div>
-                <div className="uf-row" style={{ justifyContent: 'center' }}>
-                  <span className="uf-print">{t.upload.languagesNextForm}</span>
-                </div>
-              </label>
+                ) : (
+                  <label
+                    htmlFor="epub-file-input"
+                    className={`uf-doc-affix${
+                      fileDragOver ? ' is-dragover' : ''
+                    }`}
+                  >
+                    {rows}
+                    <input
+                      type="file"
+                      accept=".epub,.mobi,.azw3"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        // Let the same file be picked again after a cancel.
+                        e.target.value = '';
+                        if (file) acceptBookFile(file);
+                      }}
+                      id="epub-file-input"
+                      style={{ display: 'none' }}
+                    />
+                    <div className="uf-affix-box">
+                      <div className="uf-plus" aria-hidden="true">
+                        +
+                      </div>
+                      <div className="uf-affix-note">{t.upload.affixHere}</div>
+                    </div>
+                    {footer}
+                  </label>
+                );
+              })()}
               <div className="uf-actions">
                 <button
                   className="uf-btn-quiet-paper"
                   style={{ flex: 1 }}
                   onClick={closeUploadModal}
+                  disabled={uploading}
                 >
                   {t.common.cancel}
                 </button>
