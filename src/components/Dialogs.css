@@ -115,7 +115,7 @@
   }
 }
 
-/* Toast: above the shelf dock and the reader's menu button. */
+/* Toast: above the shelf dock and the reader's menu button (desktop). */
 .ov-toast {
   position: fixed;
   z-index: 3000;
@@ -184,6 +184,23 @@
   from {
     opacity: 0;
     transform: translateX(-50%) translateY(8px);
+  }
+}
+
+/* Phones: at the top, where it can't cover a dialog's buttons (dialogs
+   there reach down to the bottom of the screen). */
+@media (max-width: 768px) {
+  .ov-toast {
+    top: calc(12px + env(safe-area-inset-top, 0px));
+    bottom: auto;
+    animation-name: ov-toast-in-top;
+  }
+}
+
+@keyframes ov-toast-in-top {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-8px);
   }
 }
 
