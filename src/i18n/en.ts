@@ -8,6 +8,7 @@ export const en = {
     save: 'Save',
     saving: 'Saving…',
     close: 'Close',
+    back: 'Back',
     goHome: 'Go home',
     error: (message: string) => `Error: ${message}`,
   },
@@ -142,13 +143,13 @@ export const en = {
     showOriginal: 'Show original',
     chapters: 'Chapters',
     markAsRead: 'Mark as read',
-    markedRead: 'Read',
     share: 'Share',
     copyShareLink: 'Copy share link',
     copied: 'Copied',
     revokeShare: 'Revoke share',
     theme: 'Theme',
     themeAuto: 'Auto (follow system)',
+    themeAutoShort: 'Auto',
     themeNames: {
       white: 'White',
       paper: 'Paper',
@@ -173,6 +174,8 @@ export const en = {
     // Accessible names for the − / + buttons beside each setting.
     decrease: (setting: string) => `Decrease ${setting.toLowerCase()}`,
     increase: (setting: string) => `Increase ${setting.toLowerCase()}`,
+    // Shown for a typography setting at its default value.
+    defaultValue: 'Default',
     resetToDefault: 'Reset to default',
     contents: 'Contents',
     search: 'Search',

@@ -108,6 +108,40 @@ describe('Onboarding Tooltip', () => {
     expect(localStorage.getItem('ovid_onboarding_seen')).toBe('1');
   });
 
+  it('sits below the first paragraph when the margin is too narrow', async () => {
+    vi.useRealTimers();
+
+    // jsdom lays nothing out, so the paragraph is at left 0, like a phone.
+    const { container } = render(<BilingualReaderV2 {...defaultProps} />);
+
+    await waitFor(() => {
+      expect(container.querySelector('.onboarding-tooltip')).toBeInTheDocument();
+    }, { timeout: 2000 });
+    expect(container.querySelector('.onboarding-tooltip')).toHaveClass(
+      'onboarding-tooltip-below'
+    );
+  });
+
+  it('sits in the left margin when there is room', async () => {
+    vi.useRealTimers();
+    const rect = vi
+      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockReturnValue({
+        left: 600, right: 1200, top: 100, bottom: 140, width: 600, height: 40,
+        x: 600, y: 100, toJSON: () => ({}),
+      } as DOMRect);
+
+    const { container } = render(<BilingualReaderV2 {...defaultProps} />);
+
+    await waitFor(() => {
+      expect(container.querySelector('.onboarding-tooltip')).toBeInTheDocument();
+    }, { timeout: 2000 });
+    const tooltip = container.querySelector('.onboarding-tooltip') as HTMLElement;
+    expect(tooltip).not.toHaveClass('onboarding-tooltip-below');
+    expect(tooltip.style.right).toBe(`${window.innerWidth - 600 + 12}px`);
+    rect.mockRestore();
+  });
+
   it('does not show tooltip again after dismissal and re-render', async () => {
     vi.useRealTimers();
 

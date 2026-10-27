@@ -93,6 +93,33 @@
     <title>Ovid</title>
   </head>
   <body>
+    <script>
+      // Paint the reader theme's background before the app loads, so opening
+      // a book in the dark theme doesn't flash a white page first. The colours
+      // mirror READER_THEMES in src/reader/themes.ts; a unit test keeps them
+      // in sync.
+      (function () {
+        if (!/^\/(v2\/)?(book|shared)\//.test(location.pathname)) return;
+        var bg = {
+          white: '#fefefe',
+          paper: '#faf6ec',
+          sepia: '#f7f0df',
+          green: '#ccf0cf',
+          dark: '#16181c',
+        };
+        var pref;
+        try {
+          pref = localStorage.getItem('ovid_reader_theme');
+        } catch (e) {}
+        if (!bg.hasOwnProperty(pref)) {
+          var dark =
+            window.matchMedia &&
+            window.matchMedia('(prefers-color-scheme: dark)').matches;
+          pref = dark ? 'dark' : 'paper';
+        }
+        document.body.style.backgroundColor = bg[pref];
+      })();
+    </script>
     <noscript>You need to enable JavaScript to run this app.</noscript>
     <div id="root"></div>
   </body>
