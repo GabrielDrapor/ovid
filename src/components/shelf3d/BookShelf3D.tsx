@@ -57,6 +57,7 @@ import {
   type ShelfSurface,
   type ShelfStructure,
 } from './shelfThemes';
+import { Icon } from '../Icon';
 import './BookShelf3D.css';
 
 // Studio-style environment map shared by chrome, steel panels and book
@@ -2256,7 +2257,7 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
             aria-label={t.common.close}
             onClick={() => setSelectedUuid(null)}
           >
-            ×
+            <Icon name="close" size={18} />
           </button>
           <div className="closet3d-panel-heading">{t.closet.bookInfo}</div>
           <div className="closet3d-panel-print">{t.closet.titleField}</div>

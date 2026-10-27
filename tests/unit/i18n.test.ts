@@ -50,6 +50,23 @@ describe('i18n dictionaries', () => {
     expect(zh.shelf.byAuthor('Ovid')).toContain('Ovid');
     expect(en.upload.needMore('1,200')).toContain('1,200');
     expect(zh.upload.needMore('1,200')).toContain('1,200');
+    expect(en.reader.decrease(en.reader.fontSize)).toBe('Decrease font size');
+    expect(zh.reader.increase(zh.reader.fontSize)).toBe('增大字号');
+  });
+
+  it('keeps icon characters out of messages (icons are drawn as SVG)', () => {
+    const glyphs = /[✓✔×✕◐›→]/;
+    const check = (obj: Record<string, unknown>, path: string) => {
+      for (const [key, value] of Object.entries(obj)) {
+        if (typeof value === 'string') {
+          expect(value, `${path}.${key}`).not.toMatch(glyphs);
+        } else if (value !== null && typeof value === 'object') {
+          check(value as Record<string, unknown>, `${path}.${key}`);
+        }
+      }
+    };
+    check(en.reader, 'en.reader');
+    check(zh.reader, 'zh.reader');
   });
 
   it('getMessages returns the requested dictionary', () => {

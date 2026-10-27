@@ -727,13 +727,19 @@
   align-self: center;
 }
 
+/* Checkmark drawn with two borders of a rotated box, so it sits inside the
+   square the same way in every font (a ✓ glyph hung below the box). */
 .uf-mode-row.checked .uf-box::after {
-  content: '✓';
+  content: '';
   position: absolute;
-  top: -6px;
-  left: 0;
-  font-size: 16px;
-  color: var(--uf-ink);
+  box-sizing: border-box;
+  left: 3px;
+  top: 0.5px;
+  width: 4.5px;
+  height: 7.5px;
+  border: solid var(--uf-ink);
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg);
 }
 
 .uf-mode-note {

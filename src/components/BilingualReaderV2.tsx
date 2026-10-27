@@ -3,6 +3,7 @@ import { getMessages, useI18n } from '../i18n';
 import { READER_THEMES, themeCssVars } from '../reader/themes';
 import { READER_FONTS, DEFAULT_FONT_ID, fontStack } from '../reader/fonts';
 import { useReaderTheme } from '../reader/useReaderTheme';
+import { Icon, Spinner } from './Icon';
 import './BilingualReader.css';
 
 interface Chapter {
@@ -1449,15 +1450,17 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
               </span>
               <button
                 className="note-popover-close"
-                aria-label="Close"
+                aria-label={t.common.close}
                 onClick={() => setNotePopover(null)}
               >
-                ×
+                <Icon name="close" size={18} />
               </button>
             </div>
             <div className="note-popover-body">
               {notePopover.loading ? (
-                <p className="note-popover-status">…</p>
+                <p className="note-popover-status">
+                  <Spinner />
+                </p>
               ) : notePopover.missing ? (
                 <p className="note-popover-status">{t.reader.noteNotFound}</p>
               ) : (
@@ -1510,7 +1513,8 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
                 onNavigateInternal?.(chapter, xpath);
               }}
             >
-              {t.reader.viewInContext} →
+              {t.reader.viewInContext}
+              <Icon name="arrow-right" />
             </button>
           </div>
         </>
@@ -1591,11 +1595,16 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
                 }}
                 disabled={isMarkingComplete}
               >
-                {isMarkingComplete
-                  ? '...'
-                  : isCompleted
-                    ? t.reader.markedRead
-                    : t.reader.markAsRead}
+                {isMarkingComplete ? (
+                  <Spinner />
+                ) : isCompleted ? (
+                  <span className="fab-menu-label">
+                    <Icon name="check" />
+                    {t.reader.markedRead}
+                  </span>
+                ) : (
+                  t.reader.markAsRead
+                )}
               </button>
             )}
             {markCompleteError && (
@@ -1616,7 +1625,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
                 }}
                 disabled={isSharing}
               >
-                {isSharing ? '...' : t.reader.share}
+                {isSharing ? <Spinner /> : t.reader.share}
               </button>
             )}
             {isOwner && shareToken && (
@@ -1631,7 +1640,14 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
                     setTimeout(() => setShareCopied(false), 2000);
                   }}
                 >
-                  {shareCopied ? t.reader.copied : t.reader.copyShareLink}
+                  {shareCopied ? (
+                    <span className="fab-menu-label">
+                      <Icon name="check" />
+                      {t.reader.copied}
+                    </span>
+                  ) : (
+                    t.reader.copyShareLink
+                  )}
                 </button>
                 <button
                   className="fab-menu-item"
@@ -1647,7 +1663,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
                   }}
                   disabled={isSharing}
                 >
-                  {isSharing ? '...' : t.reader.revokeShare}
+                  {isSharing ? <Spinner /> : t.reader.revokeShare}
                 </button>
               </>
             )}
@@ -1669,7 +1685,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
                   aria-pressed={themePref === 'auto'}
                   onClick={() => setThemePref('auto')}
                 >
-                  ◐
+                  <Icon name="theme-auto" />
                 </button>
                 {READER_THEMES.map((th) => (
                   <button
@@ -1700,7 +1716,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
             >
               <span>{t.reader.typography}</span>
               <span className={`fab-chevron ${isTypographyOpen ? 'open' : ''}`}>
-                ›
+                <Icon name="chevron-right" />
               </span>
             </button>
 
@@ -1730,16 +1746,18 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
                   <div className="fab-menu-controls">
                     <button
                       className="fab-control-btn"
+                      aria-label={t.reader.decrease(t.reader.fontSize)}
                       onClick={() => adjustFontSize(-1)}
                     >
-                      -
+                      <Icon name="minus" />
                     </button>
                     <span className="fab-typo-value">{fontSize}</span>
                     <button
                       className="fab-control-btn"
+                      aria-label={t.reader.increase(t.reader.fontSize)}
                       onClick={() => adjustFontSize(1)}
                     >
-                      +
+                      <Icon name="plus" />
                     </button>
                   </div>
                 </div>
@@ -1750,16 +1768,18 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
                   <div className="fab-menu-controls">
                     <button
                       className="fab-control-btn"
+                      aria-label={t.reader.decrease(t.reader.paragraphGap)}
                       onClick={() => adjustParagraphSpacing(-5)}
                     >
-                      -
+                      <Icon name="minus" />
                     </button>
                     <span className="fab-typo-value">{paragraphSpacing}</span>
                     <button
                       className="fab-control-btn"
+                      aria-label={t.reader.increase(t.reader.paragraphGap)}
                       onClick={() => adjustParagraphSpacing(5)}
                     >
-                      +
+                      <Icon name="plus" />
                     </button>
                   </div>
                 </div>
@@ -1768,18 +1788,20 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
                   <div className="fab-menu-controls">
                     <button
                       className="fab-control-btn"
+                      aria-label={t.reader.decrease(t.reader.lineHeight)}
                       onClick={() => adjustLineHeight(-0.1)}
                     >
-                      -
+                      <Icon name="minus" />
                     </button>
                     <span className="fab-typo-value">
                       {lineHeight.toFixed(1)}
                     </span>
                     <button
                       className="fab-control-btn"
+                      aria-label={t.reader.increase(t.reader.lineHeight)}
                       onClick={() => adjustLineHeight(0.1)}
                     >
-                      +
+                      <Icon name="plus" />
                     </button>
                   </div>
                 </div>
@@ -1790,18 +1812,20 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
                   <div className="fab-menu-controls">
                     <button
                       className="fab-control-btn"
+                      aria-label={t.reader.decrease(t.reader.letterSpacing)}
                       onClick={() => adjustLetterSpacing(-0.01)}
                     >
-                      -
+                      <Icon name="minus" />
                     </button>
                     <span className="fab-typo-value">
                       {letterSpacing.toFixed(2)}
                     </span>
                     <button
                       className="fab-control-btn"
+                      aria-label={t.reader.increase(t.reader.letterSpacing)}
                       onClick={() => adjustLetterSpacing(0.01)}
                     >
-                      +
+                      <Icon name="plus" />
                     </button>
                   </div>
                 </div>
@@ -1810,18 +1834,20 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
                   <div className="fab-menu-controls">
                     <button
                       className="fab-control-btn"
+                      aria-label={t.reader.decrease(t.reader.wordSpacing)}
                       onClick={() => adjustWordSpacing(-0.01)}
                     >
-                      -
+                      <Icon name="minus" />
                     </button>
                     <span className="fab-typo-value">
                       {wordSpacing.toFixed(2)}
                     </span>
                     <button
                       className="fab-control-btn"
+                      aria-label={t.reader.increase(t.reader.wordSpacing)}
                       onClick={() => adjustWordSpacing(0.01)}
                     >
-                      +
+                      <Icon name="plus" />
                     </button>
                   </div>
                 </div>
@@ -1830,16 +1856,18 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
                   <div className="fab-menu-controls">
                     <button
                       className="fab-control-btn"
+                      aria-label={t.reader.decrease(t.reader.fontWeight)}
                       onClick={() => adjustFontWeight(-10)}
                     >
-                      -
+                      <Icon name="minus" />
                     </button>
                     <span className="fab-typo-value">{fontWeight}</span>
                     <button
                       className="fab-control-btn"
+                      aria-label={t.reader.increase(t.reader.fontWeight)}
                       onClick={() => adjustFontWeight(10)}
                     >
-                      +
+                      <Icon name="plus" />
                     </button>
                   </div>
                 </div>
@@ -1873,9 +1901,10 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
                 <h3>{t.reader.contents}</h3>
                 <button
                   className="chapters-close"
+                  aria-label={t.common.close}
                   onClick={() => setIsChaptersOpen(false)}
                 >
-                  X
+                  <Icon name="close" size={18} />
                 </button>
               </div>
               <div className="chapters-list">
@@ -1914,9 +1943,10 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
                 <h3>{t.reader.search}</h3>
                 <button
                   className="chapters-close"
+                  aria-label={t.common.close}
                   onClick={() => setIsSearchOpen(false)}
                 >
-                  X
+                  <Icon name="close" size={18} />
                 </button>
               </div>
               <div className="search-input-row">

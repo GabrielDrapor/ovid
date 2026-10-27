@@ -221,20 +221,27 @@
   color: rgba(43, 36, 26, 0.72);
 }
 
+/* Same 30px round button as the reader's panel close buttons. */
 .closet3d-panel-close {
   position: absolute;
   top: 10px;
   right: 12px;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background: none;
   border: none;
+  border-radius: 50%;
   color: rgba(43, 36, 26, 0.5);
-  font-size: 22px;
-  line-height: 1;
   cursor: pointer;
-  padding: 4px;
+  padding: 0;
+  transition: all 0.2s ease;
 }
 
 .closet3d-panel-close:hover {
+  background-color: rgba(43, 36, 26, 0.08);
   color: #2b241a;
 }
 

@@ -23,6 +23,7 @@ import {
   loadShelfThemePref,
   saveShelfThemePref,
 } from './shelf3d/shelfThemes';
+import { Spinner } from './Icon';
 import './BookShelf.css';
 
 const BookShelf3D = React.lazy(() => import('./shelf3d/BookShelf3D'));
@@ -1277,7 +1278,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                             {t.shelf.credits}
                           </span>
                           <span className="credits-amount">
-                            {credits?.toLocaleString() ?? '...'}
+                            {credits?.toLocaleString() ?? '—'}
                           </span>
                         </div>
                         <button
@@ -1353,7 +1354,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                               disabled={signinBusy || !signinEmailValid}
                               onClick={handleSendCode}
                             >
-                              {signinBusy ? '…' : t.auth.sendCode}
+                              {signinBusy ? <Spinner /> : t.auth.sendCode}
                             </button>
                           </div>
                         ) : (
@@ -1394,7 +1395,11 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                               }
                               onClick={handleVerifyCode}
                             >
-                              {signinBusy ? '…' : t.auth.verifyAndSignIn}
+                              {signinBusy ? (
+                                <Spinner />
+                              ) : (
+                                t.auth.verifyAndSignIn
+                              )}
                             </button>
                             <button
                               className="signin-back-btn"
@@ -2188,7 +2193,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                 <div className="uf-row">
                   <span className="uf-print">{t.upload.creditsUnit}</span>
                   <span className="uf-entry uf-num">
-                    {credits?.toLocaleString() ?? '...'}
+                    {credits?.toLocaleString() ?? '—'}
                   </span>
                 </div>
                 <input
@@ -2243,7 +2248,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
             <h2>{t.creditsModal.title}</h2>
             <p className="credits-balance">
               {t.creditsModal.balancePrefix}{' '}
-              <strong>{credits?.toLocaleString() ?? '0'}</strong>{' '}
+              <strong>{credits?.toLocaleString() ?? '—'}</strong>{' '}
               {t.creditsModal.creditsSuffix}
             </p>
             <div className="credit-packages">

@@ -1,0 +1,32 @@
+/* Shared by Icon.tsx: line icons and the inline busy spinner. */
+
+.ov-icon {
+  display: inline-block;
+  flex: none;
+  vertical-align: -0.125em;
+}
+
+.ov-spinner {
+  display: inline-block;
+  flex: none;
+  box-sizing: border-box;
+  width: 1em;
+  height: 1em;
+  border: 0.14em solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  vertical-align: middle;
+  animation: ov-spin 0.8s linear infinite;
+}
+
+@keyframes ov-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ov-spinner {
+    animation-duration: 2.4s;
+  }
+}

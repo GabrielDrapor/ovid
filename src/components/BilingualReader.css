@@ -189,6 +189,14 @@
   font-weight: 600;
 }
 
+/* Icon + text kept together as one flex child, so the item's
+   space-between layout doesn't push them apart. */
+.fab-menu-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .fab-menu-item:disabled {
   opacity: 0.5;
   cursor: default;
@@ -214,6 +222,7 @@
 }
 
 .fab-chevron {
+  display: inline-flex;
   transition: transform 0.2s ease;
   font-size: 14px;
   color: var(--rt-text-muted, #8a8171);
@@ -375,8 +384,7 @@
   background-color: var(--rt-surface-alt, #f2edde);
   border: 1px solid var(--rt-border, #e6dfcc);
   cursor: pointer;
-  font-size: 13px;
-  font-weight: bold;
+  font-size: 14px;
   color: var(--rt-text, #2f2a21);
   display: flex;
   align-items: center;
@@ -529,7 +537,6 @@ h3.chapter-text {
 .chapters-close {
   background: none;
   border: none;
-  font-size: 24px;
   cursor: pointer;
   padding: 0;
   width: 30px;
@@ -572,6 +579,14 @@ h3.chapter-text {
 
 .search-input:focus {
   border-color: var(--rt-accent, #8b5a2b);
+}
+
+/* The panel header already has a close button; drop the browser's blue
+   clear button so the field doesn't show a second X. */
+.search-input::-webkit-search-cancel-button,
+.search-input::-webkit-search-decoration {
+  -webkit-appearance: none;
+  appearance: none;
 }
 
 .search-status {
@@ -1038,17 +1053,26 @@ sup:hover {
   color: var(--rt-accent, #8b5a2b);
 }
 
+/* Same 30px round button as .chapters-close; the negative margin keeps
+   the header as tall as the title line. */
 .note-popover-close {
   background: none;
   border: none;
-  font-size: 20px;
-  line-height: 1;
-  padding: 4px 6px;
+  padding: 0;
+  margin: -6px -8px -6px 0;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   color: var(--rt-text-muted, #8a8171);
+  border-radius: 50%;
   cursor: pointer;
+  transition: all 0.2s ease;
 }
 
 .note-popover-close:hover {
+  background-color: var(--rt-border, #e6dfcc);
   color: var(--rt-text, #2f2a21);
 }
 
@@ -1086,6 +1110,9 @@ sup:hover {
 
 .note-popover-goto {
   align-self: flex-end;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   margin: 0 12px 12px;
   padding: 6px 12px;
   background: none;
