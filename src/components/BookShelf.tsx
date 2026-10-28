@@ -24,7 +24,7 @@ import {
   saveShelfThemePref,
 } from './shelf3d/shelfThemes';
 import { Spinner } from './Icon';
-import { errorDetail, useConfirm, useToast } from './Dialogs';
+import { errorDetail, useConfirm, useEscapeLayer, useToast } from './Dialogs';
 import './BookShelf.css';
 
 const BookShelf3D = React.lazy(() => import('./shelf3d/BookShelf3D'));
@@ -32,6 +32,34 @@ const BookShelf3D = React.lazy(() => import('./shelf3d/BookShelf3D'));
 const DEFAULT_TARGET_LANGUAGE = 'zh';
 // What the upload form accepts (the server converts mobi/azw3 to epub).
 const BOOK_FILE_PATTERN = /\.(epub|mobi|azw3)$/i;
+
+// An upload waiting on credits, kept while the user pays on Stripe (a full
+// page load away and back) so the form can reopen where it was. Only the
+// key of the copy already in storage travels; the File itself can't.
+const PENDING_UPLOAD_KEY = 'ovid_pending_upload';
+const PENDING_UPLOAD_MAX_AGE_MS = 60 * 60 * 1000;
+
+interface PendingUpload {
+  savedAt: number;
+  fileKey: string;
+  targetLanguage: string;
+  sourceLanguage: string;
+  uploadTarget: ShelfUploadTarget | null;
+}
+
+/** Read and forget the saved upload, if there is a recent one. */
+function takePendingUpload(): PendingUpload | null {
+  try {
+    const raw = sessionStorage.getItem(PENDING_UPLOAD_KEY);
+    sessionStorage.removeItem(PENDING_UPLOAD_KEY);
+    if (!raw) return null;
+    const pending = JSON.parse(raw) as PendingUpload;
+    if (Date.now() - pending.savedAt > PENDING_UPLOAD_MAX_AGE_MS) return null;
+    return pending.fileKey ? pending : null;
+  } catch {
+    return null;
+  }
+}
 const BOOKS_PER_ROW = 8;
 
 function isWebGLAvailable(): boolean {
@@ -173,7 +201,12 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
   const [uploadTarget, setUploadTarget] = useState<ShelfUploadTarget | null>(
     null
   );
-  const [showCreditsModal, setShowCreditsModal] = useState(false);
+  // Buy-credits dialog. `need` is the shortfall when it was opened from the
+  // upload form, which stays open underneath.
+  const [creditsModal, setCreditsModal] = useState<{
+    need: number | null;
+  } | null>(null);
+  const [buyingPackageId, setBuyingPackageId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState('');
   const [uploadError, setUploadError] = useState<{
@@ -189,7 +222,8 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
   const [reEstimating, setReEstimating] = useState(false);
   const [skipTranslation, setSkipTranslation] = useState(false);
   const [estimate, setEstimate] = useState<{
-    file: File;
+    /** null when the form was reopened after paying: only fileKey is left. */
+    file: File | null;
     title: string;
     author: string;
     chapters: number;
@@ -211,6 +245,8 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
     credits,
     creditPackages,
     purchaseCredits,
+    paymentNotice,
+    clearPaymentNotice,
     refreshCredits,
   } = useUser();
 
@@ -242,6 +278,132 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
     setEstimate(null);
     setSkipTranslation(false);
   }, []);
+
+  // Without the stored copy, a form reopened after paying has no file to
+  // send again; the user has to pick it again.
+  const fileOrChooseAgain = (file: File | null): File => {
+    if (!file) throw new Error(t.upload.chooseAgain);
+    return file;
+  };
+
+  // Escape closes the newest dialog only: the buy dialog before the upload
+  // form under it. Neither closes while its request is under way.
+  useEscapeLayer(() => {
+    if (!uploading) closeUploadModal();
+  }, showUploadModal);
+  useEscapeLayer(() => {
+    if (!buyingPackageId) setCreditsModal(null);
+  }, creditsModal !== null);
+
+  const handleBuyPackage = async (packageId: string) => {
+    setBuyingPackageId(packageId);
+    // Keep the upload this purchase is for, so it can continue afterwards.
+    if (showUploadModal && estimate?.fileKey && !skipTranslation) {
+      const pending: PendingUpload = {
+        savedAt: Date.now(),
+        fileKey: estimate.fileKey,
+        targetLanguage: estimate.targetLanguage,
+        sourceLanguage: estimate.sourceLanguage,
+        uploadTarget,
+      };
+      try {
+        sessionStorage.setItem(PENDING_UPLOAD_KEY, JSON.stringify(pending));
+      } catch {
+        // Without storage the form just won't reopen after paying.
+      }
+    }
+    try {
+      // On success this leaves for Stripe; the button stays busy until then.
+      await purchaseCredits(packageId);
+    } catch (err) {
+      try {
+        sessionStorage.removeItem(PENDING_UPLOAD_KEY);
+      } catch {}
+      setBuyingPackageId(null);
+      showToast({
+        tone: 'error',
+        message: t.creditsModal.checkoutFailed,
+        detail: errorDetail(err),
+      });
+    }
+  };
+
+  // Coming back to this page with the browser's Back button (from Stripe)
+  // can restore it from the page cache, busy button and all.
+  useEffect(() => {
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (e.persisted) setBuyingPackageId(null);
+    };
+    window.addEventListener('pageshow', onPageShow);
+    return () => window.removeEventListener('pageshow', onPageShow);
+  }, []);
+
+  // Reopen an upload that was waiting on credits, from the copy the
+  // estimate left in storage, with a fresh estimate for the new balance.
+  const resumeUpload = async (pending: PendingUpload) => {
+    openUploadModal(pending.uploadTarget ?? undefined);
+    setEstimating(true);
+    const requestId = ++estimateRequestRef.current;
+    try {
+      const response = await fetchApi('/api/books/estimate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fileKey: pending.fileKey,
+          targetLanguage: pending.targetLanguage,
+        }),
+      });
+      const estimateData = (await response.json()) as {
+        title: string;
+        author: string;
+        chapters: number;
+        characters: number;
+        estimatedTokens: number;
+        requiredCredits: number;
+        availableCredits: number;
+        canAfford: boolean;
+        fileKey?: string;
+        detectedSourceLanguage?: string;
+      };
+      if (requestId !== estimateRequestRef.current) return;
+      setEstimate({
+        ...estimateData,
+        file: null,
+        fileKey: estimateData.fileKey || pending.fileKey,
+        targetLanguage: pending.targetLanguage,
+        detectedSourceLanguage:
+          estimateData.detectedSourceLanguage || pending.sourceLanguage,
+        sourceLanguage: pending.sourceLanguage,
+      });
+    } catch (err) {
+      if (requestId !== estimateRequestRef.current) return;
+      showToast({
+        tone: 'error',
+        message: t.upload.chooseAgain,
+        detail: errorDetail(err),
+      });
+    } finally {
+      if (requestId === estimateRequestRef.current) setEstimating(false);
+    }
+  };
+
+  // Back from Stripe: say what happened to the payment, then pick the
+  // upload back up if one was waiting on these credits.
+  useEffect(() => {
+    if (!paymentNotice || !user) return;
+    clearPaymentNotice();
+    if (paymentNotice.kind === 'added') {
+      showToast({
+        message: paymentNotice.creditsAdded
+          ? t.creditsModal.added(paymentNotice.creditsAdded.toLocaleString())
+          : t.creditsModal.addedNoAmount,
+      });
+    } else if (paymentNotice.kind === 'pending') {
+      showToast({ message: t.creditsModal.pending });
+    }
+    const pending = takePendingUpload();
+    if (pending) resumeUpload(pending);
+  }, [paymentNotice, user]);
 
   const handleSpineImageLoad = useCallback(
     (bookUuid: string, event: React.SyntheticEvent<HTMLImageElement>) => {
@@ -770,7 +932,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
         });
         if (response.status === 404) {
           const formData = new FormData();
-          formData.append('file', estimate.file);
+          formData.append('file', fileOrChooseAgain(estimate.file));
           formData.append('targetLanguage', newTarget);
           response = await fetchApi('/api/books/estimate', {
             method: 'POST',
@@ -783,7 +945,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
         }
       } else {
         const formData = new FormData();
-        formData.append('file', estimate.file);
+        formData.append('file', fileOrChooseAgain(estimate.file));
         formData.append('targetLanguage', newTarget);
         response = await fetchApi('/api/books/estimate', {
           method: 'POST',
@@ -879,7 +1041,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
         if (response.status === 404) {
           setUploadProgress(t.upload.uploading);
           const formData = new FormData();
-          formData.append('file', estimate.file);
+          formData.append('file', fileOrChooseAgain(estimate.file));
           formData.append('targetLanguage', estimate.targetLanguage);
           formData.append('sourceLanguage', estimate.sourceLanguage);
           formData.append('skipTranslation', String(skipTranslation));
@@ -893,7 +1055,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
       } else {
         // Fallback: re-upload file via FormData
         const formData = new FormData();
-        formData.append('file', estimate.file);
+        formData.append('file', fileOrChooseAgain(estimate.file));
         formData.append('targetLanguage', estimate.targetLanguage);
         formData.append('sourceLanguage', estimate.sourceLanguage);
         formData.append('skipTranslation', String(skipTranslation));
@@ -922,7 +1084,8 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
           });
           setUploading(false);
           setUploadProgress('');
-          setEstimate(null);
+          // The estimate stays: it is what the form returns to after the
+          // user buys credits.
           return;
         }
 
@@ -1360,7 +1523,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                           className="buy-credits-btn"
                           onClick={() => {
                             setOpenDockMenu(null);
-                            setShowCreditsModal(true);
+                            setCreditsModal({ need: null });
                           }}
                         >
                           {t.shelf.buyCredits}
@@ -1991,10 +2154,15 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
               <div className="uf-actions">
                 <button
                   className="uf-btn-primary"
-                  onClick={() => {
-                    closeUploadModal();
-                    setShowCreditsModal(true);
-                  }}
+                  onClick={() =>
+                    setCreditsModal({
+                      need:
+                        uploadError.required !== undefined &&
+                        uploadError.available !== undefined
+                          ? uploadError.required - uploadError.available
+                          : null,
+                    })
+                  }
                 >
                   {t.shelf.buyCredits}
                 </button>
@@ -2197,10 +2365,13 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                   ) : (
                     <button
                       className="uf-btn-primary"
-                      onClick={() => {
-                        closeUploadModal();
-                        setShowCreditsModal(true);
-                      }}
+                      onClick={() =>
+                        setCreditsModal({
+                          need:
+                            estimate.requiredCredits -
+                            estimate.availableCredits,
+                        })
+                      }
                       disabled={reEstimating}
                     >
                       {t.shelf.buyCredits}
@@ -2352,11 +2523,12 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
         </div>
       )}
 
-      {/* Credits Purchase Modal */}
-      {showCreditsModal && (
+      {/* Credits Purchase Modal — on top of the upload form when opened
+          from it, which stays as it was underneath. */}
+      {creditsModal && (
         <div
           className="upload-modal-overlay"
-          onClick={() => setShowCreditsModal(false)}
+          onClick={() => !buyingPackageId && setCreditsModal(null)}
         >
           <div
             className="upload-modal-content credits-modal"
@@ -2370,31 +2542,47 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
               <strong>{credits?.toLocaleString() ?? '—'}</strong>{' '}
               {t.creditsModal.creditsSuffix}
             </p>
+            {creditsModal.need !== null && creditsModal.need > 0 && (
+              <p className="credits-need">
+                {t.creditsModal.needMore(creditsModal.need.toLocaleString())}
+              </p>
+            )}
             <div className="credit-packages">
-              {creditPackages.map((pkg) => (
-                <button
-                  key={pkg.id}
-                  className="credit-package"
-                  onClick={() => purchaseCredits(pkg.id)}
-                >
-                  <span className="package-credits">
-                    {pkg.credits.toLocaleString()}
-                  </span>
-                  <span className="package-label">
-                    {t.creditsModal.packageUnit}
-                  </span>
-                  <span className="package-price">
-                    ${(pkg.price / 100).toFixed(2)}
-                  </span>
-                </button>
-              ))}
+              {creditPackages.map((pkg) => {
+                const busy = buyingPackageId === pkg.id;
+                // A package that wouldn't cover this book is faded.
+                const fallsShort =
+                  creditsModal.need !== null && pkg.credits < creditsModal.need;
+                return (
+                  <button
+                    key={pkg.id}
+                    className={`credit-package${
+                      fallsShort ? ' credit-package--short' : ''
+                    }`}
+                    onClick={() => handleBuyPackage(pkg.id)}
+                    disabled={buyingPackageId !== null}
+                    aria-busy={busy}
+                  >
+                    <span className="package-credits">
+                      {pkg.credits.toLocaleString()}
+                    </span>
+                    <span className="package-label">
+                      {t.creditsModal.packageUnit}
+                    </span>
+                    <span className="package-price">
+                      {busy ? <Spinner /> : `$${(pkg.price / 100).toFixed(2)}`}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
             <p className="credits-info">{t.creditsModal.info}</p>
             <div className="uf-actions">
               <button
                 className="uf-btn-quiet"
                 style={{ flex: 1 }}
-                onClick={() => setShowCreditsModal(false)}
+                onClick={() => setCreditsModal(null)}
+                disabled={buyingPackageId !== null}
               >
                 {t.common.cancel}
               </button>

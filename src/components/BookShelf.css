@@ -2080,9 +2080,11 @@
     border-color 0.15s ease;
 }
 
-.credit-package:hover {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: var(--uf-brass);
+@media (hover: hover) {
+  .credit-package:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: var(--uf-brass);
+  }
 }
 
 .package-credits {
@@ -2538,4 +2540,29 @@
   .bookshelf-error-retry:hover {
     background: rgba(216, 178, 113, 0.12);
   }
+}
+
+/* Buy-credits dialog opened from the upload form: how many more credits
+   the book needs, and packages that wouldn't cover it faded. */
+.credits-need {
+  margin: -18px 0 22px;
+  text-align: center;
+  font-size: 0.95rem;
+  color: #e0a48f;
+}
+
+.credit-package--short {
+  opacity: 0.55;
+}
+
+.credit-package:disabled {
+  cursor: default;
+}
+
+.credit-package:disabled:not([aria-busy='true']) {
+  opacity: 0.45;
+}
+
+.credit-package .package-price .ov-spinner-line {
+  color: var(--uf-brass);
 }

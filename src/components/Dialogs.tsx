@@ -7,6 +7,40 @@ import './Dialogs.css';
 // shelf's paper cards. Both come as hooks that return a function to call and
 // an element to render, so a screen needs no provider to use them.
 
+// Open dialogs, oldest first. Escape closes only the newest one, so a
+// dialog opened on top of another (buy credits over the upload form, a
+// confirm over a book card) never takes the one underneath with it.
+const escapeLayers: Array<() => void> = [];
+
+function onEscapeKey(e: KeyboardEvent) {
+  if (e.key !== 'Escape' || escapeLayers.length === 0) return;
+  // Capture phase on document, so the menus and panels underneath that
+  // listen for Escape themselves don't also close.
+  e.stopPropagation();
+  escapeLayers[escapeLayers.length - 1]();
+}
+
+/** Register an open dialog: Escape calls `onEscape` while it is the newest
+ *  open one. Pass `active: false` to leave the stack (e.g. while busy). */
+export function useEscapeLayer(onEscape: () => void, active = true) {
+  const handlerRef = useRef(onEscape);
+  handlerRef.current = onEscape;
+  useEffect(() => {
+    if (!active) return;
+    const layer = () => handlerRef.current();
+    escapeLayers.push(layer);
+    if (escapeLayers.length === 1) {
+      document.addEventListener('keydown', onEscapeKey, true);
+    }
+    return () => {
+      escapeLayers.splice(escapeLayers.indexOf(layer), 1);
+      if (escapeLayers.length === 0) {
+        document.removeEventListener('keydown', onEscapeKey, true);
+      }
+    };
+  }, [active]);
+}
+
 export interface ConfirmOptions {
   title: string;
   message?: string;
@@ -30,26 +64,15 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
 }) => {
   const { t } = useI18n();
   const cancelRef = useRef<HTMLButtonElement>(null);
+  useEscapeLayer(onCancel);
 
   useEffect(() => {
     // Focus starts on Cancel, so Enter never confirms a destructive action
     // by accident; focus goes back where it was when the dialog closes.
     const previous = document.activeElement as HTMLElement | null;
     cancelRef.current?.focus();
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        onCancel();
-      }
-    };
-    // Capture phase: the dialog sits on top, so it answers Escape before
-    // whatever is underneath (a book panel, a menu) does.
-    document.addEventListener('keydown', onKey, true);
-    return () => {
-      document.removeEventListener('keydown', onKey, true);
-      previous?.focus?.();
-    };
-  }, [onCancel]);
+    return () => previous?.focus?.();
+  }, []);
 
   return (
     <div className="ov-dialog-overlay" onClick={onCancel}>

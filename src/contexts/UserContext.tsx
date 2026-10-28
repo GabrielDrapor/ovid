@@ -16,11 +16,21 @@ export interface CreditPackage {
   name: string;
 }
 
+/** What happened to a Stripe checkout the user just came back from. */
+export type PaymentNotice =
+  | { kind: 'added'; creditsAdded?: number }
+  // Paid but not confirmed yet (slow payment method, or verifying failed):
+  // the webhook adds the credits shortly.
+  | { kind: 'pending' }
+  | { kind: 'cancelled' };
+
 interface UserContextType {
   user: User | null;
   loading: boolean;
   credits: number | null;
   creditPackages: CreditPackage[];
+  paymentNotice: PaymentNotice | null;
+  clearPaymentNotice: () => void;
   login: () => void;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
@@ -39,6 +49,8 @@ export const UserProvider: React.FC<UserProviderProps> = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [credits, setCredits] = useState<number | null>(null);
   const [creditPackages, setCreditPackages] = useState<CreditPackage[]>([]);
+  const [paymentNotice, setPaymentNotice] = useState<PaymentNotice | null>(null);
+  const clearPaymentNotice = useCallback(() => setPaymentNotice(null), []);
 
   const refreshCredits = useCallback(async () => {
     try {
@@ -84,20 +96,21 @@ export const UserProvider: React.FC<UserProviderProps> = ({ children }) => {
           const data = await response.json() as { success: boolean; credits?: number; creditsAdded?: number };
           if (data.success && data.credits !== undefined) {
             setCredits(data.credits);
-            if (data.creditsAdded) {
-              console.log(`Payment verified: ${data.creditsAdded} credits added`);
-            }
+            setPaymentNotice({ kind: 'added', creditsAdded: data.creditsAdded });
+          } else {
+            setPaymentNotice({ kind: 'pending' });
           }
         } catch (error) {
           console.error('Error verifying payment:', error);
           await refreshCredits();
+          setPaymentNotice({ kind: 'pending' });
         }
       };
       verifyPayment();
       // Remove the query params from URL
       window.history.replaceState({}, '', window.location.pathname);
     } else if (payment === 'cancelled') {
-      // Just remove the query param
+      setPaymentNotice({ kind: 'cancelled' });
       window.history.replaceState({}, '', window.location.pathname);
     }
   }, [refreshCredits]);
@@ -141,6 +154,8 @@ export const UserProvider: React.FC<UserProviderProps> = ({ children }) => {
       loading,
       credits,
       creditPackages,
+      paymentNotice,
+      clearPaymentNotice,
       login,
       logout,
       refreshUser,
