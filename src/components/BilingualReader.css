@@ -101,6 +101,8 @@
 
 .reader-skip-link:focus {
   transform: none;
+  outline: 2px solid var(--rt-accent, #8b5a2b);
+  outline-offset: 2px;
 }
 
 .fab-container {
