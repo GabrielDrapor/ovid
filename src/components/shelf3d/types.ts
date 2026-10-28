@@ -46,6 +46,9 @@ export interface ShelfUploadTarget {
   row: number;
   col: number;
   label?: string | null;
+  /** Where the bay sits on the wall as drawn, counted from 1 at the top
+   *  left, so the upload form can name an unlabeled bay. */
+  position?: { row: number; col: number };
 }
 
 export interface ShelfMoveTarget {

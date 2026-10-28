@@ -965,6 +965,8 @@ interface UploadPlaceholderProps {
     hitX: number;
     hitWidth: number;
     width: number;
+    visualRow: number;
+    visualCol: number;
   };
   y: number;
   hidden: boolean;
@@ -1051,6 +1053,7 @@ function UploadPlaceholder({
         row: target.rowCoord,
         col: target.colCoord,
         label: target.label ?? null,
+        position: { row: target.visualRow + 1, col: target.visualCol + 1 },
       });
     },
     [dragDist, hidden, onUpload, target]

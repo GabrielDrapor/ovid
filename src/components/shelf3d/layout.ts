@@ -76,6 +76,9 @@ export interface PlacedUploadTarget {
   /** Invisible hit area covering the usable remaining shelf space. */
   hitX: number;
   hitWidth: number;
+  /** Bay position on the wall as drawn (ring included), 0 = top / left. */
+  visualRow: number;
+  visualCol: number;
 }
 
 export interface PlacedBay {
@@ -505,6 +508,8 @@ function layoutPhysicalSlots(
         width: UPLOAD_PLACEHOLDER_WIDTH,
         hitX: emptyLeft + remaining / 2,
         hitWidth: remaining,
+        visualRow,
+        visualCol,
       });
     }
   }

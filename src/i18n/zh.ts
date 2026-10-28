@@ -106,6 +106,7 @@ export const zh: Messages = {
     creditsUnit: '点数',
     shelfField: '书架',
     selectedShelf: '所选书架',
+    slotPosition: (row: number, col: number) => `第 ${row} 层，第 ${col} 格`,
     modeAria: '上传模式',
     translateThisBook: '翻译这本书',
     bilingualNote: '双语',
@@ -117,7 +118,9 @@ export const zh: Messages = {
     sameLanguageWarning: '源语言与目标语言相同——请修改其一',
     confirmTranslate: '确认并翻译',
     importWithoutTranslation: '不翻译，直接导入',
-    affixHere: '将 epub 附于此处',
+    affixHere: '拖入或点选书籍',
+    acceptedFormats: 'epub · mobi · azw3',
+    unsupportedFile: '只能上传 EPUB、MOBI 或 AZW3 文件',
     languagesNextForm: '语言将在下一张表格中选择',
   },
 
