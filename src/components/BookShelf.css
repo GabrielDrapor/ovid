@@ -2325,6 +2325,76 @@
   }
 }
 
+/* "Add book" in the dock: the same pill as Sign in, a plain plus on
+   phones where the dock has less room. */
+.shelf-add-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 244, 228, 0.24);
+  background: rgba(255, 244, 228, 0.08);
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
+}
+
+@media (hover: hover) {
+  .shelf-add-btn:hover {
+    background: rgba(255, 244, 228, 0.14);
+    border-color: rgba(255, 244, 228, 0.4);
+  }
+}
+
+/* Phones: the dock has no room for the hint, so it sits just above the
+   dock until the first touch. */
+.closet-touch-hint {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .shelf-add-btn {
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    justify-content: center;
+    border-radius: 50%;
+  }
+
+  .shelf-add-label {
+    display: none;
+  }
+
+  .closet-touch-hint {
+    display: block;
+    position: absolute;
+    left: 50%;
+    bottom: calc(76px + env(safe-area-inset-bottom, 0px));
+    transform: translateX(-50%);
+    z-index: 59;
+    margin: 0;
+    padding: 5px 12px;
+    border-radius: 12px;
+    background: rgba(32, 24, 20, 0.46);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    color: rgba(255, 244, 228, 0.78);
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+
+  .shelf-content:has(.closet3d-panel) .closet-touch-hint {
+    display: none;
+  }
+}
+
 /* Email sign-in panel */
 .shelf-signin-dropdown {
   width: 264px;
@@ -2357,6 +2427,14 @@
 }
 
 /* "or continue with email" — hairline rule with a centered label */
+/* Why the sign-in menu opened, when "Add book" opened it. */
+.signin-add-hint {
+  margin: 0 0 12px;
+  color: rgba(255, 250, 240, 0.82);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 .signin-or {
   display: flex;
   align-items: center;
