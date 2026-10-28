@@ -69,28 +69,14 @@ afterEach(() => {
   delete (window as any).matchMedia;
 });
 
-describe('chapter navigation buttons', () => {
-  it('name the neighbouring chapters in the language on the page', () => {
-    render(<BilingualReaderV2 {...baseProps} />);
-    expect(
-      screen.getByRole('button', { name: /Previous chapter.*Chapter 1/ })
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: /Next chapter.*Chapter 3/ })
-    ).toBeInTheDocument();
-  });
-
-  it('use the translated titles while the translation is shown', () => {
-    render(<BilingualReaderV2 {...baseProps} initialShowOriginal={false} />);
-    expect(
-      screen.getByRole('button', { name: /Next chapter.*第3章/ })
-    ).toBeInTheDocument();
-  });
-
-  it('load the next chapter', () => {
+describe('chapter navigation', () => {
+  // The ↶ / ↷ arrows stay as they are for now (UX review item 6 is on hold).
+  it('loads the next chapter from the arrow at the end', () => {
     const onLoadChapter = vi.fn();
     render(<BilingualReaderV2 {...baseProps} onLoadChapter={onLoadChapter} />);
-    fireEvent.click(screen.getByRole('button', { name: /Next chapter/ }));
+    fireEvent.click(
+      screen.getByRole('button', { name: en.reader.nextChapter })
+    );
     expect(onLoadChapter).toHaveBeenCalledWith(3);
   });
 });

@@ -777,101 +777,58 @@ h3.chapter-text {
   color: var(--rt-text-muted, #8a8171);
 }
 
-/* Chapter navigation: a quiet link back to the previous chapter at the top,
-   and a card naming the next chapter at the end. */
+/* Chapter Navigation Buttons */
 .chapter-navigation-top {
   display: flex;
-  margin-bottom: 32px;
+  justify-content: flex-start;
+  align-items: center;
+  margin-bottom: 40px;
+  padding-bottom: 20px;
 }
 
 .chapter-navigation-bottom {
-  margin-top: 56px;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  margin-top: 60px;
+  padding-top: 40px;
 }
 
-.chapter-nav {
+.nav-button {
+  background-color: transparent;
   border: none;
-  background: none;
-  padding: 0;
-  cursor: pointer;
-  text-align: left;
+  font-size: 36px;
+  font-weight: 900;
+  /* The glyph maxes out at weight 900, so the extra heft comes from a
+     same-color stroke — readers reported the thin arrows read as
+     decoration rather than a control. */
+  -webkit-text-stroke: 1px currentColor;
   color: var(--rt-text-muted, #8a8171);
+  cursor: pointer;
   transition:
     color 0.15s ease,
-    background-color 0.15s ease;
-}
-
-/* The reader sets line-height on everything inside it; these are UI, not
-   body text. */
-.reader-content-v2 .chapter-nav,
-.reader-content-v2 .chapter-nav * {
-  line-height: 1.4 !important;
-}
-
-.chapter-nav-prev {
+    opacity 0.15s ease;
+  text-decoration: none;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  max-width: 100%;
-  min-height: 44px;
-  font-size: 14px;
+  justify-content: center;
+  padding: 8px;
 }
 
-.chapter-nav-prev .chapter-nav-title {
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.chapter-nav-prev .chapter-nav-title::before {
-  content: '·';
-  margin-right: 6px;
-}
-
-.chapter-nav-next {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  width: 100%;
-  padding: 16px 20px;
-  border: 1px solid var(--rt-border, #e6dfcc);
-  border-radius: 12px;
-}
-
-.chapter-nav-text {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-}
-
-.chapter-nav-next .chapter-nav-label {
-  font-size: 13px;
-}
-
-.chapter-nav-next .chapter-nav-title {
-  font-size: 17px;
+.nav-button:hover {
   color: var(--rt-text, #2f2a21);
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  overflow: hidden;
 }
 
-@media (hover: hover) {
-  .chapter-nav-prev:hover {
-    color: var(--rt-text, #2f2a21);
-  }
-
-  .chapter-nav-next:hover {
-    background-color: var(--rt-surface-alt, #f2edde);
-    color: var(--rt-text, #2f2a21);
-  }
-}
-
-.chapter-nav:active {
+.nav-button:active {
   opacity: 0.65;
+}
+
+.prev-button {
+  margin-right: auto;
+}
+
+.next-button {
+  margin-left: auto;
 }
 
 @media (max-width: 768px) {
@@ -942,15 +899,22 @@ h3.chapter-text {
   }
 
   .chapter-navigation-top {
-    margin-bottom: 20px;
+    margin-bottom: 24px;
+    padding-bottom: 12px;
+    justify-content: flex-start;
   }
 
   .chapter-navigation-bottom {
-    margin-top: 40px;
+    margin-top: 30px;
+    padding-top: 24px;
+    justify-content: flex-end;
   }
 
-  .chapter-nav-next {
-    padding: 14px 16px;
+  .nav-button {
+    font-size: 36px;
+    padding: 12px;
+    min-width: 48px;
+    min-height: 48px;
   }
 
   .chapters-content {

@@ -1273,16 +1273,6 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
     }
   }, [currentChapter, isLoading, totalChapters, navigateWithTransition]);
 
-  // A neighbouring chapter's title for the previous / next buttons, in the
-  // language the page is showing.
-  const chapterTitle = (chapterNumber: number) => {
-    const ch = chapters.find((c) => c.chapter_number === chapterNumber);
-    if (!ch) return '';
-    return showOriginal
-      ? ch.original_title || ch.title
-      : ch.title || ch.original_title;
-  };
-
   const scrollToChapter = (chapterNumber: number) => {
     navigateWithTransition(chapterNumber);
     setIsChaptersOpen(false);
@@ -1488,17 +1478,12 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
         {!isLoading && currentChapter > 1 && (
           <div className="chapter-navigation-top">
             <button
-              type="button"
-              className="chapter-nav chapter-nav-prev"
+              className="nav-button prev-button"
               onClick={goToPreviousChapter}
+              title={t.reader.prevChapter}
+              aria-label={t.reader.prevChapter}
             >
-              <Icon name="arrow-left" />
-              <span className="chapter-nav-label">{t.reader.prevChapter}</span>
-              {chapterTitle(currentChapter - 1) && (
-                <span className="chapter-nav-title">
-                  {chapterTitle(currentChapter - 1)}
-                </span>
-              )}
+              ↶
             </button>
           </div>
         )}
@@ -1542,21 +1527,12 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
         {!isLoading && currentChapter < totalChapters && (
           <div className="chapter-navigation-bottom">
             <button
-              type="button"
-              className="chapter-nav chapter-nav-next"
+              className="nav-button next-button"
               onClick={goToNextChapter}
+              title={t.reader.nextChapter}
+              aria-label={t.reader.nextChapter}
             >
-              <span className="chapter-nav-text">
-                <span className="chapter-nav-label">
-                  {t.reader.nextChapter}
-                </span>
-                {chapterTitle(currentChapter + 1) && (
-                  <span className="chapter-nav-title">
-                    {chapterTitle(currentChapter + 1)}
-                  </span>
-                )}
-              </span>
-              <Icon name="arrow-right" size={20} />
+              ↷
             </button>
           </div>
         )}
