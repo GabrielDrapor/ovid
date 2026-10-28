@@ -4,7 +4,17 @@ import { READER_THEMES, themeCssVars } from '../reader/themes';
 import { READER_FONTS, DEFAULT_FONT_ID, fontStack } from '../reader/fonts';
 import { useReaderTheme } from '../reader/useReaderTheme';
 import { Icon, Spinner } from './Icon';
+import {
+  hasOpenLayer,
+  useConfirm,
+  useEscapeLayer,
+  useFocusReturn,
+  useScrollLock,
+} from './Dialogs';
+import ReaderShare from './ReaderShare';
 import './BilingualReader.css';
+
+type MenuPage = 'main' | 'typography' | 'share';
 
 interface Chapter {
   id: number;
@@ -292,17 +302,20 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
   const [markCompleteError, setMarkCompleteError] = useState<string | null>(
     null
   );
-  const [isTypographyOpen, setIsTypographyOpen] = useState(false);
-  const [isSharing, setIsSharing] = useState(false);
-  // Going back from the typography page removes the focused back button;
-  // focus then returns to the Typography item that opened the page.
-  const typographyToggleRef = useRef<HTMLButtonElement>(null);
-  const backFromTypographyRef = useRef(false);
+  // The menu shows its main list, or one page that replaces it.
+  const [menuPage, setMenuPage] = useState<MenuPage>('main');
+  // Going back from a page removes the focused back button; focus then
+  // returns to the item that opened the page.
+  const pageToggleRefs = useRef<Partial<Record<MenuPage, HTMLElement | null>>>(
+    {}
+  );
+  const backFromPageRef = useRef<MenuPage | null>(null);
   useEffect(() => {
-    if (isTypographyOpen || !backFromTypographyRef.current) return;
-    backFromTypographyRef.current = false;
-    typographyToggleRef.current?.focus();
-  }, [isTypographyOpen]);
+    if (menuPage !== 'main' || !backFromPageRef.current) return;
+    pageToggleRefs.current[backFromPageRef.current]?.focus();
+    backFromPageRef.current = null;
+  }, [menuPage]);
+  const [confirm, confirmDialog] = useConfirm();
 
   // In-book full-text search (original + translation)
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -310,9 +323,16 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [searchHasMore, setSearchHasMore] = useState(false);
   const [searchLoading, setSearchLoading] = useState(false);
+  const [searchLoadingMore, setSearchLoadingMore] = useState(false);
+  // Which request failed: the search itself, or the next page of results.
+  const [searchError, setSearchError] = useState<'search' | 'more' | null>(
+    null
+  );
+  // Bumped by "Try again" to run the same search once more.
+  const [searchAttempt, setSearchAttempt] = useState(0);
   // Query string the current results answer — '' means "nothing searched yet"
   const [searchedFor, setSearchedFor] = useState('');
-  // Guards the results list's scroll handler against parallel page fetches
+  // Guards against parallel page fetches (scrolling and the button)
   const searchLoadingMoreRef = useRef(false);
   // When a search-result jump lands, force the target paragraph to show the
   // language the match was found in. Keyed by xpath so a stale entry can't
@@ -341,6 +361,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
   useEffect(() => {
     if (!isSearchOpen || !bookUuid) return;
     const q = searchQuery.trim();
+    setSearchError(null);
     if (!q) {
       setSearchResults([]);
       setSearchHasMore(false);
@@ -359,9 +380,12 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
         setSearchLoading(false);
       } catch (err) {
         // Aborted requests are expected when typing continues; anything else
-        // ends the loading state so the user isn't stuck on a spinner.
+        // ends the loading state and says so, with a way to try again.
         if (!(err instanceof DOMException && err.name === 'AbortError')) {
           console.error('Search failed:', err);
+          setSearchResults([]);
+          setSearchHasMore(false);
+          setSearchError('search');
           setSearchLoading(false);
         }
       }
@@ -370,27 +394,37 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
       clearTimeout(timer);
       controller.abort();
     };
-  }, [isSearchOpen, searchQuery, bookUuid, fetchSearchPage]);
+  }, [isSearchOpen, searchQuery, bookUuid, fetchSearchPage, searchAttempt]);
 
-  // Lazy-load the next page when the results list scrolls near its bottom
+  const loadMoreSearchResults = useCallback(async () => {
+    if (!searchHasMore || searchLoadingMoreRef.current || !searchedFor) return;
+    searchLoadingMoreRef.current = true;
+    setSearchLoadingMore(true);
+    setSearchError(null);
+    try {
+      const data = await fetchSearchPage(searchedFor, searchResults.length);
+      setSearchResults((prev) => [...prev, ...data.results]);
+      setSearchHasMore(data.hasMore);
+    } catch (err) {
+      console.error('Search load-more failed:', err);
+      setSearchError('more');
+    } finally {
+      searchLoadingMoreRef.current = false;
+      setSearchLoadingMore(false);
+    }
+  }, [searchHasMore, searchedFor, searchResults.length, fetchSearchPage]);
+
+  // Lazy-load the next page when the results list scrolls near its bottom;
+  // the "Show more results" button does the same for keyboards and lists
+  // too short to scroll. After a failed page, only the button retries.
   const handleSearchListScroll = useCallback(
-    async (e: React.UIEvent<HTMLDivElement>) => {
+    (e: React.UIEvent<HTMLDivElement>) => {
       const el = e.currentTarget;
       if (el.scrollTop + el.clientHeight < el.scrollHeight - 200) return;
-      if (!searchHasMore || searchLoadingMoreRef.current || !searchedFor)
-        return;
-      searchLoadingMoreRef.current = true;
-      try {
-        const data = await fetchSearchPage(searchedFor, searchResults.length);
-        setSearchResults((prev) => [...prev, ...data.results]);
-        setSearchHasMore(data.hasMore);
-      } catch (err) {
-        console.error('Search load-more failed:', err);
-      } finally {
-        searchLoadingMoreRef.current = false;
-      }
+      if (searchError === 'more') return;
+      loadMoreSearchResults();
     },
-    [searchHasMore, searchedFor, searchResults.length, fetchSearchPage]
+    [loadMoreSearchResults, searchError]
   );
 
   useEffect(() => {
@@ -419,7 +453,6 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
     fontSize,
     fontFamily,
   ]);
-  const [shareCopied, setShareCopied] = useState(false);
   const [showOnboardingTooltip, setShowOnboardingTooltip] = useState(false);
 
   // Store element references for toggling
@@ -1164,13 +1197,58 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
     };
   }, [translationsReady, initialXpath]);
 
-  // Closing the menu also leaves the typography page, so it reopens on the
-  // main list.
+  // Closing the menu also leaves any page of it, so it reopens on the main
+  // list.
   const closeMenu = () => {
     setIsMenuOpen(false);
-    setIsTypographyOpen(false);
+    setMenuPage('main');
   };
   const toggleMenu = () => (isMenuOpen ? closeMenu() : setIsMenuOpen(true));
+
+  // Escape closes the newest open layer only (a confirm over the menu, the
+  // note popover, the contents or search panel, the menu).
+  useEscapeLayer(closeMenu, isMenuOpen);
+  useEscapeLayer(() => setIsChaptersOpen(false), isChaptersOpen);
+  useEscapeLayer(() => setIsSearchOpen(false), isSearchOpen);
+  useEscapeLayer(() => setNotePopover(null), notePopover !== null);
+
+  // Focus moves into each layer when it opens and back when it closes. The
+  // contents and search panels and the note popover are modal: Tab stays
+  // inside, and the page behind them doesn't scroll.
+  const fabRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const chaptersPanelRef = useRef<HTMLDivElement>(null);
+  const searchPanelRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const notePopoverRef = useRef<HTMLDivElement>(null);
+  const backToFab = () => fabRef.current;
+  useFocusReturn(menuRef, isMenuOpen, { fallback: backToFab });
+  useFocusReturn(chaptersPanelRef, isChaptersOpen, {
+    initial: () =>
+      chaptersPanelRef.current?.querySelector<HTMLElement>(
+        '.chapter-item.active'
+      ),
+    fallback: backToFab,
+    trap: true,
+  });
+  useFocusReturn(searchPanelRef, isSearchOpen, {
+    initial: () => searchInputRef.current,
+    fallback: backToFab,
+    trap: true,
+  });
+  useFocusReturn(notePopoverRef, notePopover !== null, { trap: true });
+  useScrollLock(isChaptersOpen || isSearchOpen || notePopover !== null);
+
+  // The contents panel opens scrolled to the current chapter.
+  useEffect(() => {
+    const list = chaptersPanelRef.current?.querySelector('.chapters-list');
+    const active = list?.querySelector('.chapter-item.active');
+    if (!isChaptersOpen || !list || !active) return;
+    const listBox = list.getBoundingClientRect();
+    const itemBox = active.getBoundingClientRect();
+    list.scrollTop +=
+      itemBox.top - listBox.top - (listBox.height - itemBox.height) / 2;
+  }, [isChaptersOpen]);
 
   const resetTypography = () => {
     setFontSize(TYPOGRAPHY_STEPS.fontSize.def);
@@ -1280,12 +1358,13 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
   };
 
   // Keyboard navigation: ArrowLeft = previous chapter, ArrowRight = next chapter.
-  // Skip when a menu is open or focus is on an editable field.
+  // Skip while a menu, panel, popover or dialog is open, or focus is on an
+  // editable field.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
-      if (isMenuOpen || isChaptersOpen || isTypographyOpen) return;
+      if (hasOpenLayer()) return;
       const target = e.target as HTMLElement | null;
       if (target) {
         const tag = target.tagName;
@@ -1304,13 +1383,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [
-    goToPreviousChapter,
-    goToNextChapter,
-    isMenuOpen,
-    isChaptersOpen,
-    isTypographyOpen,
-  ]);
+  }, [goToPreviousChapter, goToNextChapter]);
 
   // iOS Safari standalone PWA: position:fixed anchors to the layout viewport, so when the
   // visual viewport shifts during scroll (toolbar show/hide, rubber-band overscroll) the FAB
@@ -1333,6 +1406,25 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
       vv.removeEventListener('scroll', update);
     };
   }, []);
+
+  // Header of a menu page: back to the main list, and the page's title.
+  const menuPageHeader = (page: MenuPage, title: string) => (
+    <div className="fab-page-header">
+      <button
+        type="button"
+        className="fab-page-back"
+        aria-label={t.common.back}
+        autoFocus
+        onClick={() => {
+          backFromPageRef.current = page;
+          setMenuPage('main');
+        }}
+      >
+        <Icon name="chevron-left" size={18} />
+      </button>
+      <span className="fab-page-title">{title}</span>
+    </div>
+  );
 
   return (
     <div
@@ -1546,8 +1638,10 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
             onClick={() => setNotePopover(null)}
           />
           <div
+            ref={notePopoverRef}
             className="note-popover"
             role="dialog"
+            aria-modal="true"
             aria-label={`${t.reader.note} ${notePopover.label}`}
           >
             <div className="note-popover-header">
@@ -1629,30 +1723,22 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
       <div className="fab-container">
         {/* Backdrop for mobile bottom sheet */}
         {isMenuOpen && <div className="fab-backdrop" onClick={closeMenu} />}
-        <button className="fab" onClick={toggleMenu} aria-label={t.reader.menu}>
+        <button
+          ref={fabRef}
+          className="fab"
+          onClick={toggleMenu}
+          aria-label={t.reader.menu}
+          aria-expanded={isMenuOpen}
+        >
           <span className="fab-dots"></span>
         </button>
         {isMenuOpen && (
-          <div className="fab-menu">
-            {isTypographyOpen ? (
+          <div className="fab-menu" ref={menuRef}>
+            {menuPage === 'typography' ? (
               /* Typography page: replaces the main list instead of growing
                  it, so every setting fits without scrolling the menu. */
               <>
-                <div className="fab-page-header">
-                  <button
-                    type="button"
-                    className="fab-page-back"
-                    aria-label={t.common.back}
-                    autoFocus
-                    onClick={() => {
-                      backFromTypographyRef.current = true;
-                      setIsTypographyOpen(false);
-                    }}
-                  >
-                    <Icon name="chevron-left" size={18} />
-                  </button>
-                  <span className="fab-page-title">{t.reader.typography}</span>
-                </div>
+                {menuPageHeader('typography', t.reader.typography)}
                 <div className="fab-typography-panel">
                   <div className="fab-typo-row">
                     <span className="fab-typo-label">{t.reader.font}</span>
@@ -1724,6 +1810,20 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
                     {t.reader.resetToDefault}
                   </button>
                 </div>
+              </>
+            ) : menuPage === 'share' && onShare && onRevokeShare ? (
+              <>
+                {menuPageHeader('share', t.reader.share)}
+                <ReaderShare
+                  url={
+                    shareToken
+                      ? `${window.location.origin}/shared/${shareToken}`
+                      : null
+                  }
+                  onCreate={onShare}
+                  onStop={onRevokeShare}
+                  confirm={confirm}
+                />
               </>
             ) : (
               <>
@@ -1807,61 +1907,25 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
                   <div className="fab-error">{markCompleteError}</div>
                 )}
 
-                {/* Share buttons (owner only) */}
-                {isOwner && onShare && !shareToken && (
+                {/* Share (owner only): opens the Share page */}
+                {isOwner && onShare && onRevokeShare && (
                   <button
-                    className="fab-menu-item"
-                    onClick={async () => {
-                      setIsSharing(true);
-                      try {
-                        await onShare();
-                      } finally {
-                        setIsSharing(false);
-                      }
+                    ref={(el) => {
+                      pageToggleRefs.current.share = el;
                     }}
-                    disabled={isSharing}
+                    className="fab-menu-item"
+                    onClick={() => setMenuPage('share')}
                   >
-                    {isSharing ? <Spinner /> : t.reader.share}
-                  </button>
-                )}
-                {isOwner && shareToken && (
-                  <>
-                    <button
-                      className="fab-menu-item"
-                      onClick={() => {
-                        navigator.clipboard.writeText(
-                          `${window.location.origin}/shared/${shareToken}`
-                        );
-                        setShareCopied(true);
-                        setTimeout(() => setShareCopied(false), 2000);
-                      }}
-                    >
-                      {shareCopied ? (
-                        <span className="fab-menu-label">
-                          <Icon name="check" />
-                          {t.reader.copied}
+                    <span>{t.reader.share}</span>
+                    <span className="fab-chevron">
+                      {shareToken && (
+                        <span className="fab-menu-meta">
+                          {t.reader.shareOn}
                         </span>
-                      ) : (
-                        t.reader.copyShareLink
                       )}
-                    </button>
-                    <button
-                      className="fab-menu-item"
-                      onClick={async () => {
-                        if (onRevokeShare) {
-                          setIsSharing(true);
-                          try {
-                            await onRevokeShare();
-                          } finally {
-                            setIsSharing(false);
-                          }
-                        }
-                      }}
-                      disabled={isSharing}
-                    >
-                      {isSharing ? <Spinner /> : t.reader.revokeShare}
-                    </button>
-                  </>
+                      <Icon name="chevron-right" />
+                    </span>
+                  </button>
                 )}
 
                 {/* Divider */}
@@ -1911,9 +1975,11 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
                 </div>
 
                 <button
-                  ref={typographyToggleRef}
+                  ref={(el) => {
+                    pageToggleRefs.current.typography = el;
+                  }}
                   className="fab-menu-item"
-                  onClick={() => setIsTypographyOpen(true)}
+                  onClick={() => setMenuPage('typography')}
                 >
                   <span>{t.reader.typography}</span>
                   <span className="fab-chevron">
@@ -1925,12 +1991,18 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
           </div>
         )}
 
-        {/* Chapters Modal */}
+        {/* Contents panel */}
         {isChaptersOpen && (
           <div className="chapters-modal">
-            <div className="chapters-content">
+            <div
+              ref={chaptersPanelRef}
+              className="chapters-content"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="reader-contents-title"
+            >
               <div className="chapters-header">
-                <h3>{t.reader.contents}</h3>
+                <h3 id="reader-contents-title">{t.reader.contents}</h3>
                 <button
                   className="chapters-close"
                   aria-label={t.common.close}
@@ -1944,6 +2016,11 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
                   <button
                     key={chapter.id}
                     className={`chapter-item ${currentChapter === chapter.chapter_number ? 'active' : ''}`}
+                    aria-current={
+                      currentChapter === chapter.chapter_number
+                        ? 'true'
+                        : undefined
+                    }
                     onClick={() => scrollToChapter(chapter.chapter_number)}
                   >
                     <div className="chapter-number">
@@ -1970,9 +2047,15 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
 
         {isSearchOpen && (
           <div className="chapters-modal">
-            <div className="chapters-content">
+            <div
+              ref={searchPanelRef}
+              className="chapters-content"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="reader-search-title"
+            >
               <div className="chapters-header">
-                <h3>{t.reader.search}</h3>
+                <h3 id="reader-search-title">{t.reader.search}</h3>
                 <button
                   className="chapters-close"
                   aria-label={t.common.close}
@@ -1983,11 +2066,12 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
               </div>
               <div className="search-input-row">
                 <input
+                  ref={searchInputRef}
                   type="search"
                   className="search-input"
                   value={searchQuery}
                   placeholder={t.reader.searchPlaceholder}
-                  autoFocus
+                  aria-label={t.reader.search}
                   onChange={(e) => setSearchQuery(e.target.value)}
                 />
               </div>
@@ -1996,15 +2080,38 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
                 onScroll={handleSearchListScroll}
               >
                 {searchLoading && (
-                  <div className="search-status">{t.reader.searching}</div>
+                  <div className="search-status" role="status">
+                    {t.reader.searching}
+                  </div>
+                )}
+                {!searchLoading && searchError === 'search' && (
+                  <div className="search-status search-status-error">
+                    <span role="alert">{t.reader.searchFailed}</span>
+                    <button
+                      type="button"
+                      className="search-action"
+                      onClick={() => setSearchAttempt((n) => n + 1)}
+                    >
+                      {t.errors.tryAgain}
+                    </button>
+                  </div>
                 )}
                 {!searchLoading &&
+                  !searchError &&
                   searchedFor &&
                   searchResults.length === 0 && (
-                    <div className="search-status">
+                    <div className="search-status" role="status">
                       {t.reader.searchNoResults}
                     </div>
                   )}
+                {!searchLoading && searchResults.length > 0 && (
+                  <div className="search-count" role="status">
+                    {t.reader.searchResultCount(
+                      searchResults.length,
+                      searchHasMore
+                    )}
+                  </div>
+                )}
                 {searchResults.map((r, i) => (
                   <button
                     key={`${r.chapter}-${r.xpath}-${i}`}
@@ -2026,9 +2133,32 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
                     </div>
                   </button>
                 ))}
-                {searchHasMore && (
-                  <div className="search-status">{t.reader.searching}</div>
-                )}
+                {searchHasMore &&
+                  !searchLoading &&
+                  (searchLoadingMore ? (
+                    <div className="search-status" role="status">
+                      {t.reader.searching}
+                    </div>
+                  ) : searchError === 'more' ? (
+                    <div className="search-status search-status-error">
+                      <span role="alert">{t.reader.searchMoreFailed}</span>
+                      <button
+                        type="button"
+                        className="search-action"
+                        onClick={loadMoreSearchResults}
+                      >
+                        {t.errors.tryAgain}
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      className="search-more"
+                      onClick={loadMoreSearchResults}
+                    >
+                      {t.reader.showMoreResults}
+                    </button>
+                  ))}
               </div>
             </div>
             <div
@@ -2038,6 +2168,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
           </div>
         )}
       </div>
+      {confirmDialog}
     </div>
   );
 };

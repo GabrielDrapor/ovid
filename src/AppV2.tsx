@@ -531,14 +531,9 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
       method: 'POST',
     });
     if (response.ok) {
-      const data = (await response.json()) as { token: string; url: string };
+      // The reader's Share page shows the new link with a Copy button.
+      const data = (await response.json()) as { token: string };
       setShareToken(data.token);
-      // Auto-copy to clipboard
-      try {
-        await navigator.clipboard.writeText(data.url);
-      } catch {
-        /* clipboard may fail */
-      }
     } else {
       throw new Error(t.book.createShareFailed);
     }
