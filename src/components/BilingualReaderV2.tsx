@@ -16,6 +16,77 @@ import './BilingualReader.css';
 
 type MenuPage = 'main' | 'typography' | 'share';
 
+// A pointer that moves further than this between press and release was
+// dragging (selecting), not tapping.
+const DRAG_PX = 5;
+// Longest gap between the two clicks of a double-click that we undo.
+const DOUBLE_CLICK_MS = 600;
+
+/** True when the current text selection reaches into `el`. */
+export function hasSelectionIn(el: HTMLElement): boolean {
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed || sel.rangeCount === 0) return false;
+  return sel.getRangeAt(0).intersectsNode(el);
+}
+
+/** Select the word under a point, as a double-click does. Words come from
+ *  Intl.Segmenter, so Chinese and Japanese split into words too; without
+ *  it, the character under the point is selected. */
+export function selectWordAt(x: number, y: number) {
+  const doc = document as any;
+  let node: Node | null = null;
+  let offset = 0;
+  if (doc.caretPositionFromPoint) {
+    const pos = doc.caretPositionFromPoint(x, y);
+    if (pos) {
+      node = pos.offsetNode;
+      offset = pos.offset;
+    }
+  } else if (doc.caretRangeFromPoint) {
+    const range: Range | null = doc.caretRangeFromPoint(x, y);
+    if (range) {
+      node = range.startContainer;
+      offset = range.startOffset;
+    }
+  }
+  if (!node || node.nodeType !== Node.TEXT_NODE) return;
+  const text = node.textContent || '';
+  if (!text) return;
+  // The caret sits between characters; take the character whose box holds
+  // the point (the one after the caret, or else the one before it).
+  const charBox = (i: number) => {
+    const r = document.createRange();
+    r.setStart(node!, i);
+    r.setEnd(node!, i + 1);
+    return r.getBoundingClientRect();
+  };
+  let i = Math.min(offset, text.length - 1);
+  const box = charBox(i);
+  if (i > 0 && !(x >= box.left && x <= box.right)) i -= 1;
+
+  let start = i;
+  let end = i + 1;
+  const Segmenter = (Intl as any).Segmenter;
+  if (Segmenter) {
+    for (const seg of new Segmenter(undefined, { granularity: 'word' }).segment(
+      text
+    )) {
+      if (i >= seg.index && i < seg.index + seg.segment.length) {
+        if (!seg.isWordLike) return;
+        start = seg.index;
+        end = seg.index + seg.segment.length;
+        break;
+      }
+    }
+  }
+  const range = document.createRange();
+  range.setStart(node, start);
+  range.setEnd(node, end);
+  const sel = window.getSelection();
+  sel?.removeAllRanges();
+  sel?.addRange(range);
+}
+
 interface Chapter {
   id: number;
   chapter_number: number;
@@ -585,13 +656,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
           noteRefChunks: collectNoteRefChunks(el as HTMLElement),
         });
 
-        // Make element clickable
-        (el as HTMLElement).setAttribute('data-bilingual', 'true');
-        (el as HTMLElement).style.cursor = 'pointer';
-        el.addEventListener('click', (e) => {
-          e.stopPropagation();
-          toggleElement(xpath);
-        });
+        makeToggleable(el as HTMLElement, xpath);
       });
 
       // Set initial state and return early
@@ -636,13 +701,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
             noteRefChunks: collectNoteRefChunks(el),
           });
 
-          // Make element clickable
-          el.setAttribute('data-bilingual', 'true');
-          el.style.cursor = 'pointer';
-          el.addEventListener('click', (e) => {
-            e.stopPropagation();
-            toggleElement(xpath);
-          });
+          makeToggleable(el, xpath);
 
           // Don't recurse into matched block elements
           return;
@@ -677,6 +736,48 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
     // Initialize elements to match the current showOriginal state
     updateAllElements(showOriginalRef.current);
   }, [translations]);
+
+  /**
+   * Make a paragraph switch language on a tap or click, or on Enter when it
+   * has keyboard focus. Selecting text is not a tap: a click that ends a
+   * drag or leaves a selection in the paragraph switches nothing, so the
+   * selection can be copied. A double-click selects a word as usual: its
+   * first click already switched the paragraph, so the second switches it
+   * back and selects the word under the pointer.
+   */
+  const makeToggleable = (el: HTMLElement, xpath: string) => {
+    el.setAttribute('data-bilingual', 'true');
+    el.style.cursor = 'pointer';
+    el.tabIndex = 0;
+    let downAt: { x: number; y: number } | null = null;
+    let lastToggle = 0;
+    el.addEventListener('pointerdown', (e) => {
+      downAt = { x: e.clientX, y: e.clientY };
+    });
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (e.detail === 2) {
+        if (Date.now() - lastToggle > DOUBLE_CLICK_MS) return;
+        lastToggle = 0;
+        toggleElement(xpath);
+        selectWordAt(e.clientX, e.clientY);
+        return;
+      }
+      if (e.detail > 2 || hasSelectionIn(el)) return;
+      if (
+        downAt &&
+        Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) > DRAG_PX
+      )
+        return;
+      lastToggle = Date.now();
+      toggleElement(xpath);
+    });
+    el.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' || e.target !== el) return;
+      e.preventDefault();
+      toggleElement(xpath);
+    });
+  };
 
   /**
    * Toggle text in a specific element by xpath
@@ -1431,6 +1532,15 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
       className="bilingual-reader"
       style={themeCssVars(theme) as React.CSSProperties}
     >
+      {/* First keyboard stop: every paragraph can take focus (Enter switches
+          its language), so this goes straight to the menu button. */}
+      <button
+        type="button"
+        className="reader-skip-link"
+        onClick={() => fabRef.current?.focus()}
+      >
+        {t.reader.skipToMenu}
+      </button>
       {/* Inject EPUB CSS styles — scoped to .epub-content to prevent leaking */}
       {styles && (
         <style dangerouslySetInnerHTML={{ __html: scopeEpubStyles(styles) }} />
@@ -1466,6 +1576,14 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
         .reader-content-v2 [data-bilingual] {
           cursor: pointer;
           transition: background-color 0.2s;
+        }
+        .reader-content-v2 [data-bilingual]:focus {
+          outline: none;
+        }
+        .reader-content-v2 [data-bilingual]:focus-visible {
+          outline: 2px solid var(--rt-accent, #8b5a2b);
+          outline-offset: 4px;
+          border-radius: 2px;
         }
         /* Hover tint only where there is a real pointer: on touch screens
            it would stick to the last tapped paragraph. */
