@@ -112,7 +112,7 @@ describe('Reader icon buttons', () => {
     }
   });
 
-  it('marks a read book with a check icon rather than a ✓ character', () => {
+  it('shows the read state as a switch with no ✓ character', () => {
     render(
       <BilingualReaderV2
         {...baseProps}
@@ -122,8 +122,8 @@ describe('Reader icon buttons', () => {
     );
     openMenu();
 
-    const item = screen.getByRole('button', { name: en.reader.markedRead });
-    expect(item.querySelector('svg')).toBeInTheDocument();
+    const item = screen.getByRole('switch', { name: en.reader.markAsRead });
+    expect(item).toHaveAttribute('aria-checked', 'true');
     expect(item).not.toHaveTextContent('✓');
   });
 
@@ -135,7 +135,7 @@ describe('Reader icon buttons', () => {
     );
     openMenu();
 
-    const item = screen.getByRole('button', { name: en.reader.markAsRead });
+    const item = screen.getByRole('switch', { name: en.reader.markAsRead });
     fireEvent.click(item);
 
     await waitFor(() => {

@@ -139,8 +139,10 @@
   top: 7px;
 }
 
-.fab:hover {
-  filter: brightness(1.15);
+@media (hover: hover) {
+  .fab:hover {
+    filter: brightness(1.15);
+  }
 }
 
 .fab-backdrop {
@@ -155,7 +157,9 @@
   border-radius: 12px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
   padding: 8px 0;
-  min-width: 200px;
+  /* Wide enough for six named theme swatches and the three font buttons on
+     one line each. */
+  width: 292px;
   max-height: 70vh;
   overflow-y: auto;
   border: 1px solid var(--rt-border, #e6dfcc);
@@ -176,17 +180,14 @@
   transition: background-color 0.15s ease;
 }
 
-.fab-menu-item:hover {
-  background-color: var(--rt-surface-alt, #f2edde);
+@media (hover: hover) {
+  .fab-menu-item:hover {
+    background-color: var(--rt-surface-alt, #f2edde);
+  }
 }
 
 .fab-menu-item:active {
   background-color: var(--rt-border, #e6dfcc);
-}
-
-.fab-menu-item-completed {
-  color: var(--rt-accent, #8b5a2b);
-  font-weight: 600;
 }
 
 /* Icon + text kept together as one flex child, so the item's
@@ -215,69 +216,118 @@
   padding: 4px 16px;
 }
 
-/* Collapsible section toggle */
-.fab-section-toggle {
-  font-size: 14px;
-  color: var(--rt-text, #2f2a21);
-}
-
+/* Chevron on the Typography item, which opens its own page. */
 .fab-chevron {
   display: inline-flex;
-  transition: transform 0.2s ease;
   font-size: 14px;
   color: var(--rt-text-muted, #8a8171);
 }
 
-.fab-chevron.open {
-  transform: rotate(90deg);
+/* Header of a menu page (Typography): back button + title. */
+.fab-page-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 16px 6px 8px;
+  border-bottom: 1px solid var(--rt-border, #e6dfcc);
+  margin-bottom: 4px;
 }
 
-/* Theme swatch row — label above, swatches below, so the swatch strip
-   never widens the menu. */
+.fab-page-back {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  color: var(--rt-text-muted, #8a8171);
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .fab-page-back:hover {
+    background-color: var(--rt-surface-alt, #f2edde);
+    color: var(--rt-text, #2f2a21);
+  }
+}
+
+.fab-page-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--rt-text, #2f2a21);
+}
+
+/* Theme row — label above, then one swatch per theme with its name under
+   it, so similar light themes can be told apart without hovering. */
 .fab-theme-row {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: stretch;
   gap: 8px;
   padding: 8px 16px;
 }
 
-.fab-theme-swatches {
+.fab-theme-options {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.fab-theme-option {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
+  gap: 5px;
+  min-width: 0;
+  padding: 2px 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--rt-text-muted, #8a8171);
 }
 
 .fab-theme-swatch {
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
   border: 1px solid var(--rt-border, #e6dfcc);
-  font-size: 12px;
-  line-height: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  cursor: pointer;
-  padding: 0;
-  transition:
-    box-shadow 0.15s ease,
-    transform 0.15s ease;
-}
-
-.fab-theme-swatch:hover {
-  transform: scale(1.08);
-}
-
-.fab-theme-swatch.active {
-  box-shadow: 0 0 0 2px var(--rt-accent, #8b5a2b);
+  transition: box-shadow 0.15s ease;
 }
 
 .fab-theme-swatch-auto {
   background: transparent;
   color: var(--rt-text, #2f2a21);
-  font-size: 14px;
+  font-size: 16px;
+}
+
+.fab-theme-name {
+  max-width: 100%;
+  font-size: 11px;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (hover: hover) {
+  .fab-theme-option:hover .fab-theme-swatch {
+    box-shadow: 0 0 0 2px var(--rt-border, #e6dfcc);
+  }
+}
+
+.fab-theme-option.active .fab-theme-swatch {
+  box-shadow: 0 0 0 2px var(--rt-accent, #8b5a2b);
+}
+
+.fab-theme-option.active {
+  color: var(--rt-text, #2f2a21);
+  font-weight: 600;
 }
 
 /* Font family options */
@@ -287,6 +337,7 @@
 }
 
 .fab-font-btn {
+  white-space: nowrap;
   padding: 3px 10px;
   border-radius: 6px;
   border: 1px solid var(--rt-border, #e6dfcc);
@@ -300,8 +351,10 @@
     box-shadow 0.15s ease;
 }
 
-.fab-font-btn:hover {
-  background: var(--rt-surface-alt, #f2edde);
+@media (hover: hover) {
+  .fab-font-btn:hover {
+    background: var(--rt-surface-alt, #f2edde);
+  }
 }
 
 .fab-font-btn.active {
@@ -309,8 +362,11 @@
   background: var(--rt-accent-soft, rgba(139, 90, 43, 0.12));
 }
 
-/* First-line indent switch */
+/* On/off switch: first-line indent, and the read state in the main list
+   (there a span inside the menu item, which is the actual control). */
 .fab-switch {
+  display: inline-block;
+  flex: none;
   position: relative;
   width: 36px;
   height: 20px;
@@ -360,13 +416,12 @@
   font-size: 13px;
   color: var(--rt-text-translated, #4a443a);
   flex-shrink: 0;
-  min-width: 100px;
 }
 
 .fab-typo-value {
   font-size: 12px;
   color: var(--rt-text-muted, #8a8171);
-  min-width: 40px;
+  min-width: 48px;
   text-align: center;
   font-variant-numeric: tabular-nums;
 }
@@ -392,12 +447,20 @@
   transition: all 0.15s ease;
 }
 
-.fab-control-btn:hover {
-  background-color: var(--rt-border, #e6dfcc);
+@media (hover: hover) {
+  .fab-control-btn:hover:not(:disabled) {
+    background-color: var(--rt-border, #e6dfcc);
+  }
 }
 
-.fab-control-btn:active {
+.fab-control-btn:active:not(:disabled) {
   transform: scale(0.9);
+}
+
+/* At the end of a setting's range. */
+.fab-control-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
 }
 
 .fab-reset-btn {
@@ -413,9 +476,11 @@
   transition: all 0.15s;
 }
 
-.fab-reset-btn:hover {
-  background-color: var(--rt-surface-alt, #f2edde);
-  color: var(--rt-text, #2f2a21);
+@media (hover: hover) {
+  .fab-reset-btn:hover {
+    background-color: var(--rt-surface-alt, #f2edde);
+    color: var(--rt-text, #2f2a21);
+  }
 }
 
 .fab-reset-btn:active {
@@ -549,9 +614,11 @@ h3.chapter-text {
   transition: all 0.2s ease;
 }
 
-.chapters-close:hover {
-  background-color: var(--rt-border, #e6dfcc);
-  color: var(--rt-text, #2f2a21);
+@media (hover: hover) {
+  .chapters-close:hover {
+    background-color: var(--rt-border, #e6dfcc);
+    color: var(--rt-text, #2f2a21);
+  }
 }
 
 .chapters-list {
@@ -608,8 +675,10 @@ h3.chapter-text {
   transition: background-color 0.15s ease;
 }
 
-.search-result-item:hover {
-  background-color: var(--rt-surface-alt, #f2edde);
+@media (hover: hover) {
+  .search-result-item:hover {
+    background-color: var(--rt-surface-alt, #f2edde);
+  }
 }
 
 .search-result-chapter {
@@ -648,8 +717,10 @@ h3.chapter-text {
   gap: 12px;
 }
 
-.chapter-item:hover {
-  background-color: var(--rt-surface-alt, #f2edde);
+@media (hover: hover) {
+  .chapter-item:hover {
+    background-color: var(--rt-surface-alt, #f2edde);
+  }
 }
 
 .chapter-item:last-child {
@@ -696,6 +767,14 @@ h3.chapter-text {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Shown in place of the chapter while it loads. */
+.reader-loading-chapter {
+  padding: 20px;
+  text-align: center;
+  font-size: 15px;
+  color: var(--rt-text-muted, #8a8171);
 }
 
 /* Chapter Navigation Buttons */
@@ -879,15 +958,20 @@ sup {
   cursor: pointer;
 }
 
-sup:hover {
-  color: var(--rt-accent, #8b5a2b);
+@media (hover: hover) {
+  sup:hover {
+    color: var(--rt-accent, #8b5a2b);
+  }
 }
 
 /* (removed - completed style now in .fab-completed) */
 
 /* Onboarding tooltip */
+/* Placed in the left margin beside the first paragraph; see
+   .onboarding-tooltip-below for narrow screens. */
 .onboarding-tooltip {
   position: absolute;
+  transform: translateY(-50%);
   background: #1e1e1e;
   color: #fff;
   padding: 12px 18px;
@@ -931,12 +1015,43 @@ sup:hover {
   }
 }
 
+/* No room in the margin (phones, narrow windows): centered under the first
+   paragraph, pointing up at it. */
+.onboarding-tooltip-below {
+  transform: translateX(-50%);
+  max-width: calc(100vw - 32px);
+  white-space: normal;
+  animation-name: onboarding-fade-in-below;
+}
+
+.onboarding-tooltip-below .onboarding-tooltip-arrow {
+  top: -6px;
+  right: auto;
+  left: 50%;
+  transform: translateX(-50%) rotate(45deg);
+}
+
+@keyframes onboarding-fade-in-below {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
 @media (max-width: 768px) {
   .onboarding-tooltip {
-    white-space: normal;
-    max-width: 200px;
     font-size: 14px;
     padding: 10px 14px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .onboarding-tooltip {
+    animation: none;
   }
 }
 
@@ -968,8 +1083,10 @@ sup:hover {
   border-radius: 6px;
 }
 
-.reader-content-v2 a[data-ov-note]:hover {
-  background: var(--rt-accent-soft, rgba(139, 90, 43, 0.1));
+@media (hover: hover) {
+  .reader-content-v2 a[data-ov-note]:hover {
+    background: var(--rt-accent-soft, rgba(139, 90, 43, 0.1));
+  }
 }
 
 /* Landing highlight after a jump (also used by progress restore) */
@@ -1071,9 +1188,11 @@ sup:hover {
   transition: all 0.2s ease;
 }
 
-.note-popover-close:hover {
-  background-color: var(--rt-border, #e6dfcc);
-  color: var(--rt-text, #2f2a21);
+@media (hover: hover) {
+  .note-popover-close:hover {
+    background-color: var(--rt-border, #e6dfcc);
+    color: var(--rt-text, #2f2a21);
+  }
 }
 
 .note-popover-body {
@@ -1125,8 +1244,10 @@ sup:hover {
   text-decoration-color: var(--rt-accent-soft, rgba(139, 90, 43, 0.4));
 }
 
-.note-popover-goto:hover {
-  text-decoration-color: currentColor;
+@media (hover: hover) {
+  .note-popover-goto:hover {
+    text-decoration-color: currentColor;
+  }
 }
 
 /* ---- Return-to-reading chip (after following an internal link) ---- */
@@ -1151,8 +1272,10 @@ sup:hover {
   animation: return-chip-in 0.25s ease both;
 }
 
-.return-chip:hover {
-  filter: brightness(1.15);
+@media (hover: hover) {
+  .return-chip:hover {
+    filter: brightness(1.15);
+  }
 }
 
 @keyframes return-chip-in {
@@ -1170,4 +1293,21 @@ sup:hover {
   .return-chip {
     animation: none;
   }
+}
+
+/* ---- Full-page status in place of the reader (loading a book) ---- */
+
+.reader-status {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 24px;
+  text-align: center;
+  font-size: 15px;
+  background-color: var(--rt-bg, #faf6ec);
+  color: var(--rt-text-muted, #8a8171);
 }

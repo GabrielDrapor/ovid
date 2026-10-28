@@ -8,6 +8,7 @@ import './Icon.css';
 export type IconName =
   | 'close'
   | 'check'
+  | 'chevron-left'
   | 'chevron-right'
   | 'arrow-right'
   | 'plus'
@@ -17,6 +18,7 @@ export type IconName =
 const SHAPES: Record<IconName, React.ReactNode> = {
   close: <path d="M18 6 6 18M6 6l12 12" />,
   check: <path d="M20 6 9 17l-5-5" />,
+  'chevron-left': <path d="m15 18-6-6 6-6" />,
   'chevron-right': <path d="m9 18 6-6-6-6" />,
   'arrow-right': <path d="M5 12h14M12 5l7 7-7 7" />,
   plus: <path d="M12 5v14M5 12h14" />,

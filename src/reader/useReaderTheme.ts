@@ -49,12 +49,17 @@ export function useReaderTheme(): {
   const theme = resolveTheme(themePref, systemDark);
 
   // Paint the page outside the reading column too (body shows through around
-  // the max-width container). Restore on unmount so the shelf is untouched.
+  // the max-width container), and tint the browser bar to match through the
+  // theme-color meta tag. Restore both on unmount so the shelf is untouched.
   useEffect(() => {
     const prev = document.body.style.backgroundColor;
     document.body.style.backgroundColor = theme.colors.bg;
+    const meta = document.querySelector('meta[name="theme-color"]');
+    const prevMeta = meta?.getAttribute('content');
+    meta?.setAttribute('content', theme.colors.bg);
     return () => {
       document.body.style.backgroundColor = prev;
+      if (meta && prevMeta != null) meta.setAttribute('content', prevMeta);
     };
   }, [theme]);
 

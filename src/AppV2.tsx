@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import BilingualReaderV2 from './components/BilingualReaderV2';
+import ReaderStatus from './components/ReaderStatus';
 import { useUser } from './contexts/UserContext';
 import { fetchWithRetry } from './utils/fetchWithRetry';
 import { ApiError, fetchApi } from './utils/api';
@@ -589,13 +590,7 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
   }
 
   if (loading && !chapterContent) {
-    return (
-      <div className="App">
-        <div style={{ textAlign: 'center', padding: '50px' }}>
-          <div>{t.book.loadingContent}</div>
-        </div>
-      </div>
-    );
+    return <ReaderStatus>{t.book.loadingContent}</ReaderStatus>;
   }
 
   if (!chapterContent) return null;

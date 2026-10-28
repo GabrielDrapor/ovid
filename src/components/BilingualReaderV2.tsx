@@ -169,6 +169,48 @@ export function loadTypographyDefaults(): TypographySettings {
   return {};
 }
 
+interface StepSpec {
+  def: number;
+  step: number;
+  min: number;
+  max: number;
+}
+
+// Range and step of each typography − / + setting. Limits sit on the step
+// grid, so the value shown never repeats at the ends.
+export const TYPOGRAPHY_STEPS: Record<
+  | 'fontSize'
+  | 'paragraphSpacing'
+  | 'lineHeight'
+  | 'letterSpacing'
+  | 'wordSpacing'
+  | 'fontWeight',
+  StepSpec
+> = {
+  fontSize: { def: 19, step: 1, min: 14, max: 32 },
+  paragraphSpacing: { def: 0, step: 5, min: 0, max: 50 },
+  // 1.75 default: CJK body text conventionally runs looser (1.6–2.0) than
+  // Latin; measured peers: Douban Read 2.0, WeRead ~1.9, clreq range 1.5–2.0.
+  lineHeight: { def: 1.75, step: 0.1, min: 1.05, max: 2.95 },
+  letterSpacing: { def: -0.03, step: 0.01, min: -0.1, max: 0.3 },
+  // 0.05em is about one pixel per space: the smallest step you can see.
+  wordSpacing: { def: 0, step: 0.05, min: -0.2, max: 0.3 },
+  fontWeight: { def: 450, step: 10, min: 200, max: 900 },
+};
+
+/** How many steps a setting sits from its default (0 = default). */
+export function stepsFromDefault(value: number, spec: StepSpec): number {
+  return Math.round((value - spec.def) / spec.step);
+}
+
+/** Move a setting one step, snapping it onto the grid inside its range. A
+ *  value saved with an older step size lands back on the grid this way. */
+function stepValue(value: number, spec: StepSpec, direction: 1 | -1): number {
+  const steps = stepsFromDefault(value, spec) + direction;
+  const next = Math.round((spec.def + steps * spec.step) * 1000) / 1000;
+  return Math.min(spec.max, Math.max(spec.min, next));
+}
+
 /**
  * BilingualReaderV2 - XPath-based bilingual reader
  *
@@ -221,23 +263,23 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
   const [isChaptersOpen, setIsChaptersOpen] = useState(false);
   const [typographyDefaults] = useState(loadTypographyDefaults);
   const [paragraphSpacing, setParagraphSpacing] = useState(
-    typographyDefaults.paragraphSpacing ?? 0
+    typographyDefaults.paragraphSpacing ?? TYPOGRAPHY_STEPS.paragraphSpacing.def
   );
-  // 1.75 default: CJK body text conventionally runs looser (1.6–2.0) than
-  // Latin; measured peers: Douban Read 2.0, WeRead ~1.9, clreq range 1.5–2.0.
   const [lineHeight, setLineHeight] = useState(
-    typographyDefaults.lineHeight ?? 1.75
+    typographyDefaults.lineHeight ?? TYPOGRAPHY_STEPS.lineHeight.def
   );
   const [letterSpacing, setLetterSpacing] = useState(
-    typographyDefaults.letterSpacing ?? -0.03
+    typographyDefaults.letterSpacing ?? TYPOGRAPHY_STEPS.letterSpacing.def
   );
   const [wordSpacing, setWordSpacing] = useState(
-    typographyDefaults.wordSpacing ?? 0
+    typographyDefaults.wordSpacing ?? TYPOGRAPHY_STEPS.wordSpacing.def
   );
   const [fontWeight, setFontWeight] = useState(
-    typographyDefaults.fontWeight ?? 450
+    typographyDefaults.fontWeight ?? TYPOGRAPHY_STEPS.fontWeight.def
   );
-  const [fontSize, setFontSize] = useState(typographyDefaults.fontSize ?? 19);
+  const [fontSize, setFontSize] = useState(
+    typographyDefaults.fontSize ?? TYPOGRAPHY_STEPS.fontSize.def
+  );
   const [fontFamily, setFontFamily] = useState(
     typographyDefaults.fontFamily ?? DEFAULT_FONT_ID
   );
@@ -252,6 +294,15 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
   );
   const [isTypographyOpen, setIsTypographyOpen] = useState(false);
   const [isSharing, setIsSharing] = useState(false);
+  // Going back from the typography page removes the focused back button;
+  // focus then returns to the Typography item that opened the page.
+  const typographyToggleRef = useRef<HTMLButtonElement>(null);
+  const backFromTypographyRef = useRef(false);
+  useEffect(() => {
+    if (isTypographyOpen || !backFromTypographyRef.current) return;
+    backFromTypographyRef.current = false;
+    typographyToggleRef.current?.focus();
+  }, [isTypographyOpen]);
 
   // In-book full-text search (original + translation)
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -1004,11 +1055,14 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
     };
   }, [translationsReady]);
 
-  // Show onboarding tooltip for first-time users, positioned near first paragraph
-  const [tooltipPos, setTooltipPos] = useState<{
-    top: number;
-    right: number;
-  } | null>(null);
+  // Show onboarding tooltip for first-time users, next to the first
+  // paragraph: in the left margin when it has room (desktop), otherwise just
+  // below the paragraph, so it never runs off a phone screen.
+  const [tooltipPos, setTooltipPos] = useState<
+    | { placement: 'left'; top: number; right: number }
+    | { placement: 'below'; top: number; left: number }
+    | null
+  >(null);
   useEffect(() => {
     if (!translationsReady || elementsRef.current.size === 0) return;
     const seen = localStorage.getItem('ovid_onboarding_seen');
@@ -1020,10 +1074,20 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
       if (firstEntry?.element) {
         const rect = firstEntry.element.getBoundingClientRect();
         const scrollTop = window.scrollY || document.documentElement.scrollTop;
-        setTooltipPos({
-          top: rect.top + scrollTop + rect.height / 2,
-          right: window.innerWidth - rect.left + 12,
-        });
+        // The tooltip is about 210px wide, plus a 12px gap to the paragraph.
+        if (rect.left >= 240) {
+          setTooltipPos({
+            placement: 'left',
+            top: rect.top + scrollTop + rect.height / 2,
+            right: window.innerWidth - rect.left + 12,
+          });
+        } else {
+          setTooltipPos({
+            placement: 'below',
+            top: rect.bottom + scrollTop + 12,
+            left: rect.left + rect.width / 2,
+          });
+        }
       }
       setShowOnboardingTooltip(true);
     }, 500);
@@ -1100,42 +1164,80 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
     };
   }, [translationsReady, initialXpath]);
 
-  const toggleMenu = () => setIsMenuOpen(!isMenuOpen);
-
-  const adjustParagraphSpacing = (delta: number) => {
-    setParagraphSpacing((prev) => Math.max(0, Math.min(50, prev + delta)));
+  // Closing the menu also leaves the typography page, so it reopens on the
+  // main list.
+  const closeMenu = () => {
+    setIsMenuOpen(false);
+    setIsTypographyOpen(false);
   };
-
-  const adjustLineHeight = (delta: number) => {
-    setLineHeight((prev) => Math.max(1.0, Math.min(3.0, prev + delta)));
-  };
-
-  const adjustLetterSpacing = (delta: number) => {
-    setLetterSpacing((prev) => Math.max(-0.1, Math.min(0.3, prev + delta)));
-  };
-
-  const adjustWordSpacing = (delta: number) => {
-    setWordSpacing((prev) => Math.max(-0.2, Math.min(0.3, prev + delta)));
-  };
-
-  const adjustFontWeight = (delta: number) => {
-    setFontWeight((prev) => Math.max(200, Math.min(900, prev + delta)));
-  };
-
-  const adjustFontSize = (delta: number) => {
-    setFontSize((prev) => Math.max(14, Math.min(24, prev + delta)));
-  };
+  const toggleMenu = () => (isMenuOpen ? closeMenu() : setIsMenuOpen(true));
 
   const resetTypography = () => {
-    setFontSize(19);
-    setParagraphSpacing(0);
-    setLineHeight(1.75);
-    setLetterSpacing(-0.03);
-    setWordSpacing(0);
-    setFontWeight(450);
+    setFontSize(TYPOGRAPHY_STEPS.fontSize.def);
+    setParagraphSpacing(TYPOGRAPHY_STEPS.paragraphSpacing.def);
+    setLineHeight(TYPOGRAPHY_STEPS.lineHeight.def);
+    setLetterSpacing(TYPOGRAPHY_STEPS.letterSpacing.def);
+    setWordSpacing(TYPOGRAPHY_STEPS.wordSpacing.def);
+    setFontWeight(TYPOGRAPHY_STEPS.fontWeight.def);
     setIndentParagraphs(false);
     setFontFamily(DEFAULT_FONT_ID);
   };
+
+  // The − / + rows of the typography page. Font size shows its pixel value;
+  // the others show how many steps they sit from the default, since raw em
+  // and weight values mean nothing to most readers.
+  const typographySteppers: {
+    label: string;
+    value: number;
+    set: React.Dispatch<React.SetStateAction<number>>;
+    spec: StepSpec;
+    showRaw?: boolean;
+  }[] = [
+    {
+      label: t.reader.fontSize,
+      value: fontSize,
+      set: setFontSize,
+      spec: TYPOGRAPHY_STEPS.fontSize,
+      showRaw: true,
+    },
+    {
+      label: t.reader.paragraphGap,
+      value: paragraphSpacing,
+      set: setParagraphSpacing,
+      spec: TYPOGRAPHY_STEPS.paragraphSpacing,
+    },
+    {
+      label: t.reader.lineHeight,
+      value: lineHeight,
+      set: setLineHeight,
+      spec: TYPOGRAPHY_STEPS.lineHeight,
+    },
+    {
+      label: t.reader.letterSpacing,
+      value: letterSpacing,
+      set: setLetterSpacing,
+      spec: TYPOGRAPHY_STEPS.letterSpacing,
+    },
+    {
+      label: t.reader.wordSpacing,
+      value: wordSpacing,
+      set: setWordSpacing,
+      spec: TYPOGRAPHY_STEPS.wordSpacing,
+    },
+    {
+      label: t.reader.fontWeight,
+      value: fontWeight,
+      set: setFontWeight,
+      spec: TYPOGRAPHY_STEPS.fontWeight,
+    },
+  ];
+
+  const formatSteps = (steps: number) =>
+    steps === 0
+      ? t.reader.defaultValue
+      : steps > 0
+        ? `+${steps}`
+        : `−${-steps}`;
 
   // View-transition wrapper: crossfades chapters using the browser's View
   // Transitions API when available, falling back to a plain load otherwise.
@@ -1273,8 +1375,12 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
           cursor: pointer;
           transition: background-color 0.2s;
         }
-        .reader-content-v2 [data-bilingual]:hover {
-          background-color: var(--rt-hover, rgba(0, 0, 0, 0.02));
+        /* Hover tint only where there is a real pointer: on touch screens
+           it would stick to the last tapped paragraph. */
+        @media (hover: hover) {
+          .reader-content-v2 [data-bilingual]:hover {
+            background-color: var(--rt-hover, rgba(0, 0, 0, 0.02));
+          }
         }
         ${
           theme.dark
@@ -1363,7 +1469,7 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
         }}
       >
         {isLoading && (
-          <div style={{ textAlign: 'center', padding: '20px', color: '#666' }}>
+          <div className="reader-loading-chapter">
             {t.reader.loadingChapter}
           </div>
         )}
@@ -1395,18 +1501,18 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
         {/* Onboarding tooltip for first-time users */}
         {showOnboardingTooltip && (
           <div
-            className="onboarding-tooltip"
+            className={`onboarding-tooltip ${
+              tooltipPos?.placement === 'below'
+                ? 'onboarding-tooltip-below'
+                : ''
+            }`}
             onClick={dismissOnboarding}
             style={
-              tooltipPos
-                ? {
-                    position: 'absolute',
-                    top: tooltipPos.top,
-                    right: tooltipPos.right,
-                    left: 'auto',
-                    transform: 'translateY(-50%)',
-                  }
-                : undefined
+              tooltipPos?.placement === 'left'
+                ? { top: tooltipPos.top, right: tooltipPos.right }
+                : tooltipPos?.placement === 'below'
+                  ? { top: tooltipPos.top, left: tooltipPos.left }
+                  : undefined
             }
           >
             <div className="onboarding-tooltip-arrow" />
@@ -1522,373 +1628,299 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
 
       <div className="fab-container">
         {/* Backdrop for mobile bottom sheet */}
-        {isMenuOpen && (
-          <div
-            className="fab-backdrop"
-            onClick={() => {
-              setIsMenuOpen(false);
-              setIsTypographyOpen(false);
-            }}
-          />
-        )}
+        {isMenuOpen && <div className="fab-backdrop" onClick={closeMenu} />}
         <button className="fab" onClick={toggleMenu} aria-label={t.reader.menu}>
           <span className="fab-dots"></span>
         </button>
         {isMenuOpen && (
           <div className="fab-menu">
-            {/* Primary actions */}
-            {onBackToShelf && (
-              <button className="fab-menu-item" onClick={onBackToShelf}>
-                {t.reader.backToShelf}
-              </button>
-            )}
-            {translations.length > 0 && (
-              <button
-                className="fab-menu-item"
-                onClick={() => {
-                  const next = !showOriginal;
-                  setShowOriginal(next);
-                  updateAllElements(next);
-                  onShowOriginalChange?.(next);
-                }}
-              >
-                {showOriginal
-                  ? t.reader.showTranslation
-                  : t.reader.showOriginal}
-              </button>
-            )}
-            <button
-              className="fab-menu-item"
-              onClick={() => {
-                setIsChaptersOpen(true);
-                setIsMenuOpen(false);
-              }}
-            >
-              {t.reader.chapters}
-            </button>
-            {bookUuid && onNavigateInternal && (
-              <button
-                className="fab-menu-item"
-                onClick={() => {
-                  setIsSearchOpen(true);
-                  setIsMenuOpen(false);
-                }}
-              >
-                {t.reader.search}
-              </button>
-            )}
-            {onMarkComplete && (
-              <button
-                className={`fab-menu-item ${isCompleted ? 'fab-menu-item-completed' : ''}`}
-                onClick={async () => {
-                  setIsMarkingComplete(true);
-                  setMarkCompleteError(null);
-                  try {
-                    await onMarkComplete(!isCompleted);
-                  } catch (err) {
-                    const errorMsg =
-                      err instanceof Error ? err.message : String(err);
-                    setMarkCompleteError(errorMsg);
-                  } finally {
-                    setIsMarkingComplete(false);
-                  }
-                }}
-                disabled={isMarkingComplete}
-              >
-                {isMarkingComplete ? (
-                  <Spinner />
-                ) : isCompleted ? (
-                  <span className="fab-menu-label">
-                    <Icon name="check" />
-                    {t.reader.markedRead}
-                  </span>
-                ) : (
-                  t.reader.markAsRead
-                )}
-              </button>
-            )}
-            {markCompleteError && (
-              <div className="fab-error">{markCompleteError}</div>
-            )}
-
-            {/* Share buttons (owner only) */}
-            {isOwner && onShare && !shareToken && (
-              <button
-                className="fab-menu-item"
-                onClick={async () => {
-                  setIsSharing(true);
-                  try {
-                    await onShare();
-                  } finally {
-                    setIsSharing(false);
-                  }
-                }}
-                disabled={isSharing}
-              >
-                {isSharing ? <Spinner /> : t.reader.share}
-              </button>
-            )}
-            {isOwner && shareToken && (
+            {isTypographyOpen ? (
+              /* Typography page: replaces the main list instead of growing
+                 it, so every setting fits without scrolling the menu. */
               <>
+                <div className="fab-page-header">
+                  <button
+                    type="button"
+                    className="fab-page-back"
+                    aria-label={t.common.back}
+                    autoFocus
+                    onClick={() => {
+                      backFromTypographyRef.current = true;
+                      setIsTypographyOpen(false);
+                    }}
+                  >
+                    <Icon name="chevron-left" size={18} />
+                  </button>
+                  <span className="fab-page-title">{t.reader.typography}</span>
+                </div>
+                <div className="fab-typography-panel">
+                  <div className="fab-typo-row">
+                    <span className="fab-typo-label">{t.reader.font}</span>
+                    <div className="fab-font-options">
+                      {READER_FONTS.map((f) => (
+                        <button
+                          type="button"
+                          key={f.id}
+                          className={`fab-font-btn ${
+                            fontFamily === f.id ? 'active' : ''
+                          }`}
+                          style={{ fontFamily: f.stack }}
+                          aria-pressed={fontFamily === f.id}
+                          onClick={() => setFontFamily(f.id)}
+                        >
+                          {t.reader.fontNames[f.id] || f.id}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {typographySteppers.map(
+                    ({ label, value, set, spec, showRaw }) => (
+                      <div className="fab-typo-row" key={label}>
+                        <span className="fab-typo-label">{label}</span>
+                        <div className="fab-menu-controls">
+                          <button
+                            type="button"
+                            className="fab-control-btn"
+                            aria-label={t.reader.decrease(label)}
+                            disabled={value <= spec.min}
+                            onClick={() => set((v) => stepValue(v, spec, -1))}
+                          >
+                            <Icon name="minus" />
+                          </button>
+                          <span className="fab-typo-value">
+                            {showRaw
+                              ? value
+                              : formatSteps(stepsFromDefault(value, spec))}
+                          </span>
+                          <button
+                            type="button"
+                            className="fab-control-btn"
+                            aria-label={t.reader.increase(label)}
+                            disabled={value >= spec.max}
+                            onClick={() => set((v) => stepValue(v, spec, 1))}
+                          >
+                            <Icon name="plus" />
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  )}
+                  <div className="fab-typo-row">
+                    <span className="fab-typo-label" id="fab-indent-label">
+                      {t.reader.firstLineIndent}
+                    </span>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={indentParagraphs}
+                      aria-labelledby="fab-indent-label"
+                      className={`fab-switch ${indentParagraphs ? 'on' : ''}`}
+                      onClick={() => setIndentParagraphs((v) => !v)}
+                    >
+                      <span className="fab-switch-knob" />
+                    </button>
+                  </div>
+                  <button className="fab-reset-btn" onClick={resetTypography}>
+                    {t.reader.resetToDefault}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                {/* Primary actions */}
+                {onBackToShelf && (
+                  <button className="fab-menu-item" onClick={onBackToShelf}>
+                    {t.reader.backToShelf}
+                  </button>
+                )}
+                {translations.length > 0 && (
+                  <button
+                    className="fab-menu-item"
+                    onClick={() => {
+                      const next = !showOriginal;
+                      setShowOriginal(next);
+                      updateAllElements(next);
+                      onShowOriginalChange?.(next);
+                    }}
+                  >
+                    {showOriginal
+                      ? t.reader.showTranslation
+                      : t.reader.showOriginal}
+                  </button>
+                )}
                 <button
                   className="fab-menu-item"
                   onClick={() => {
-                    navigator.clipboard.writeText(
-                      `${window.location.origin}/shared/${shareToken}`
-                    );
-                    setShareCopied(true);
-                    setTimeout(() => setShareCopied(false), 2000);
+                    setIsChaptersOpen(true);
+                    closeMenu();
                   }}
                 >
-                  {shareCopied ? (
-                    <span className="fab-menu-label">
-                      <Icon name="check" />
-                      {t.reader.copied}
-                    </span>
-                  ) : (
-                    t.reader.copyShareLink
-                  )}
+                  {t.reader.chapters}
                 </button>
-                <button
-                  className="fab-menu-item"
-                  onClick={async () => {
-                    if (onRevokeShare) {
+                {bookUuid && onNavigateInternal && (
+                  <button
+                    className="fab-menu-item"
+                    onClick={() => {
+                      setIsSearchOpen(true);
+                      closeMenu();
+                    }}
+                  >
+                    {t.reader.search}
+                  </button>
+                )}
+                {onMarkComplete && (
+                  /* A switch, so it's clear that tapping again undoes it. */
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={!!isCompleted}
+                    className="fab-menu-item"
+                    onClick={async () => {
+                      setIsMarkingComplete(true);
+                      setMarkCompleteError(null);
+                      try {
+                        await onMarkComplete(!isCompleted);
+                      } catch (err) {
+                        const errorMsg =
+                          err instanceof Error ? err.message : String(err);
+                        setMarkCompleteError(errorMsg);
+                      } finally {
+                        setIsMarkingComplete(false);
+                      }
+                    }}
+                    disabled={isMarkingComplete}
+                  >
+                    <span>{t.reader.markAsRead}</span>
+                    {isMarkingComplete ? (
+                      <Spinner />
+                    ) : (
+                      <span
+                        className={`fab-switch ${isCompleted ? 'on' : ''}`}
+                        aria-hidden="true"
+                      >
+                        <span className="fab-switch-knob" />
+                      </span>
+                    )}
+                  </button>
+                )}
+                {markCompleteError && (
+                  <div className="fab-error">{markCompleteError}</div>
+                )}
+
+                {/* Share buttons (owner only) */}
+                {isOwner && onShare && !shareToken && (
+                  <button
+                    className="fab-menu-item"
+                    onClick={async () => {
                       setIsSharing(true);
                       try {
-                        await onRevokeShare();
+                        await onShare();
                       } finally {
                         setIsSharing(false);
                       }
-                    }
-                  }}
-                  disabled={isSharing}
-                >
-                  {isSharing ? <Spinner /> : t.reader.revokeShare}
-                </button>
-              </>
-            )}
-
-            {/* Divider */}
-            <div className="fab-divider" />
-
-            {/* Theme swatches: Auto (follow system) + each defined theme */}
-            <div className="fab-theme-row">
-              <span className="fab-typo-label">{t.reader.theme}</span>
-              <div className="fab-theme-swatches">
-                <button
-                  type="button"
-                  className={`fab-theme-swatch fab-theme-swatch-auto ${
-                    themePref === 'auto' ? 'active' : ''
-                  }`}
-                  title={t.reader.themeAuto}
-                  aria-label={t.reader.themeAuto}
-                  aria-pressed={themePref === 'auto'}
-                  onClick={() => setThemePref('auto')}
-                >
-                  <Icon name="theme-auto" />
-                </button>
-                {READER_THEMES.map((th) => (
-                  <button
-                    type="button"
-                    key={th.id}
-                    className={`fab-theme-swatch ${
-                      themePref === th.id ? 'active' : ''
-                    }`}
-                    style={{
-                      backgroundColor: th.colors.bg,
-                      color: th.colors.text,
                     }}
-                    title={t.reader.themeNames[th.id] || th.id}
-                    aria-label={t.reader.themeNames[th.id] || th.id}
-                    aria-pressed={themePref === th.id}
-                    onClick={() => setThemePref(th.id)}
+                    disabled={isSharing}
                   >
-                    A
+                    {isSharing ? <Spinner /> : t.reader.share}
                   </button>
-                ))}
-              </div>
-            </div>
+                )}
+                {isOwner && shareToken && (
+                  <>
+                    <button
+                      className="fab-menu-item"
+                      onClick={() => {
+                        navigator.clipboard.writeText(
+                          `${window.location.origin}/shared/${shareToken}`
+                        );
+                        setShareCopied(true);
+                        setTimeout(() => setShareCopied(false), 2000);
+                      }}
+                    >
+                      {shareCopied ? (
+                        <span className="fab-menu-label">
+                          <Icon name="check" />
+                          {t.reader.copied}
+                        </span>
+                      ) : (
+                        t.reader.copyShareLink
+                      )}
+                    </button>
+                    <button
+                      className="fab-menu-item"
+                      onClick={async () => {
+                        if (onRevokeShare) {
+                          setIsSharing(true);
+                          try {
+                            await onRevokeShare();
+                          } finally {
+                            setIsSharing(false);
+                          }
+                        }
+                      }}
+                      disabled={isSharing}
+                    >
+                      {isSharing ? <Spinner /> : t.reader.revokeShare}
+                    </button>
+                  </>
+                )}
 
-            {/* Typography section - collapsible */}
-            <button
-              className="fab-menu-item fab-section-toggle"
-              onClick={() => setIsTypographyOpen(!isTypographyOpen)}
-            >
-              <span>{t.reader.typography}</span>
-              <span className={`fab-chevron ${isTypographyOpen ? 'open' : ''}`}>
-                <Icon name="chevron-right" />
-              </span>
-            </button>
+                {/* Divider */}
+                <div className="fab-divider" />
 
-            {isTypographyOpen && (
-              <div className="fab-typography-panel">
-                <div className="fab-typo-row">
-                  <span className="fab-typo-label">{t.reader.font}</span>
-                  <div className="fab-font-options">
-                    {READER_FONTS.map((f) => (
+                {/* Theme swatches, each with its name: Auto (follow system)
+                    + each defined theme. */}
+                <div className="fab-theme-row">
+                  <span className="fab-typo-label">{t.reader.theme}</span>
+                  <div className="fab-theme-options">
+                    <button
+                      type="button"
+                      className={`fab-theme-option ${
+                        themePref === 'auto' ? 'active' : ''
+                      }`}
+                      title={t.reader.themeAuto}
+                      aria-pressed={themePref === 'auto'}
+                      onClick={() => setThemePref('auto')}
+                    >
+                      <span className="fab-theme-swatch fab-theme-swatch-auto">
+                        <Icon name="theme-auto" />
+                      </span>
+                      <span className="fab-theme-name">
+                        {t.reader.themeAutoShort}
+                      </span>
+                    </button>
+                    {READER_THEMES.map((th) => (
                       <button
                         type="button"
-                        key={f.id}
-                        className={`fab-font-btn ${
-                          fontFamily === f.id ? 'active' : ''
+                        key={th.id}
+                        className={`fab-theme-option ${
+                          themePref === th.id ? 'active' : ''
                         }`}
-                        style={{ fontFamily: f.stack }}
-                        aria-pressed={fontFamily === f.id}
-                        onClick={() => setFontFamily(f.id)}
+                        aria-pressed={themePref === th.id}
+                        onClick={() => setThemePref(th.id)}
                       >
-                        {t.reader.fontNames[f.id] || f.id}
+                        <span
+                          className="fab-theme-swatch"
+                          style={{ backgroundColor: th.colors.bg }}
+                        />
+                        <span className="fab-theme-name">
+                          {t.reader.themeNames[th.id] || th.id}
+                        </span>
                       </button>
                     ))}
                   </div>
                 </div>
-                <div className="fab-typo-row">
-                  <span className="fab-typo-label">{t.reader.fontSize}</span>
-                  <div className="fab-menu-controls">
-                    <button
-                      className="fab-control-btn"
-                      aria-label={t.reader.decrease(t.reader.fontSize)}
-                      onClick={() => adjustFontSize(-1)}
-                    >
-                      <Icon name="minus" />
-                    </button>
-                    <span className="fab-typo-value">{fontSize}</span>
-                    <button
-                      className="fab-control-btn"
-                      aria-label={t.reader.increase(t.reader.fontSize)}
-                      onClick={() => adjustFontSize(1)}
-                    >
-                      <Icon name="plus" />
-                    </button>
-                  </div>
-                </div>
-                <div className="fab-typo-row">
-                  <span className="fab-typo-label">
-                    {t.reader.paragraphGap}
+
+                <button
+                  ref={typographyToggleRef}
+                  className="fab-menu-item"
+                  onClick={() => setIsTypographyOpen(true)}
+                >
+                  <span>{t.reader.typography}</span>
+                  <span className="fab-chevron">
+                    <Icon name="chevron-right" />
                   </span>
-                  <div className="fab-menu-controls">
-                    <button
-                      className="fab-control-btn"
-                      aria-label={t.reader.decrease(t.reader.paragraphGap)}
-                      onClick={() => adjustParagraphSpacing(-5)}
-                    >
-                      <Icon name="minus" />
-                    </button>
-                    <span className="fab-typo-value">{paragraphSpacing}</span>
-                    <button
-                      className="fab-control-btn"
-                      aria-label={t.reader.increase(t.reader.paragraphGap)}
-                      onClick={() => adjustParagraphSpacing(5)}
-                    >
-                      <Icon name="plus" />
-                    </button>
-                  </div>
-                </div>
-                <div className="fab-typo-row">
-                  <span className="fab-typo-label">{t.reader.lineHeight}</span>
-                  <div className="fab-menu-controls">
-                    <button
-                      className="fab-control-btn"
-                      aria-label={t.reader.decrease(t.reader.lineHeight)}
-                      onClick={() => adjustLineHeight(-0.1)}
-                    >
-                      <Icon name="minus" />
-                    </button>
-                    <span className="fab-typo-value">
-                      {lineHeight.toFixed(1)}
-                    </span>
-                    <button
-                      className="fab-control-btn"
-                      aria-label={t.reader.increase(t.reader.lineHeight)}
-                      onClick={() => adjustLineHeight(0.1)}
-                    >
-                      <Icon name="plus" />
-                    </button>
-                  </div>
-                </div>
-                <div className="fab-typo-row">
-                  <span className="fab-typo-label">
-                    {t.reader.letterSpacing}
-                  </span>
-                  <div className="fab-menu-controls">
-                    <button
-                      className="fab-control-btn"
-                      aria-label={t.reader.decrease(t.reader.letterSpacing)}
-                      onClick={() => adjustLetterSpacing(-0.01)}
-                    >
-                      <Icon name="minus" />
-                    </button>
-                    <span className="fab-typo-value">
-                      {letterSpacing.toFixed(2)}
-                    </span>
-                    <button
-                      className="fab-control-btn"
-                      aria-label={t.reader.increase(t.reader.letterSpacing)}
-                      onClick={() => adjustLetterSpacing(0.01)}
-                    >
-                      <Icon name="plus" />
-                    </button>
-                  </div>
-                </div>
-                <div className="fab-typo-row">
-                  <span className="fab-typo-label">{t.reader.wordSpacing}</span>
-                  <div className="fab-menu-controls">
-                    <button
-                      className="fab-control-btn"
-                      aria-label={t.reader.decrease(t.reader.wordSpacing)}
-                      onClick={() => adjustWordSpacing(-0.01)}
-                    >
-                      <Icon name="minus" />
-                    </button>
-                    <span className="fab-typo-value">
-                      {wordSpacing.toFixed(2)}
-                    </span>
-                    <button
-                      className="fab-control-btn"
-                      aria-label={t.reader.increase(t.reader.wordSpacing)}
-                      onClick={() => adjustWordSpacing(0.01)}
-                    >
-                      <Icon name="plus" />
-                    </button>
-                  </div>
-                </div>
-                <div className="fab-typo-row">
-                  <span className="fab-typo-label">{t.reader.fontWeight}</span>
-                  <div className="fab-menu-controls">
-                    <button
-                      className="fab-control-btn"
-                      aria-label={t.reader.decrease(t.reader.fontWeight)}
-                      onClick={() => adjustFontWeight(-10)}
-                    >
-                      <Icon name="minus" />
-                    </button>
-                    <span className="fab-typo-value">{fontWeight}</span>
-                    <button
-                      className="fab-control-btn"
-                      aria-label={t.reader.increase(t.reader.fontWeight)}
-                      onClick={() => adjustFontWeight(10)}
-                    >
-                      <Icon name="plus" />
-                    </button>
-                  </div>
-                </div>
-                <div className="fab-typo-row">
-                  <span className="fab-typo-label">
-                    {t.reader.firstLineIndent}
-                  </span>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={indentParagraphs}
-                    className={`fab-switch ${indentParagraphs ? 'on' : ''}`}
-                    onClick={() => setIndentParagraphs((v) => !v)}
-                  >
-                    <span className="fab-switch-knob" />
-                  </button>
-                </div>
-                <button className="fab-reset-btn" onClick={resetTypography}>
-                  {t.reader.resetToDefault}
                 </button>
-              </div>
+              </>
             )}
           </div>
         )}

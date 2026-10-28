@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import BilingualReaderV2 from './BilingualReaderV2';
+import ReaderStatus from './ReaderStatus';
 import { fetchWithRetry } from '../utils/fetchWithRetry';
 import { useI18n } from '../i18n';
 import '../App.css';
@@ -121,13 +122,7 @@ function SharedBookView({ shareToken }: SharedBookViewProps) {
   }
 
   if (loading && !chapterContent) {
-    return (
-      <div className="App">
-        <div style={{ textAlign: 'center', padding: '50px' }}>
-          {t.shared.loadingSharedBook}
-        </div>
-      </div>
-    );
+    return <ReaderStatus>{t.shared.loadingSharedBook}</ReaderStatus>;
   }
 
   if (!chapterContent) return null;
