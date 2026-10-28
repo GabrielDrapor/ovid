@@ -144,6 +144,7 @@ export const zh: Messages = {
     prevChapter: '上一章',
     nextChapter: '下一章',
     menu: '菜单',
+    skipToMenu: '跳到菜单',
     tapToToggle: '点击段落切换翻译',
     note: '注',
     noteNotFound: '未找到对应的注释内容',

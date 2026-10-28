@@ -146,6 +146,7 @@ export const en = {
     prevChapter: 'Previous chapter',
     nextChapter: 'Next chapter',
     menu: 'Menu',
+    skipToMenu: 'Skip to menu',
     tapToToggle: 'Tap to toggle translation',
     note: 'Note',
     noteNotFound: 'Note content not found',

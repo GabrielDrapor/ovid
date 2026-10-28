@@ -83,6 +83,28 @@
   color: var(--rt-text, #2f2a21);
 }
 
+/* Shown only when it has keyboard focus (see BilingualReaderV2). */
+.reader-skip-link {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  z-index: 2600;
+  padding: 8px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--rt-border, #e6dfcc);
+  background: var(--rt-surface, #fffdf6);
+  color: var(--rt-text, #2f2a21);
+  font-size: 14px;
+  cursor: pointer;
+  transform: translateY(calc(-100% - 16px));
+}
+
+.reader-skip-link:focus {
+  transform: none;
+  outline: 2px solid var(--rt-accent, #8b5a2b);
+  outline-offset: 2px;
+}
+
 .fab-container {
   position: fixed;
   bottom: calc(
