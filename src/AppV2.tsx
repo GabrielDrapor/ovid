@@ -52,6 +52,9 @@ interface AppV2Props {
   onBackToShelf: () => void;
 }
 
+// The API answers 404 when a book doesn't exist or this user can't open it.
+class BookNotFoundError extends Error {}
+
 // Fetch cloud progress and merge with local — cloud wins if newer
 const fetchAndMergeProgress = async (
   uuid: string
@@ -82,6 +85,11 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [notFound, setNotFound] = useState(false);
+  // Where a failed chapter load was going, so Try again repeats that load.
+  const failedLoadRef = useRef<{ chapter: number; xpath?: string } | null>(
+    null
+  );
 
   // Initialize from local progress first, then merge with cloud
   const initialProgress = useRef(getLocalProgress(bookUuid));
@@ -157,16 +165,15 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
           console.log('Book marked complete:', data);
         } else {
           const errData = await response.text();
-          console.error(`Mark complete failed: ${response.status}`, errData);
           throw new Error(`HTTP ${response.status}: ${errData}`);
         }
       } catch (err) {
         console.error('Error marking book complete:', err);
-        // Re-throw so BilingualReaderV2 can show error to user
-        throw err;
+        // BilingualReaderV2 shows this message under the switch.
+        throw new Error(t.book.markReadFailed);
       }
     },
-    [bookUuid, calculateProgress]
+    [bookUuid, calculateProgress, t]
   );
 
   // Save progress to localStorage only (URL stays clean as /book/{uuid})
@@ -266,8 +273,7 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
           `/api/v2/book/${bookUuid}/chapters`
         );
         if (response.status === 404) {
-          // Book not found or not accessible — redirect to home
-          window.location.replace('/');
+          setNotFound(true);
           return;
         }
         if (!response.ok) {
@@ -337,6 +343,7 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
     const response = await fetchWithRetry(
       `/api/v2/book/${bookUuid}/chapter/${chapterNumber}`
     );
+    if (response.status === 404) throw new BookNotFoundError();
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
@@ -431,14 +438,20 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
         }, 100);
       }
     } catch (err) {
-      setError(
-        err instanceof ApiError
-          ? err.message
-          : err instanceof Error
+      if (err instanceof BookNotFoundError) {
+        setNotFound(true);
+      } else {
+        failedLoadRef.current = {
+          chapter: chapterNumber,
+          xpath: scrollToXpath,
+        };
+        setError(
+          err instanceof ApiError || err instanceof Error
             ? err.message
             : t.book.loadChapterFailed
-      );
-      console.error('Error fetching chapter:', err);
+        );
+        console.error('Error fetching chapter:', err);
+      }
     } finally {
       setLoading(false);
     }
@@ -578,14 +591,51 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
     });
   }, [bookUuid]);
 
+  if (notFound) {
+    return (
+      <ReaderStatus
+        title={t.book.notFoundTitle}
+        actions={
+          <button
+            className="reader-status-btn reader-status-btn-primary"
+            onClick={onBackToShelf}
+          >
+            {t.reader.backToShelf}
+          </button>
+        }
+      >
+        {t.book.notFoundMessage}
+      </ReaderStatus>
+    );
+  }
+
   if (error) {
     return (
-      <div className="App">
-        <div style={{ textAlign: 'center', padding: '50px' }}>
-          <div>{t.common.error(error)}</div>
-          <button onClick={onBackToShelf}>{t.common.goHome}</button>
-        </div>
-      </div>
+      <ReaderStatus
+        title={t.book.loadChapterFailed}
+        detail={error !== t.book.loadChapterFailed ? error : undefined}
+        actions={
+          <>
+            <button
+              className="reader-status-btn reader-status-btn-primary"
+              onClick={() => {
+                const target = failedLoadRef.current ?? {
+                  chapter: currentChapter,
+                };
+                setError(null);
+                loadChapter(target.chapter, target.xpath);
+              }}
+            >
+              {t.errors.tryAgain}
+            </button>
+            <button className="reader-status-btn" onClick={onBackToShelf}>
+              {t.reader.backToShelf}
+            </button>
+          </>
+        }
+      >
+        {t.book.loadFailedMessage}
+      </ReaderStatus>
     );
   }
 
@@ -611,7 +661,8 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
         bookUuid={bookUuid}
         languagePair={languagePair}
         onBackToShelf={onBackToShelf}
-        onMarkComplete={handleMarkComplete}
+        // Reading status is per account; signed out there is nothing to save.
+        onMarkComplete={user ? handleMarkComplete : undefined}
         isCompleted={isCompleted}
         isOwner={isOwner}
         shareToken={shareToken}

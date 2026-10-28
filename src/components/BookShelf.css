@@ -2465,3 +2465,55 @@
   word-break: break-word;
   line-height: 1.5;
 }
+
+/* Shelf failed to load: centred card on the dark wall, with a retry. */
+.bookshelf-error {
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.bookshelf-error-card {
+  max-width: 360px;
+  text-align: center;
+  color: #f4ead9;
+}
+
+.bookshelf-error-card h2 {
+  margin: 0 0 10px;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.bookshelf-error-card p {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.6;
+  color: rgba(244, 234, 217, 0.72);
+}
+
+.bookshelf-error-card .bookshelf-error-detail {
+  margin-top: 6px;
+  font-size: 12.5px;
+  color: rgba(244, 234, 217, 0.45);
+  overflow-wrap: anywhere;
+}
+
+.bookshelf-error-retry {
+  margin-top: 22px;
+  padding: 10px 28px;
+  border: 1px solid rgba(216, 178, 113, 0.6);
+  border-radius: 999px;
+  background: none;
+  color: #d8b271;
+  font-family: inherit;
+  font-size: 15px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+@media (hover: hover) {
+  .bookshelf-error-retry:hover {
+    background: rgba(216, 178, 113, 0.12);
+  }
+}

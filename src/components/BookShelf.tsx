@@ -24,6 +24,7 @@ import {
   saveShelfThemePref,
 } from './shelf3d/shelfThemes';
 import { Spinner } from './Icon';
+import { errorDetail, useConfirm, useToast } from './Dialogs';
 import './BookShelf.css';
 
 const BookShelf3D = React.lazy(() => import('./shelf3d/BookShelf3D'));
@@ -77,6 +78,8 @@ function needsTranslationDrive(book: Book): boolean {
 
 const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
   const { t, locale, setLocale } = useI18n();
+  const [confirm, confirmDialog] = useConfirm();
+  const [showToast, toast] = useToast();
   const [books, setBooks] = useState<Book[]>([]);
   const [shelfSlots, setShelfSlots] = useState<ShelfSlot[]>([]);
   const [spineRatios, setSpineRatios] = useState<Map<string, number>>(
@@ -659,7 +662,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
 
   const handleFileSelect = async (file: File) => {
     if (!user) {
-      alert(t.upload.loginRequired);
+      showToast({ message: t.upload.loginRequired });
       return;
     }
 
@@ -699,13 +702,11 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
         sourceLanguage: detected,
       });
     } catch (err) {
-      alert(
-        err instanceof ApiError
-          ? err.message
-          : err instanceof Error
-            ? err.message
-            : t.upload.estimateFailed
-      );
+      showToast({
+        tone: 'error',
+        message: t.upload.estimateFailed,
+        detail: errorDetail(err),
+      });
     } finally {
       setEstimating(false);
     }
@@ -771,13 +772,11 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
           : prev
       );
     } catch (err) {
-      alert(
-        err instanceof ApiError
-          ? err.message
-          : err instanceof Error
-            ? err.message
-            : t.upload.reEstimateFailed
-      );
+      showToast({
+        tone: 'error',
+        message: t.upload.reEstimateFailed,
+        detail: errorDetail(err),
+      });
     } finally {
       setReEstimating(false);
     }
@@ -911,15 +910,15 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
     } catch (err) {
       setUploadProgress('');
       setUploading(false);
-      const message =
-        err instanceof ApiError
-          ? err.message
-          : err instanceof TypeError
-            ? t.upload.networkError
-            : err instanceof Error
-              ? err.message
-              : t.upload.uploadFailed;
-      alert(message);
+      showToast(
+        err instanceof TypeError
+          ? { tone: 'error', message: t.upload.networkError }
+          : {
+              tone: 'error',
+              message: t.upload.uploadFailed,
+              detail: errorDetail(err),
+            }
+      );
     }
   };
 
@@ -930,7 +929,14 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
   };
 
   const handleDeleteBook = async (bookUuid: string) => {
-    if (!confirm(t.shelf.confirmRemove)) return;
+    const book = books.find((b) => b.uuid === bookUuid);
+    const confirmed = await confirm({
+      title: t.shelf.removeTitle,
+      message: t.shelf.removeMessage(book?.original_title || book?.title || ''),
+      confirmLabel: t.common.remove,
+      destructive: true,
+    });
+    if (!confirmed) return;
     try {
       const response = await fetch(`/api/book/${bookUuid}`, {
         method: 'DELETE',
@@ -942,7 +948,11 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
       setHoveredBook(null);
       await fetchBooks();
     } catch (err) {
-      alert(err instanceof Error ? err.message : t.errors.deleteBookFailed);
+      showToast({
+        tone: 'error',
+        message: t.errors.deleteBookFailed,
+        detail: errorDetail(err),
+      });
     }
   };
 
@@ -970,7 +980,11 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
       await fetchBooks();
       return true;
     } catch (err) {
-      alert(err instanceof Error ? err.message : t.errors.saveLabelFailed);
+      showToast({
+        tone: 'error',
+        message: t.errors.saveLabelFailed,
+        detail: errorDetail(err),
+      });
       return false;
     }
   };
@@ -1049,7 +1063,11 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
             : b
         )
       );
-      alert(err instanceof Error ? err.message : t.errors.moveBookFailed);
+      showToast({
+        tone: 'error',
+        message: t.errors.moveBookFailed,
+        detail: errorDetail(err),
+      });
       return;
     }
 
@@ -1064,9 +1082,22 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
 
   if (error) {
     return (
-      <div className="bookshelf-error">
-        <h2>{t.shelf.unableToLoadBooks}</h2>
-        <p>{error}</p>
+      <div className="bookshelf-container bookshelf-error">
+        <div className="bookshelf-error-card" role="alert">
+          <h2>{t.shelf.loadFailedTitle}</h2>
+          <p>{t.shelf.loadFailedMessage}</p>
+          <p className="bookshelf-error-detail">{error}</p>
+          <button
+            className="bookshelf-error-retry"
+            onClick={() => {
+              setError(null);
+              setLoading(true);
+              fetchBooks();
+            }}
+          >
+            {t.errors.tryAgain}
+          </button>
+        </div>
       </div>
     );
   }
@@ -2283,6 +2314,8 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
           </div>
         </div>
       )}
+      {confirmDialog}
+      {toast}
     </div>
   );
 };
