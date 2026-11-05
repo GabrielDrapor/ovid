@@ -172,6 +172,23 @@ export function processingTitleInk(progress: number): string {
     : `rgba(255, 250, 240, ${(0.6 + 0.4 * p).toFixed(2)})`;
 }
 
+/**
+ * Shorten `text` with a trailing ellipsis until `measure` says it fits in
+ * `maxWidth`. Each step drops one character, so it always ends.
+ */
+export function fitText(
+  text: string,
+  maxWidth: number,
+  measure: (t: string) => number
+): string {
+  if (measure(text) <= maxWidth) return text;
+  let kept = text;
+  while (kept.length > 1 && measure(kept + '…') > maxWidth) {
+    kept = kept.slice(0, -1);
+  }
+  return kept + '…';
+}
+
 export function makeProcessingSpineCanvas(
   title: string,
   progress: number
@@ -229,13 +246,11 @@ export function makeProcessingSpineCanvas(
     ctx.font = '600 38px Georgia, "Songti SC", serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    let text = title;
-    while (
-      text.length > 1 &&
-      ctx.measureText(text).width > canvas.height - 70
-    ) {
-      text = text.slice(0, -2) + '...';
-    }
+    const text = fitText(
+      title,
+      canvas.height - 70,
+      (t) => ctx.measureText(t).width
+    );
     ctx.fillText(text, 0, 0);
     ctx.restore();
   }
