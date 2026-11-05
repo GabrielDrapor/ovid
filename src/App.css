@@ -8,6 +8,16 @@
   text-align: left;
 }
 
+/* The shelf while a book is open: kept at full size (so the 3D view keeps
+   its camera), but invisible, unclickable and out of the tab order. */
+.App-shelf-away {
+  position: fixed;
+  inset: 0;
+  visibility: hidden;
+  pointer-events: none;
+  z-index: -1;
+}
+
 .title-page {
   display: flex;
   flex-direction: column;

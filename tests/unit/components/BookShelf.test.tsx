@@ -41,27 +41,51 @@ global.alert = vi.fn();
 
 const MOCK_PUBLIC_BOOKS = [
   {
-    id: 1, uuid: 'pub-1', title: '血字的研究', original_title: 'A Study in Scarlet',
-    author: 'Doyle', language_pair: 'en-zh', book_cover_img_url: null,
-    book_spine_img_url: null, user_id: null, status: 'ready',
-    created_at: '2025-01-01', updated_at: '2025-01-01',
+    id: 1,
+    uuid: 'pub-1',
+    title: '血字的研究',
+    original_title: 'A Study in Scarlet',
+    author: 'Doyle',
+    language_pair: 'en-zh',
+    book_cover_img_url: null,
+    book_spine_img_url: null,
+    user_id: null,
+    status: 'ready',
+    created_at: '2025-01-01',
+    updated_at: '2025-01-01',
   },
 ];
 
 const MOCK_USER_BOOKS = [
   {
-    id: 2, uuid: 'user-1', title: '局外人', original_title: 'The Stranger',
-    author: 'Camus', language_pair: 'en-zh', book_cover_img_url: null,
-    book_spine_img_url: null, user_id: 1, status: 'ready',
-    created_at: '2025-01-01', updated_at: '2025-01-01',
+    id: 2,
+    uuid: 'user-1',
+    title: '局外人',
+    original_title: 'The Stranger',
+    author: 'Camus',
+    language_pair: 'en-zh',
+    book_cover_img_url: null,
+    book_spine_img_url: null,
+    user_id: 1,
+    status: 'ready',
+    created_at: '2025-01-01',
+    updated_at: '2025-01-01',
   },
 ];
 
 const MOCK_PROCESSING_BOOK = {
-  id: 3, uuid: 'proc-1', title: 'Processing Book', original_title: 'Processing',
-  author: 'Author', language_pair: 'en-zh', book_cover_img_url: null,
-  book_spine_img_url: null, user_id: 1, status: 'processing',
-  created_at: '2025-01-01', updated_at: '2025-01-01',
+  id: 3,
+  uuid: 'proc-1',
+  title: 'Processing Book',
+  original_title: 'Processing',
+  author: 'Author',
+  language_pair: 'en-zh',
+  book_cover_img_url: null,
+  book_spine_img_url: null,
+  user_id: 1,
+  status: 'processing',
+  created_at: '2025-01-01',
+  updated_at: '2025-01-01',
 };
 
 function setupFetch(books: any[]) {
@@ -70,13 +94,22 @@ function setupFetch(books: any[]) {
       return Promise.resolve({ ok: true, json: () => Promise.resolve(books) });
     }
     if (url.includes('/progress')) {
-      return Promise.resolve({ ok: true, json: () => Promise.resolve({ progress: null }) });
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ progress: null }),
+      });
     }
     if (url.includes('/status')) {
-      return Promise.resolve({ ok: true, json: () => Promise.resolve({ status: 'processing', progress: null }) });
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ status: 'processing', progress: null }),
+      });
     }
     if (url.includes('/translate-next')) {
-      return Promise.resolve({ ok: true, json: () => Promise.resolve({ done: false }) });
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ done: false }),
+      });
     }
     return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
   });
@@ -92,7 +125,8 @@ describe('BookShelf Component', () => {
       const allBooks = [...MOCK_PUBLIC_BOOKS, ...MOCK_USER_BOOKS];
       setupFetch(allBooks);
 
-      const BookShelf = (await import('../../../src/components/BookShelf')).default;
+      const BookShelf = (await import('../../../src/components/BookShelf'))
+        .default;
       const onSelectBook = vi.fn();
 
       render(<BookShelf onSelectBook={onSelectBook} />);
@@ -111,11 +145,14 @@ describe('BookShelf Component', () => {
     it('shows processing class for translating books', async () => {
       setupFetch([MOCK_PROCESSING_BOOK]);
 
-      const BookShelf = (await import('../../../src/components/BookShelf')).default;
+      const BookShelf = (await import('../../../src/components/BookShelf'))
+        .default;
       render(<BookShelf onSelectBook={vi.fn()} />);
 
       await waitFor(() => {
-        const processingEl = document.querySelector('.book-spine-wrapper.processing');
+        const processingEl = document.querySelector(
+          '.book-spine-wrapper.processing'
+        );
         expect(processingEl).toBeTruthy();
       });
     });
@@ -124,11 +161,14 @@ describe('BookShelf Component', () => {
       setupFetch([MOCK_PROCESSING_BOOK]);
 
       const onSelectBook = vi.fn();
-      const BookShelf = (await import('../../../src/components/BookShelf')).default;
+      const BookShelf = (await import('../../../src/components/BookShelf'))
+        .default;
       render(<BookShelf onSelectBook={onSelectBook} />);
 
       await waitFor(() => {
-        const wrapper = document.querySelector('.book-spine-wrapper.processing');
+        const wrapper = document.querySelector(
+          '.book-spine-wrapper.processing'
+        );
         expect(wrapper).toBeTruthy();
       });
 
@@ -216,5 +256,41 @@ describe('BookShelf Component', () => {
         expect(document.querySelector('.bookshelf-wall')).toBeTruthy()
       );
     });
+  });
+});
+
+describe('BookShelf - back from a book', () => {
+  beforeEach(() => mockFetch.mockReset());
+
+  const bookCalls = () =>
+    mockFetch.mock.calls.filter(([url]) => String(url) === '/api/v2/books')
+      .length;
+
+  it('refreshes quietly when shown again, and keeps the shelf if that fails', async () => {
+    setupFetch(MOCK_PUBLIC_BOOKS);
+    const BookShelf = (await import('../../../src/components/BookShelf'))
+      .default;
+    const { rerender } = render(<BookShelf onSelectBook={vi.fn()} active />);
+    await waitFor(() => expect(bookCalls()).toBeGreaterThan(0));
+    await new Promise((r) => setTimeout(r, 20));
+    const before = bookCalls();
+
+    rerender(<BookShelf onSelectBook={vi.fn()} active={false} />);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(bookCalls()).toBe(before);
+
+    mockFetch.mockImplementation((url: string) =>
+      String(url) === '/api/v2/books'
+        ? Promise.resolve({
+            ok: false,
+            status: 503,
+            json: () => Promise.resolve({}),
+          })
+        : Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    );
+    rerender(<BookShelf onSelectBook={vi.fn()} active />);
+    await waitFor(() => expect(bookCalls()).toBe(before + 1));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 });

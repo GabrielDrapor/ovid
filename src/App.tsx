@@ -12,6 +12,12 @@ function App() {
   const [bookUuid, setBookUuid] = useState<string | null>(null);
   const [shareToken, setShareToken] = useState<string | null>(null);
   const [showBookShelf, setShowBookShelf] = useState(false);
+  // Once opened, the shelf stays mounted while a book is open (hidden, with
+  // its 3D loop paused), so going back to it doesn't load it all again.
+  const [shelfOpened, setShelfOpened] = useState(false);
+  useEffect(() => {
+    if (showBookShelf) setShelfOpened(true);
+  }, [showBookShelf]);
   const [error, setError] = useState<string | null>(null);
 
   // Sync state from URL
@@ -79,19 +85,6 @@ function App() {
     syncFromUrl();
   };
 
-  // Show book shelf on root path
-  if (showBookShelf) {
-    return (
-      <ErrorBoundary>
-        <UserProvider>
-          <div className="App">
-            <BookShelf onSelectBook={handleSelectBook} />
-          </div>
-        </UserProvider>
-      </ErrorBoundary>
-    );
-  }
-
   // Shared book view (no auth needed)
   if (shareToken) {
     return (
@@ -122,18 +115,24 @@ function App() {
     );
   }
 
-  // V2 Book reader
-  if (bookUuid) {
-    return (
-      <ErrorBoundary>
-        <UserProvider>
+  // The shelf and the reader share one UserProvider, so sign-in state and
+  // credits aren't fetched again on every switch.
+  const reading = !showBookShelf && bookUuid !== null;
+  if (!showBookShelf && !shelfOpened && !reading) return null;
+  return (
+    <ErrorBoundary>
+      <UserProvider>
+        {(showBookShelf || shelfOpened) && (
+          <div className={showBookShelf ? 'App' : 'App App-shelf-away'}>
+            <BookShelf onSelectBook={handleSelectBook} active={showBookShelf} />
+          </div>
+        )}
+        {reading && (
           <AppV2 bookUuid={bookUuid} onBackToShelf={handleBackToShelf} />
-        </UserProvider>
-      </ErrorBoundary>
-    );
-  }
-
-  return null;
+        )}
+      </UserProvider>
+    </ErrorBoundary>
+  );
 }
 
 export default App;

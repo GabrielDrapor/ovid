@@ -76,6 +76,8 @@ function isWebGLAvailable(): boolean {
 
 interface BookShelfProps {
   onSelectBook: (bookUuid: string) => void;
+  /** False while a book is open and the shelf waits, hidden, underneath. */
+  active?: boolean;
 }
 
 const DEFAULT_SPINE_RATIO = 1 / 5.3;
@@ -106,7 +108,10 @@ function needsTranslationDrive(book: Book): boolean {
   return book.status === 'processing' && !book.language_pair?.endsWith('-none');
 }
 
-const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
+const BookShelf: React.FC<BookShelfProps> = ({
+  onSelectBook,
+  active = true,
+}) => {
   const { t, locale, setLocale } = useI18n();
   const [confirm, confirmDialog] = useConfirm();
   const [showToast, toast] = useToast();
@@ -455,7 +460,9 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
     []
   );
 
-  const fetchBooks = async () => {
+  // `quiet`: a background refresh. If it fails, the shelf already on
+  // screen stays instead of turning into the error page.
+  const fetchBooks = async ({ quiet = false } = {}) => {
     try {
       const response = await fetch('/api/v2/books');
       if (!response.ok) {
@@ -509,8 +516,9 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
         }
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : t.errors.fetchBooksFailed);
       console.error('Error fetching books:', err);
+      if (quiet) return;
+      setError(err instanceof Error ? err.message : t.errors.fetchBooksFailed);
       setLoading(false);
     }
   };
@@ -518,6 +526,14 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
   useEffect(() => {
     fetchBooks();
   }, [user]);
+
+  // Back from a book: refresh in the background (reading progress, books
+  // whose translation moved on) without the loading veil.
+  const wasActiveRef = useRef(active);
+  useEffect(() => {
+    if (active && !wasActiveRef.current) fetchBooks({ quiet: true });
+    wasActiveRef.current = active;
+  }, [active]);
 
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth <= 768);
@@ -1490,6 +1506,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                     onMoveBook={user ? handleMoveBook : undefined}
                     onSaveSlotLabel={user ? handleSaveSlotLabel : undefined}
                     onAddTargetChange={setAddTarget}
+                    active={active}
                   />
                 </Suspense>
               )}

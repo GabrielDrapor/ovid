@@ -102,6 +102,9 @@ interface BookShelf3DProps {
   onSaveSlotLabel?: (slotId: number, label: string) => Promise<boolean>;
   /** Where the dock's "Add book" button puts a book; null when nowhere. */
   onAddTargetChange?: (target: ShelfUploadTarget | null) => void;
+  /** False while the shelf is hidden behind an open book: no frames are
+   *  drawn, and an open book card is put away. */
+  active?: boolean;
 }
 
 function toUploadTarget(target: PlacedUploadTarget): ShelfUploadTarget {
@@ -2016,6 +2019,7 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
   onMoveBook,
   onSaveSlotLabel,
   onAddTargetChange,
+  active = true,
 }) => {
   const { t } = useI18n();
   const [spineRatios, setSpineRatios] = useState<Map<string, number>>(
@@ -2214,6 +2218,13 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
   }, [selectedUuid, bookByUuid]);
 
   useEffect(() => {
+    if (!active) {
+      setSelectedUuid(null);
+      setEditingLabel(null);
+    }
+  }, [active]);
+
+  useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         setSelectedUuid(null);
@@ -2229,6 +2240,7 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
   return (
     <div className="closet3d-root">
       <Canvas
+        frameloop={active ? 'always' : 'never'}
         dpr={[1, 2]}
         shadows
         camera={{ fov: 38, position: [0, 0, initialZ], near: 0.1, far: 60 }}
