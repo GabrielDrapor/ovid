@@ -27,20 +27,25 @@ import {
   DIVIDER_T,
   DropTarget,
   PlacedShelfLabel,
+  PlacedUploadTarget,
   ROW_HEIGHT,
   ShelfLayout,
   clampSpineRatio,
   layoutBooks,
+  narrowOpeningView,
+  pickAddBookTarget,
   pickMostRecentRead,
   bookFocusPoint,
   resolveDropTarget,
   rowYCenters,
+  targetsBesideOwnBooks,
 } from './layout';
 import {
   averageColor,
   makeCoverCanvas,
   makePageEdgesCanvas,
   makeProcessingCoverCanvas,
+  makeFailedStickerCanvas,
   makeProcessingSpineCanvas,
   makeSpineCanvas,
   makeUploadGhostCanvas,
@@ -58,6 +63,7 @@ import {
   type ShelfStructure,
 } from './shelfThemes';
 import { Icon } from '../Icon';
+import { useChaptersAvailable } from './useChaptersAvailable';
 import './BookShelf3D.css';
 
 // Studio-style environment map shared by chrome, steel panels and book
@@ -94,6 +100,18 @@ interface BookShelf3DProps {
   ) => void;
   /** Persist a slot label edit; resolve true on success. */
   onSaveSlotLabel?: (slotId: number, label: string) => Promise<boolean>;
+  /** Where the dock's "Add book" button puts a book; null when nowhere. */
+  onAddTargetChange?: (target: ShelfUploadTarget | null) => void;
+}
+
+function toUploadTarget(target: PlacedUploadTarget): ShelfUploadTarget {
+  return {
+    shelfSlotId: target.shelfSlotId,
+    row: target.rowCoord,
+    col: target.colCoord,
+    label: target.label ?? null,
+    position: { row: target.visualRow + 1, col: target.visualCol + 1 },
+  };
 }
 
 const DRAG_START_PX_MOUSE = 6;
@@ -113,8 +131,13 @@ const RIBBON_RED = '#a63d2b';
 const MIN_ZOOM = 2.5;
 /** How far the opening view leans toward the last-read book (0 = center). */
 const OPEN_FOCUS_BIAS = 0.6;
-const SHELF_LABEL_HEIGHT = 0.084;
-const SHELF_LABEL_FONT = '900 58px Arial, Helvetica, sans-serif';
+// Tall enough to read at the opening view. It hangs a little below the
+// 0.09 board, still clear of the tallest book in the row underneath.
+const SHELF_LABEL_HEIGHT = 0.14;
+/** How far the label's click area reaches below the label itself. */
+const SHELF_LABEL_HIT_BELOW = 0.035;
+const SHELF_LABEL_FONT = '800 70px Arial, Helvetica, sans-serif';
+const SHELF_LABEL_PLACEHOLDER_FONT = '700 54px Arial, Helvetica, sans-serif';
 
 /** A tiny solid-color canvas used as a neutral placeholder while loading. */
 function makeNeutralCanvas(w = 16, h = 16): HTMLCanvasElement {
@@ -129,17 +152,22 @@ function makeNeutralCanvas(w = 16, h = 16): HTMLCanvasElement {
   return c;
 }
 
-function makeShelfLabelCanvas(text: string): HTMLCanvasElement {
+/** Label art. `placeholder` draws the grey prompt on an empty holder. */
+function makeShelfLabelCanvas(
+  text: string,
+  placeholder = false
+): HTMLCanvasElement {
+  const font = placeholder ? SHELF_LABEL_PLACEHOLDER_FONT : SHELF_LABEL_FONT;
   const measureCanvas = document.createElement('canvas');
   const measureCtx = measureCanvas.getContext('2d');
   const textWidth = (() => {
     if (!measureCtx) return 520;
-    measureCtx.font = SHELF_LABEL_FONT;
+    measureCtx.font = font;
     return Math.ceil(measureCtx.measureText(text).width);
   })();
 
   const c = document.createElement('canvas');
-  c.width = Math.max(780, textWidth + 150);
+  c.width = Math.max(780, textWidth + 120);
   c.height = 132;
   const ctx = c.getContext('2d');
   if (!ctx) return c;
@@ -148,22 +176,24 @@ function makeShelfLabelCanvas(text: string): HTMLCanvasElement {
   ctx.fillStyle = 'rgba(0, 0, 0, 0.34)';
   ctx.fillRect(30, 11, c.width - 60, 116);
 
-  // Black plastic holder, like a clip-on library shelf label.
+  // Black plastic holder, like a clip-on library shelf label. Thin rims
+  // leave most of the height to the paper, so the text can be read from
+  // the opening view.
   ctx.fillStyle = '#11100e';
   ctx.fillRect(20, 4, c.width - 40, 116);
   ctx.fillStyle = '#24211d';
-  ctx.fillRect(20, 4, c.width - 40, 18);
+  ctx.fillRect(20, 4, c.width - 40, 10);
   ctx.fillStyle = '#050504';
-  ctx.fillRect(20, 107, c.width - 40, 13);
-  ctx.fillRect(20, 4, 20, 116);
-  ctx.fillRect(c.width - 40, 4, 20, 116);
+  ctx.fillRect(20, 112, c.width - 40, 8);
+  ctx.fillRect(20, 4, 12, 116);
+  ctx.fillRect(c.width - 32, 4, 12, 116);
 
   // White paper insert.
   ctx.fillStyle = '#f6f4ed';
-  ctx.fillRect(48, 30, c.width - 96, 64);
+  ctx.fillRect(32, 16, c.width - 64, 92);
   ctx.strokeStyle = '#d0cabd';
   ctx.lineWidth = 2;
-  ctx.strokeRect(48, 30, c.width - 96, 64);
+  ctx.strokeRect(32, 16, c.width - 64, 92);
 
   // Subtle paper grain so the label reads as a pasted library shelf marker.
   const noise = seededRandom(`shelf-label-${text}`);
@@ -171,15 +201,15 @@ function makeShelfLabelCanvas(text: string): HTMLCanvasElement {
   for (let i = 0; i < 1200; i++) {
     const v = 120 + Math.floor(noise() * 80);
     ctx.fillStyle = `rgb(${v}, ${v}, ${v})`;
-    ctx.fillRect(48 + noise() * (c.width - 96), 30 + noise() * 64, 1, 1);
+    ctx.fillRect(32 + noise() * (c.width - 64), 16 + noise() * 92, 1, 1);
   }
   ctx.globalAlpha = 1;
 
-  ctx.fillStyle = '#050505';
-  ctx.font = SHELF_LABEL_FONT;
+  ctx.fillStyle = placeholder ? '#8f887a' : '#050505';
+  ctx.font = font;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(text, c.width / 2, 63);
+  ctx.fillText(text, c.width / 2, 64);
   return c;
 }
 
@@ -259,6 +289,8 @@ function ShelfLabel({
   hidden,
   onEdit,
   dragDist,
+  placeholder,
+  gazeHold,
 }: {
   label: PlacedShelfLabel;
   y: number;
@@ -268,15 +300,19 @@ function ShelfLabel({
   hidden: boolean;
   onEdit?: (label: PlacedShelfLabel) => void;
   dragDist: React.MutableRefObject<number>;
+  /** Grey prompt printed on an empty holder ("+ Add label"). */
+  placeholder: string;
+  /** Set while the pointer is on the label: the camera stops following it. */
+  gazeHold: React.MutableRefObject<boolean>;
 }) {
   const [hovered, setHovered] = useState(false);
   const materialRef = useRef<THREE.MeshBasicMaterial>(null);
   const isGhost = !label.text;
 
-  // An unlabeled bay renders as a blank label holder — visibly present (so
-  // the affordance is discoverable) but clearly empty, waiting to be filled.
+  // An unlabeled bay renders as a label holder with a grey prompt, so it's
+  // clear that it can be filled in.
   const art = useMemo(() => {
-    const canvas = makeShelfLabelCanvas(label.text);
+    const canvas = makeShelfLabelCanvas(label.text || placeholder, isGhost);
     const t = new THREE.CanvasTexture(canvas);
     t.colorSpace = THREE.SRGBColorSpace;
     t.anisotropy = 8;
@@ -284,12 +320,22 @@ function ShelfLabel({
       texture: t,
       width: SHELF_LABEL_HEIGHT * (canvas.width / canvas.height),
     };
-  }, [label.text]);
+  }, [label.text, placeholder, isGhost]);
   useEffect(() => () => art.texture.dispose(), [art]);
 
   useEffect(() => {
     if (hidden) setHovered(false);
   }, [hidden]);
+
+  // The camera follows the mouse; holding it still while the pointer is on
+  // a label keeps the label under the pointer long enough to click.
+  useEffect(() => {
+    const hold = hovered && editable && !hidden;
+    if (hold) gazeHold.current = true;
+    return () => {
+      if (hold) gazeHold.current = false;
+    };
+  }, [hovered, editable, hidden, gazeHold]);
 
   useEffect(() => {
     if (!editable || hidden) return;
@@ -299,7 +345,7 @@ function ShelfLabel({
     };
   }, [hovered, editable, hidden]);
 
-  // Blank holders sit at half strength and wake up on hover; filled labels
+  // Empty holders sit a little faded and wake up on hover; filled labels
   // dim slightly on hover when editable, so the click affordance reads
   // without extra chrome.
   useFrame((_, delta) => {
@@ -308,7 +354,7 @@ function ShelfLabel({
     const target = isGhost
       ? hovered
         ? 1
-        : 0.5
+        : 0.8
       : hovered && editable
         ? 0.82
         : 1;
@@ -349,10 +395,11 @@ function ShelfLabel({
         <mesh
           position={[
             label.left + art.width / 2,
-            // Extra hit height extends DOWN into the shelf board only —
-            // growing upward would sit in front of the row above's books
-            // and steal clicks off their bottom edges.
-            y - SHELF_LABEL_HEIGHT / 2,
+            // Extra hit height extends DOWN only, and only a little: growing
+            // upward would sit in front of the books standing on this board,
+            // and much further down in front of the tops of the books in the
+            // row underneath, stealing their clicks.
+            y - SHELF_LABEL_HIT_BELOW / 2,
             BOOK_DEPTH / 2 + 0.16,
           ]}
           onClick={handleClick}
@@ -362,7 +409,12 @@ function ShelfLabel({
           }}
           onPointerOut={() => setHovered(false)}
         >
-          <planeGeometry args={[art.width * 1.15, SHELF_LABEL_HEIGHT * 2]} />
+          <planeGeometry
+            args={[
+              art.width * 1.15,
+              SHELF_LABEL_HEIGHT + SHELF_LABEL_HIT_BELOW,
+            ]}
+          />
           <meshBasicMaterial transparent opacity={0} depthWrite={false} />
         </mesh>
       )}
@@ -382,6 +434,8 @@ interface BookMeshProps {
   processingProgress: number;
   /** Most recently read book: ribbon bookmark + sits pulled out a little. */
   isRecent: boolean;
+  /** Translation failed: a warning sticker at the foot of the spine. */
+  failed: boolean;
   themeId: string;
   /** Accumulated touch-drag distance; large values suppress the tap-click. */
   dragDist: React.MutableRefObject<number>;
@@ -410,6 +464,7 @@ function BookMesh({
   onArtReady,
   processingProgress,
   isRecent,
+  failed,
   themeId,
   dragDist,
   draggable,
@@ -686,6 +741,28 @@ function BookMesh({
   useEffect(() => () => ribbonMat.dispose(), [ribbonMat]);
   const ribbonBase = useMemo(() => new THREE.Color(RIBBON_RED), []);
 
+  // Warning sticker for a failed translation, so the book can be told
+  // apart on the shelf without opening it. Dims with the book.
+  const stickerMat = useMemo(() => {
+    if (!failed) return null;
+    const tex = new THREE.CanvasTexture(makeFailedStickerCanvas());
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = 8;
+    return new THREE.MeshBasicMaterial({
+      map: tex,
+      transparent: true,
+      toneMapped: false,
+    });
+  }, [failed]);
+  useEffect(
+    () => () => {
+      stickerMat?.map?.dispose();
+      stickerMat?.dispose();
+    },
+    [stickerMat]
+  );
+  const stickerSize = Math.min(0.13, width * 0.82);
+
   // Per-theme book response: tint/lift shift the cover colors with the room,
   // sheen adds environment reflection (glossy covers under showroom light).
   const glRef = useThree((s) => s.gl);
@@ -848,6 +925,7 @@ function BookMesh({
         ribbonBase.g * bright,
         ribbonBase.b * bright
       );
+      stickerMat?.color.setScalar(Math.min(1, bright));
     }
   });
 
@@ -951,25 +1029,30 @@ function BookMesh({
           </mesh>
         </group>
       )}
+      {/* At the foot of the spine, like a library sticker: the ribbon
+          already uses the top. */}
+      {stickerMat && (
+        <mesh
+          material={stickerMat}
+          position={[
+            0,
+            -bookHeight / 2 + 0.05 + stickerSize / 2,
+            BOOK_DEPTH / 2 + 0.003,
+          ]}
+        >
+          <planeGeometry args={[stickerSize, stickerSize]} />
+        </mesh>
+      )}
     </group>
   );
 }
 
 interface UploadPlaceholderProps {
-  target: {
-    shelfSlotId?: number | null;
-    rowCoord: number;
-    colCoord: number;
-    label?: string | null;
-    x: number;
-    hitX: number;
-    hitWidth: number;
-    width: number;
-    visualRow: number;
-    visualCol: number;
-  };
+  target: PlacedUploadTarget;
   y: number;
   hidden: boolean;
+  /** Keep the plus visible without hover (next to the viewer's own books). */
+  beckon: boolean;
   themeId: string;
   onUpload: (target: ShelfUploadTarget) => void;
   dragDist: React.MutableRefObject<number>;
@@ -979,6 +1062,7 @@ function UploadPlaceholder({
   target,
   y,
   hidden,
+  beckon,
   onUpload,
   dragDist,
   themeId,
@@ -1035,9 +1119,10 @@ function UploadPlaceholder({
     // Body: barely-there fill volume behind the ghost, hover only.
     const bodyTarget = !hidden && hovered ? 0.14 : 0;
     body.opacity += (bodyTarget - body.opacity) * k;
-    // Plus glyph: hover only — idle slots stay clean so the wall doesn't
-    // fill up with plus signs.
-    const ghostTarget = !hidden && hovered ? 0.95 : 0;
+    // Plus glyph: on hover, and faintly at rest only next to the viewer's
+    // own books — the rest of the wall stays clean instead of filling up
+    // with plus signs.
+    const ghostTarget = hidden ? 0 : hovered ? 0.95 : beckon ? 0.5 : 0;
     spine.opacity += (ghostTarget - spine.opacity) * k;
     group.position.z =
       (hovered && !hidden ? 0.05 : 0) +
@@ -1048,13 +1133,7 @@ function UploadPlaceholder({
     (e: ThreeEvent<MouseEvent>) => {
       e.stopPropagation();
       if (hidden || dragDist.current > 12) return;
-      onUpload({
-        shelfSlotId: target.shelfSlotId,
-        row: target.rowCoord,
-        col: target.colCoord,
-        label: target.label ?? null,
-        position: { row: target.visualRow + 1, col: target.visualCol + 1 },
-      });
+      onUpload(toUploadTarget(target));
     },
     [dragDist, hidden, onUpload, target]
   );
@@ -1131,6 +1210,8 @@ function Bookcase({
   labelsHidden,
   dragDist,
   themeId,
+  labelPlaceholder,
+  gazeHold,
 }: {
   totalRows: number;
   totalCols: number;
@@ -1139,6 +1220,8 @@ function Bookcase({
   labelsHidden: boolean;
   dragDist: React.MutableRefObject<number>;
   themeId: string;
+  labelPlaceholder: string;
+  gazeHold: React.MutableRefObject<boolean>;
 }) {
   const rows = rowYCenters(totalRows);
   const width = totalCols * BAY_PITCH + DIVIDER_T;
@@ -1484,6 +1567,8 @@ function Bookcase({
             hidden={labelsHidden}
             onEdit={onEditLabel}
             dragDist={dragDist}
+            placeholder={labelPlaceholder}
+            gazeHold={gazeHold}
           />
         );
       })}
@@ -1522,6 +1607,10 @@ function CameraRig({
   dragDist,
   dragPointerId,
   openFocus,
+  layout,
+  rowCenters,
+  focusUuid,
+  gazeHold,
 }: {
   focused: boolean;
   contentW: number;
@@ -1534,6 +1623,12 @@ function CameraRig({
   dragPointerId: React.MutableRefObject<number | null>;
   /** Where the last-read book sits; the opening view leans toward it. */
   openFocus: { x: number; y: number } | null;
+  layout: ShelfLayout;
+  rowCenters: number[];
+  /** Last-read book, for the narrow-screen opening view. */
+  focusUuid: string | null;
+  /** True while the pointer rests on a shelf label: hold the gaze still. */
+  gazeHold: React.MutableRefObject<boolean>;
 }) {
   const { camera, gl, size } = useThree();
   const zoom = useRef<number | null>(null);
@@ -1549,8 +1644,6 @@ function CameraRig({
   const leanReleased = useRef(false);
   const lastPointer = useRef<{ x: number; y: number } | null>(null);
   const panSeeded = useRef(false);
-  const openFocusRef = useRef(openFocus);
-  openFocusRef.current = openFocus;
 
   const tanHalf = Math.tan((38 / 2) * (Math.PI / 180));
   const aspect = size.width / size.height;
@@ -1567,8 +1660,28 @@ function CameraRig({
   const maxZoomRef = useRef(maxZoom);
   maxZoomRef.current = maxZoom;
 
+  // Too narrow for the filled bays (phones, tablets held upright): open on
+  // whole bays with books instead of the middle of the wall.
+  const narrowView = useMemo(
+    () =>
+      narrowOpeningView(
+        layout,
+        rowCenters,
+        { aspect, tanHalf, minZoom: MIN_ZOOM, maxZoom },
+        focusUuid
+      ),
+    [layout, rowCenters, aspect, tanHalf, maxZoom, focusUuid]
+  );
+  // The opening view leans toward this point: all the way on a narrow
+  // screen, where it decides which bays are seen at all; partway otherwise.
+  const openTarget = narrowView ?? openFocus;
+  const openBias = narrowView ? 1 : OPEN_FOCUS_BIAS;
+  const openTargetRef = useRef({ point: openTarget, bias: openBias });
+  openTargetRef.current = { point: openTarget, bias: openBias };
+
   // Distance at which the content bays fit in view, with some margin.
   const fitZ = useMemo(() => {
+    if (narrowView) return narrowView.z;
     if (!contentW) return 6;
     const zForWidth = (contentW / 2 + 0.55) / (tanHalf * aspect);
     const zForHeight = contentH / 2 / tanHalf + 0.9;
@@ -1577,7 +1690,7 @@ function CameraRig({
       MIN_ZOOM,
       maxZoom
     );
-  }, [contentW, contentH, tanHalf, aspect, maxZoom]);
+  }, [narrowView, contentW, contentH, tanHalf, aspect, maxZoom]);
 
   // Follow layout changes until the user takes over the wheel.
   useEffect(() => {
@@ -1702,7 +1815,7 @@ function CameraRig({
     }
     lastPointer.current = { x: state.pointer.x, y: state.pointer.y };
 
-    const focus = openFocusRef.current;
+    const { point: focus, bias } = openTargetRef.current;
     const leanTarget = leanReleased.current || !focus ? 0 : 1;
     openLean.current +=
       (leanTarget - openLean.current) * (1 - Math.exp(-delta * 2));
@@ -1710,8 +1823,8 @@ function CameraRig({
     // Touch has no hover gaze to lean, so seed its pan at the same spot.
     if (!panSeeded.current && focus && !leanReleased.current) {
       panSeeded.current = true;
-      pan.current.x = focus.x * OPEN_FOCUS_BIAS;
-      pan.current.y = wallMidY + (focus.y - wallMidY) * OPEN_FOCUS_BIAS;
+      pan.current.x = focus.x * bias;
+      pan.current.y = wallMidY + (focus.y - wallMidY) * bias;
     }
 
     let tx: number;
@@ -1721,6 +1834,10 @@ function CameraRig({
       pan.current.y = THREE.MathUtils.clamp(pan.current.y, yMin, yMax);
       tx = pan.current.x;
       ty = pan.current.y;
+    } else if (gazeHold.current) {
+      // The pointer is on a shelf label: stay put so it can be clicked.
+      tx = camera.position.x;
+      ty = camera.position.y;
     } else {
       // While a book is presented, quiet the gaze so the pose feels stable.
       const gaze = focused ? 0.18 : 1;
@@ -1741,13 +1858,9 @@ function CameraRig({
       if (focus && openLean.current > 0.001) {
         // Lean partway toward the book — enough to say "you were here",
         // not so far that the shelf looks off-center.
-        const leanX = THREE.MathUtils.clamp(
-          focus.x * OPEN_FOCUS_BIAS,
-          -xMax,
-          xMax
-        );
+        const leanX = THREE.MathUtils.clamp(focus.x * bias, -xMax, xMax);
         const leanY = THREE.MathUtils.clamp(
-          wallMidY + (focus.y - wallMidY) * OPEN_FOCUS_BIAS,
+          wallMidY + (focus.y - wallMidY) * bias,
           yMin,
           yMax
         );
@@ -1902,6 +2015,7 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
   onUploadToSlot,
   onMoveBook,
   onSaveSlotLabel,
+  onAddTargetChange,
 }) => {
   const { t } = useI18n();
   const [spineRatios, setSpineRatios] = useState<Map<string, number>>(
@@ -1992,6 +2106,32 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
     () => pickMostRecentRead(books, progressMap),
     [books, progressMap]
   );
+
+  // Where a signed-in reader can add a book: the spots beside their own
+  // books keep a faint plus, and the dock's "Add book" uses the first one
+  // (or an empty bay when they have no books yet).
+  const ownUuids = useMemo(
+    () =>
+      new Set(
+        currentUserId == null
+          ? []
+          : books.filter((b) => b.user_id === currentUserId).map((b) => b.uuid)
+      ),
+    [books, currentUserId]
+  );
+  const addTarget = useMemo(
+    () => (onUploadToSlot ? pickAddBookTarget(layout, ownUuids) : null),
+    [layout, ownUuids, onUploadToSlot]
+  );
+  const beckonKeys = useMemo(() => {
+    if (!onUploadToSlot) return new Set<string>();
+    const beside = targetsBesideOwnBooks(layout, ownUuids);
+    const shown = beside.length > 0 ? beside : addTarget ? [addTarget] : [];
+    return new Set(shown.map((t) => `${t.rowCoord}:${t.colCoord}`));
+  }, [layout, ownUuids, addTarget, onUploadToSlot]);
+  useEffect(() => {
+    onAddTargetChange?.(addTarget ? toUploadTarget(addTarget) : null);
+  }, [addTarget, onAddTargetChange]);
   const {
     placements,
     slotLabels,
@@ -2021,6 +2161,8 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
   const dragPointerId = useRef<number | null>(null);
   const dragWorldPos = useRef(new THREE.Vector3());
   const dragShift = useRef<{ uuids: Set<string>; amount: number } | null>(null);
+  // Set while the pointer rests on a shelf label (see ShelfLabel).
+  const gazeHold = useRef(false);
   const bookByUuid = useMemo(
     () => new Map(books.map((b) => [b.uuid, b])),
     [books]
@@ -2060,6 +2202,9 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
     ? isBookImportPending(selectedBook)
     : false;
   const selectedFailed = selectedBook?.status === 'error';
+  const failedReadable = useChaptersAvailable(
+    selectedFailed ? selectedBook.uuid : null
+  );
 
   // If the selected book disappears (e.g. deleted), close the panel.
   useEffect(() => {
@@ -2114,6 +2259,8 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
             labelsHidden={selectedUuid !== null}
             dragDist={dragDist}
             themeId={shelfTheme}
+            labelPlaceholder={t.closet.addLabel}
+            gazeHold={gazeHold}
           />
         )}
 
@@ -2139,6 +2286,7 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
               onArtReady={handleArtReady}
               processingProgress={processingProgress}
               isRecent={p.uuid === recentUuid}
+              failed={book.status === 'error'}
               themeId={shelfTheme}
               dragDist={dragDist}
               draggable={
@@ -2165,6 +2313,7 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
                 target={target}
                 y={y}
                 hidden={loading || selectedUuid !== null}
+                beckon={beckonKeys.has(`${target.rowCoord}:${target.colCoord}`)}
                 themeId={shelfTheme}
                 onUpload={onUploadToSlot}
                 dragDist={dragDist}
@@ -2182,6 +2331,10 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
           dragDist={dragDist}
           dragPointerId={dragPointerId}
           openFocus={openFocus}
+          layout={layout}
+          rowCenters={rowCenters}
+          focusUuid={recentUuid}
+          gazeHold={gazeHold}
         />
       </Canvas>
 
@@ -2361,7 +2514,9 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
             })()
           )}
 
-          {(!(selectedPending || selectedFailed) || selectedBook.user_id) && (
+          {(!(selectedPending || selectedFailed) ||
+            failedReadable ||
+            selectedBook.user_id) && (
             <div className="closet3d-panel-actions">
               {!(selectedPending || selectedFailed) && (
                 <button
@@ -2369,6 +2524,14 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
                   onClick={() => onRead(selectedBook.uuid)}
                 >
                   {t.common.read}
+                </button>
+              )}
+              {selectedFailed && failedReadable && (
+                <button
+                  className="closet3d-read-btn"
+                  onClick={() => onRead(selectedBook.uuid)}
+                >
+                  {t.closet.readOriginal}
                 </button>
               )}
               {selectedBook.user_id && (

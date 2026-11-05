@@ -734,3 +734,146 @@ export function pickMostRecentRead(
   }
   return bestUuid;
 }
+
+const targetKey = (t: { rowCoord: number; colCoord: number }) =>
+  `${t.rowCoord}:${t.colCoord}`;
+
+/** Upload targets in reading order: top row first, left to right. */
+function targetsInReadingOrder(layout: ShelfLayout): PlacedUploadTarget[] {
+  return layout.uploadTargets
+    .slice()
+    .sort((a, b) => a.visualRow - b.visualRow || a.visualCol - b.visualCol);
+}
+
+/**
+ * Empty spots in bays that already hold some of the viewer's own books.
+ * Their plus sign stays visible, so the place to add a book can be found
+ * without hovering (touch screens have no hover).
+ */
+export function targetsBesideOwnBooks(
+  layout: ShelfLayout,
+  ownUuids: ReadonlySet<string>
+): PlacedUploadTarget[] {
+  if (ownUuids.size === 0) return [];
+  const ownBays = new Set(
+    layout.bays
+      .filter((bay) => bay.bookUuids.some((uuid) => ownUuids.has(uuid)))
+      .map(targetKey)
+  );
+  return targetsInReadingOrder(layout).filter((t) => ownBays.has(targetKey(t)));
+}
+
+/**
+ * Where "Add book" puts a new book: next to the viewer's own books when
+ * any bay of theirs has room, otherwise the first empty bay inside the
+ * filled part of the wall, otherwise the first spot in the row under it.
+ */
+export function pickAddBookTarget(
+  layout: ShelfLayout,
+  ownUuids: ReadonlySet<string>
+): PlacedUploadTarget | null {
+  const besideOwn = targetsBesideOwnBooks(layout, ownUuids);
+  if (besideOwn.length > 0) return besideOwn[0];
+  const ordered = targetsInReadingOrder(layout);
+  const occupied = new Set(
+    layout.bays.filter((bay) => bay.bookUuids.length > 0).map(targetKey)
+  );
+  const inside = ordered.find(
+    (t) =>
+      t.row >= 0 &&
+      t.row < layout.contentRows &&
+      t.visualCol >= 1 &&
+      t.visualCol <= layout.contentCols &&
+      !occupied.has(targetKey(t))
+  );
+  if (inside) return inside;
+  const below = ordered.find(
+    (t) => t.row === layout.contentRows && t.visualCol >= 1
+  );
+  return below ?? ordered[0] ?? null;
+}
+
+export interface OpeningViewInput {
+  /** Viewport width / height. */
+  aspect: number;
+  /** tan(fov / 2) of the camera. */
+  tanHalf: number;
+  /** Closest and farthest camera distances allowed. */
+  minZoom: number;
+  maxZoom: number;
+}
+
+/**
+ * Opening camera for a screen too narrow to show the filled part of the
+ * wall (phones, tablets held upright). Instead of the wall's middle, which
+ * cut a bay in half and often showed empty rows, it frames as many whole
+ * bays as fit around the last-read book, or around the first book in
+ * reading order, and sits on the rows that hold books there. Returns null
+ * when the filled part fits; the normal framing applies then.
+ */
+export function narrowOpeningView(
+  layout: ShelfLayout,
+  rowCenters: ReadonlyArray<number>,
+  view: OpeningViewInput,
+  focusUuid: string | null,
+  bayPitch: number = BAY_PITCH,
+  rowHeight: number = ROW_HEIGHT
+): { x: number; y: number; z: number } | null {
+  const { placements, contentCols, totalCols } = layout;
+  if (contentCols === 0 || placements.length === 0) return null;
+  const halfWidthPerZ = view.tanHalf * view.aspect;
+  // The same margin the normal framing keeps around the filled bays.
+  const contentZ = ((contentCols * bayPitch) / 2 + 0.55) / halfWidthPerZ;
+  if (contentZ <= view.maxZoom) return null;
+
+  // Whole bays that fit at the farthest allowed zoom (at least one).
+  const margin = 0.12;
+  const widest = 2 * halfWidthPerZ * view.maxZoom;
+  const n = Math.max(
+    1,
+    Math.min(contentCols, Math.floor((widest - 2 * margin) / bayPitch))
+  );
+  const z = Math.min(
+    view.maxZoom,
+    Math.max(view.minZoom, ((n * bayPitch) / 2 + margin) / halfWidthPerZ)
+  );
+
+  // Visual column of a world x (inverse of the bay-center formula).
+  const colOf = (x: number) => Math.round(x / bayPitch + totalCols / 2 - 0.5);
+  const focus = focusUuid
+    ? placements.find((p) => p.uuid === focusUuid)
+    : undefined;
+  const first = placements
+    .slice()
+    .sort((a, b) => a.row - b.row || a.x - b.x)[0];
+  const anchor = focus ?? first;
+  // Content columns are 1…contentCols on the wall (column 0 is the ring).
+  const start = Math.min(
+    Math.max(1, colOf(anchor.x) - Math.floor((n - 1) / 2)),
+    Math.max(1, contentCols - n + 1)
+  );
+  const x = (start + n / 2 - totalCols / 2) * bayPitch;
+
+  let y: number;
+  if (focus) {
+    y = rowCenters[focus.row + 1];
+  } else {
+    const rows = placements
+      .filter((p) => {
+        const col = colOf(p.x);
+        return col >= start && col < start + n;
+      })
+      .map((p) => p.row);
+    const top = Math.min(...rows);
+    const bottom = Math.max(...rows);
+    const visibleH = 2 * view.tanHalf * z;
+    const spanTop = rowCenters[top + 1] + rowHeight / 2;
+    const spanBottom = rowCenters[bottom + 1] - rowHeight / 2;
+    // All of the book rows when they fit, else start from the top one.
+    y =
+      spanTop - spanBottom <= visibleH
+        ? (spanTop + spanBottom) / 2
+        : spanTop + 0.15 - visibleH / 2;
+  }
+  return { x, y, z };
+}

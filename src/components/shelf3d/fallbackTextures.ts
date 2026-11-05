@@ -161,6 +161,34 @@ function isPlaceholderTitle(title: string): boolean {
   return title.trim().toLowerCase() === 'processing...';
 }
 
+/**
+ * Title color on a spine still being prepared: dark ink while the pale fog
+ * is thick, light print once the spine has darkened.
+ */
+export function processingTitleInk(progress: number): string {
+  const p = clampProgress(progress);
+  return p < 0.5
+    ? 'rgba(58, 53, 45, 0.78)'
+    : `rgba(255, 250, 240, ${(0.6 + 0.4 * p).toFixed(2)})`;
+}
+
+/**
+ * Shorten `text` with a trailing ellipsis until `measure` says it fits in
+ * `maxWidth`. Each step drops one character, so it always ends.
+ */
+export function fitText(
+  text: string,
+  maxWidth: number,
+  measure: (t: string) => number
+): string {
+  if (measure(text) <= maxWidth) return text;
+  let kept = text;
+  while (kept.length > 1 && measure(kept + '…') > maxWidth) {
+    kept = kept.slice(0, -1);
+  }
+  return kept + '…';
+}
+
 export function makeProcessingSpineCanvas(
   title: string,
   progress: number
@@ -198,22 +226,7 @@ export function makeProcessingSpineCanvas(
   ctx.fillStyle = shine;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  if (!isPlaceholderTitle(title) && p > 0.45) {
-    ctx.translate(canvas.width / 2, canvas.height / 2);
-    ctx.rotate(-Math.PI / 2);
-    ctx.fillStyle = `rgba(255, 250, 240, ${(p - 0.45) / 0.55})`;
-    ctx.font = '600 38px Georgia, "Songti SC", serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    let text = title;
-    while (
-      text.length > 1 &&
-      ctx.measureText(text).width > canvas.height - 70
-    ) {
-      text = text.slice(0, -2) + '...';
-    }
-    ctx.fillText(text, 0, 0);
-  } else {
+  if (isPlaceholderTitle(title)) {
     ctx.fillStyle = `rgba(255, 250, 240, ${0.12 + p * 0.18})`;
     ctx.fillRect(canvas.width / 2 - 10, 90, 20, canvas.height - 180);
   }
@@ -221,6 +234,26 @@ export function makeProcessingSpineCanvas(
 
   ctx.fillStyle = `rgba(238, 232, 220, ${fog})`;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // The title is printed from the start, outside the blur and the fog, so
+  // several books still being prepared can be told apart.
+  if (!isPlaceholderTitle(title)) {
+    const ink = processingTitleInk(p);
+    ctx.save();
+    ctx.translate(canvas.width / 2, canvas.height / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillStyle = ink;
+    ctx.font = '600 38px Georgia, "Songti SC", serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const text = fitText(
+      title,
+      canvas.height - 70,
+      (t) => ctx.measureText(t).width
+    );
+    ctx.fillText(text, 0, 0);
+    ctx.restore();
+  }
 
   ctx.strokeStyle = `rgba(255, 250, 240, ${0.18 + p * 0.3})`;
   ctx.lineWidth = 2;
@@ -339,4 +372,27 @@ function wrapText(
   }
   if (current) lines.push(current);
   return lines.slice(0, 4);
+}
+
+/** Round warning sticker for a book whose translation failed. */
+export function makeFailedStickerCanvas(): HTMLCanvasElement {
+  const canvas = document.createElement('canvas');
+  canvas.width = 128;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return canvas;
+  ctx.beginPath();
+  ctx.arc(64, 64, 60, 0, Math.PI * 2);
+  ctx.fillStyle = '#f6f1e6';
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(64, 64, 52, 0, Math.PI * 2);
+  ctx.fillStyle = '#c4452f';
+  ctx.fill();
+  ctx.fillStyle = '#fffaf0';
+  ctx.font = '900 76px Arial, Helvetica, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('!', 64, 68);
+  return canvas;
 }

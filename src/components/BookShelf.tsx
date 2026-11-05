@@ -23,7 +23,7 @@ import {
   loadShelfThemePref,
   saveShelfThemePref,
 } from './shelf3d/shelfThemes';
-import { Spinner } from './Icon';
+import { Icon, Spinner } from './Icon';
 import { errorDetail, useConfirm, useEscapeLayer, useToast } from './Dialogs';
 import './BookShelf.css';
 
@@ -131,6 +131,19 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
   const [openDockMenu, setOpenDockMenu] = useState<
     'user' | 'help' | 'theme' | 'signin' | null
   >(null);
+  // The sign-in menu says why it opened when "Add book" opened it.
+  const [signinForAdd, setSigninForAdd] = useState(false);
+  useEffect(() => {
+    if (openDockMenu !== 'signin') setSigninForAdd(false);
+  }, [openDockMenu]);
+  // Where "Add book" puts a book, chosen by the 3D closet's layout.
+  const [addTarget, setAddTarget] = useState<ShelfUploadTarget | null>(null);
+  // Touch screens get touch wording in the dock hint. Phones have no room
+  // for it in the dock, so it sits above the dock until the first touch.
+  const [touchUi] = useState(
+    () => window.matchMedia?.('(hover: none)').matches ?? false
+  );
+  const [touchHintSeen, setTouchHintSeen] = useState(false);
   // Email OTP sign-in flow state
   const [signinEmail, setSigninEmail] = useState('');
   const [signinCode, setSigninCode] = useState('');
@@ -264,6 +277,18 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
     setSkipTranslation(false);
     setShowUploadModal(true);
   }, []);
+
+  // The dock's "Add book": the upload form for the spot the closet picked,
+  // or, signed out, the sign-in menu with a line saying why.
+  const handleAddBook = () => {
+    if (!user) {
+      setOpenDockMenu('signin');
+      setSigninForAdd(true);
+      return;
+    }
+    setOpenDockMenu(null);
+    openUploadModal(addTarget ?? undefined);
+  };
 
   const closeUploadModal = useCallback(() => {
     estimateRequestRef.current++;
@@ -1440,6 +1465,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                 opacity: loading ? 0 : 1,
                 transition: 'opacity 0.5s ease-in-out',
               }}
+              onPointerDownCapture={() => setTouchHintSeen(true)}
             >
               {use3D && (
                 <Suspense
@@ -1463,6 +1489,7 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                     onUploadToSlot={user ? openUploadModal : undefined}
                     onMoveBook={user ? handleMoveBook : undefined}
                     onSaveSlotLabel={user ? handleSaveSlotLabel : undefined}
+                    onAddTargetChange={setAddTarget}
                   />
                 </Suspense>
               )}
@@ -1549,6 +1576,11 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                     </button>
                     {openDockMenu === 'signin' && (
                       <div className="shelf-signin-dropdown dock-menu">
+                        {signinForAdd && (
+                          <p className="signin-add-hint">
+                            {t.shelf.signInToAdd}
+                          </p>
+                        )}
                         <button className="signin-google-btn" onClick={login}>
                           <svg viewBox="0 0 24 24" width="16" height="16">
                             <path
@@ -1657,6 +1689,17 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                       </div>
                     )}
                   </div>
+                )}
+                {use3D && !userLoading && (
+                  <button
+                    type="button"
+                    className="shelf-add-btn"
+                    aria-label={t.shelf.addBook}
+                    onClick={handleAddBook}
+                  >
+                    <Icon name="plus" size={14} />
+                    <span className="shelf-add-label">{t.shelf.addBook}</span>
+                  </button>
                 )}
                 <div className="shelf-help-wrapper shelf-menu-wrapper">
                   <button
@@ -1776,9 +1819,16 @@ const BookShelf: React.FC<BookShelfProps> = ({ onSelectBook }) => {
                   </div>
                 )}
                 {use3D && (
-                  <span className="closet-dock-hint">{t.shelf.dockHint}</span>
+                  <span className="closet-dock-hint">
+                    {touchUi ? t.shelf.dockHintTouch : t.shelf.dockHint}
+                  </span>
                 )}
               </div>
+              {use3D && isMobile && !touchHintSeen && !loading && (
+                <p className="closet-touch-hint" aria-hidden="true">
+                  {touchUi ? t.shelf.dockHintTouch : t.shelf.dockHint}
+                </p>
+              )}
               {!use3D && row2Books.length > 0 && (
                 <div
                   key={`row2-${page}`}
