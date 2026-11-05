@@ -155,9 +155,17 @@ export const zh: Messages = {
     chapters: '章节',
     markAsRead: '标记为已读',
     share: '分享',
-    copyShareLink: '复制分享链接',
+    shareOn: '已开启',
+    shareIntro: '拿到链接的人不用登录就能读这本书。',
+    createShareLink: '创建链接',
+    shareLink: '分享链接',
+    copyLink: '复制链接',
     copied: '已复制',
-    revokeShare: '取消分享',
+    copyFailed: '没能复制，请选中链接自己复制。',
+    shareVia: '分享到…',
+    stopSharing: '停止分享',
+    stopSharingTitle: '停止分享这本书？',
+    stopSharingMessage: '已经发出去的链接会全部失效。之后可以再创建新链接。',
     theme: '主题',
     themeAuto: '跟随系统',
     themeAutoShort: '自动',
@@ -191,6 +199,11 @@ export const zh: Messages = {
     searchPlaceholder: '搜索原文与译文…',
     searching: '搜索中…',
     searchNoResults: '未找到匹配内容',
+    searchFailed: '没能搜索，请检查网络后重试。',
+    searchMoreFailed: '没能加载更多结果。',
+    showMoreResults: '显示更多结果',
+    searchResultCount: (count: number, more: boolean) =>
+      more ? `超过 ${count} 条结果` : `${count} 条结果`,
   },
 
   auth: {
@@ -213,8 +226,8 @@ export const zh: Messages = {
     notFoundTitle: '找不到这本书',
     notFoundMessage: '它可能已经被删除，或者需要登录后才能打开。',
     markReadFailed: '没能保存，请重试。',
-    createShareFailed: '创建分享链接失败',
-    revokeShareFailed: '取消分享失败',
+    createShareFailed: '没能创建链接，请重试。',
+    revokeShareFailed: '没能停止分享，请重试。',
   },
 
   shared: {

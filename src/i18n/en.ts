@@ -157,9 +157,20 @@ export const en = {
     chapters: 'Chapters',
     markAsRead: 'Mark as read',
     share: 'Share',
-    copyShareLink: 'Copy share link',
+    // Beside Share in the menu while the book has a link.
+    shareOn: 'On',
+    shareIntro: 'Anyone with the link can read this book, without signing in.',
+    createShareLink: 'Create link',
+    shareLink: 'Share link',
+    copyLink: 'Copy link',
     copied: 'Copied',
-    revokeShare: 'Revoke share',
+    copyFailed: "Couldn't copy. Select the link and copy it yourself.",
+    // Opens the system share sheet (phones).
+    shareVia: 'Share via…',
+    stopSharing: 'Stop sharing',
+    stopSharingTitle: 'Stop sharing this book?',
+    stopSharingMessage:
+      'The link will stop working for everyone who has it. You can create a new one later.',
     theme: 'Theme',
     themeAuto: 'Auto (follow system)',
     themeAutoShort: 'Auto',
@@ -195,6 +206,16 @@ export const en = {
     searchPlaceholder: 'Search original & translation…',
     searching: 'Searching…',
     searchNoResults: 'No matches found',
+    searchFailed: "Couldn't search. Check your connection and try again.",
+    searchMoreFailed: "Couldn't load more results.",
+    showMoreResults: 'Show more results',
+    // Results come in pages; `more` means there are further pages.
+    searchResultCount: (count: number, more: boolean) =>
+      more
+        ? `${count}+ results`
+        : count === 1
+          ? '1 result'
+          : `${count} results`,
   },
 
   auth: {
@@ -218,8 +239,8 @@ export const en = {
     notFoundMessage:
       'It may have been removed, or you may need to sign in to open it.',
     markReadFailed: "Couldn't save. Please try again.",
-    createShareFailed: 'Failed to create share link',
-    revokeShareFailed: 'Failed to revoke share',
+    createShareFailed: "Couldn't create the link. Please try again.",
+    revokeShareFailed: "Couldn't stop sharing. Please try again.",
   },
 
   shared: {

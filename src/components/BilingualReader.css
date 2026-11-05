@@ -219,8 +219,119 @@
 /* Chevron on the Typography item, which opens its own page. */
 .fab-chevron {
   display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: 14px;
   color: var(--rt-text-muted, #8a8171);
+}
+
+.fab-menu-meta {
+  font-size: 12px;
+}
+
+/* Share page: what sharing means, the link itself, Copy / Share via,
+   and Stop sharing at the end. */
+.fab-share {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 6px 16px 10px;
+}
+
+.fab-share-note {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--rt-text-muted, #8a8171);
+}
+
+.fab-share-link {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--rt-border, #e6dfcc);
+  background: var(--rt-surface-alt, #f2edde);
+  color: var(--rt-text, #2f2a21);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  outline: none;
+}
+
+.fab-share-link:focus {
+  border-color: var(--rt-accent, #8b5a2b);
+}
+
+.fab-share-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.fab-share-btn {
+  flex: 1;
+  min-height: 34px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--rt-border, #e6dfcc);
+  background: transparent;
+  color: var(--rt-text, #2f2a21);
+  font-size: 13px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s ease;
+}
+
+.fab-share-btn-primary {
+  border-color: var(--rt-accent, #8b5a2b);
+  background: var(--rt-accent, #8b5a2b);
+  color: var(--rt-surface, #fffdf6);
+}
+
+@media (hover: hover) {
+  .fab-share-btn:hover {
+    background: var(--rt-surface-alt, #f2edde);
+  }
+
+  .fab-share-btn-primary:hover {
+    background: var(--rt-accent, #8b5a2b);
+    filter: brightness(1.1);
+  }
+}
+
+.fab-share-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.fab-share-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--rt-text-muted, #8a8171);
+}
+
+.fab-share-status-error {
+  color: #b4533c;
+}
+
+.fab-share-stop {
+  align-self: flex-start;
+  padding: 4px 0;
+  border: none;
+  background: none;
+  color: #b4533c;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.fab-share-stop:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 /* Header of a menu page (Typography): back button + title. */
@@ -569,6 +680,13 @@ h3.chapter-text {
   bottom: 0;
   background-color: rgba(0, 0, 0, 0.5);
   z-index: -1;
+  animation: chapters-backdrop-in 0.2s ease both;
+}
+
+@keyframes chapters-backdrop-in {
+  from {
+    opacity: 0;
+  }
 }
 
 .chapters-content {
@@ -581,6 +699,21 @@ h3.chapter-text {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  animation: chapters-content-in 0.22s ease both;
+}
+
+@keyframes chapters-content-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chapters-backdrop,
+  .chapters-content {
+    animation: none;
+  }
 }
 
 .chapters-header {
@@ -623,6 +756,7 @@ h3.chapter-text {
 
 .chapters-list {
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 16px;
   flex: 1;
 }
@@ -661,6 +795,43 @@ h3.chapter-text {
   font-size: 13px;
   color: var(--rt-text-muted, #8a8171);
   text-align: center;
+}
+
+.search-status-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  color: var(--rt-text, #2f2a21);
+}
+
+.search-count {
+  padding: 0 16px 6px;
+  font-size: 12px;
+  color: var(--rt-text-muted, #8a8171);
+}
+
+.search-action,
+.search-more {
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--rt-border, #e6dfcc);
+  background: transparent;
+  color: var(--rt-text, #2f2a21);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.search-more {
+  display: block;
+  margin: 12px auto 4px;
+}
+
+@media (hover: hover) {
+  .search-action:hover,
+  .search-more:hover {
+    background: var(--rt-surface-alt, #f2edde);
+  }
 }
 
 .search-result-item {
@@ -751,22 +922,19 @@ h3.chapter-text {
   min-width: 0;
 }
 
+/* Long titles wrap, so the whole name can be read. */
 .chapter-title-original {
   font-size: 16px;
   font-weight: 500;
   color: var(--rt-text, #2f2a21);
   margin-bottom: 4px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
 }
 
 .chapter-title-translated {
   font-size: 14px;
   color: var(--rt-text-muted, #8a8171);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
 }
 
 /* Shown in place of the chapter while it loads. */
@@ -1375,4 +1543,13 @@ sup {
     background-color: var(--rt-fab-bg, #3a3324);
     filter: brightness(1.15);
   }
+}
+
+/* Confirm dialogs opened from the reader (Stop sharing) use the reader
+   theme's colours instead of the shelf's paper. */
+.bilingual-reader .ov-dialog-overlay {
+  --ov-dialog-paper: var(--rt-surface, #fffdf6);
+  --ov-dialog-ink: var(--rt-text, #2f2a21);
+  --ov-dialog-muted: var(--rt-text-muted, #8a8171);
+  --ov-dialog-line: var(--rt-border, #e6dfcc);
 }

@@ -41,6 +41,100 @@ export function useEscapeLayer(onEscape: () => void, active = true) {
   }, [active]);
 }
 
+/** True while any layer from useEscapeLayer is open, e.g. so arrow keys
+ *  don't turn pages behind a panel. */
+export const hasOpenLayer = () => escapeLayers.length > 0;
+
+const FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/**
+ * While `active`, keyboard focus belongs to the element in `ref`: it moves
+ * to `initial()` (or the first control) on open, Tab wraps inside it when
+ * `trap` is set, and on close it goes back where it was, or to `fallback()`
+ * when that element is gone (e.g. a menu item that closed with its menu).
+ * Focus moves never scroll the page.
+ */
+export function useFocusReturn(
+  ref: React.RefObject<HTMLElement | null>,
+  active: boolean,
+  {
+    initial,
+    fallback,
+    trap = false,
+  }: {
+    initial?: () => HTMLElement | null | undefined;
+    fallback?: () => HTMLElement | null | undefined;
+    trap?: boolean;
+  } = {}
+) {
+  const initialRef = useRef(initial);
+  initialRef.current = initial;
+  const fallbackRef = useRef(fallback);
+  fallbackRef.current = fallback;
+  useEffect(() => {
+    const root = ref.current;
+    if (!active || !root) return;
+    const previous = document.activeElement as HTMLElement | null;
+    const first =
+      initialRef.current?.() ??
+      root.querySelector<HTMLElement>(FOCUSABLE) ??
+      root;
+    first.focus({ preventScroll: true });
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!trap || e.key !== 'Tab') return;
+      const items = Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE));
+      if (items.length === 0) return;
+      const last = items[items.length - 1];
+      if (e.shiftKey && document.activeElement === items[0]) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        items[0].focus();
+      }
+    };
+    root.addEventListener('keydown', onKeyDown);
+    return () => {
+      root.removeEventListener('keydown', onKeyDown);
+      // Leave focus alone if it already moved somewhere else on purpose.
+      const now = document.activeElement;
+      if (now && now !== document.body && !root.contains(now)) return;
+      const back =
+        previous && previous.isConnected && previous !== document.body
+          ? previous
+          : fallbackRef.current?.();
+      back?.focus({ preventScroll: true });
+    };
+  }, [ref, active, trap]);
+}
+
+// Open scroll locks; the page scrolls again when the last one closes.
+let scrollLocks = 0;
+
+/** Keep the page behind an open panel from scrolling. Only `overflow`
+ *  changes, so the page stays where it was (the reader saves progress from
+ *  what is on screen); a classic scrollbar's width is padded so the text
+ *  doesn't reflow. */
+export function useScrollLock(active: boolean) {
+  useEffect(() => {
+    if (!active) return;
+    const root = document.documentElement;
+    if (scrollLocks++ === 0) {
+      const scrollbar = window.innerWidth - root.clientWidth;
+      root.style.overflow = 'hidden';
+      if (scrollbar > 0) root.style.paddingRight = `${scrollbar}px`;
+    }
+    return () => {
+      if (--scrollLocks === 0) {
+        root.style.overflow = '';
+        root.style.paddingRight = '';
+      }
+    };
+  }, [active]);
+}
+
 export interface ConfirmOptions {
   title: string;
   message?: string;
