@@ -1203,7 +1203,42 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
     setIsMenuOpen(false);
     setMenuPage('main');
   };
-  const toggleMenu = () => (isMenuOpen ? closeMenu() : setIsMenuOpen(true));
+  // Where the reader is, measured when the menu opens: which chapter, and
+  // how far through the book. Chapters count as equal parts, and the
+  // scroll position gives the part of the current one already read.
+  const [menuPosition, setMenuPosition] = useState<{
+    index: number;
+    total: number;
+    percent: number;
+  } | null>(null);
+  const openMenu = () => {
+    const found = chapters.findIndex(
+      (c) => c.chapter_number === currentChapter
+    );
+    const index = found >= 0 ? found + 1 : currentChapter;
+    const total = Math.max(chapters.length || totalChapters, index, 1);
+    const root = document.documentElement;
+    const scrollable = root.scrollHeight - window.innerHeight;
+    const inChapter =
+      scrollable > 0
+        ? Math.min(1, Math.max(0, window.scrollY / scrollable))
+        : 0;
+    setMenuPosition({
+      index,
+      total,
+      percent: Math.round(((index - 1 + inChapter) / total) * 100),
+    });
+    setIsMenuOpen(true);
+  };
+  const toggleMenu = () => (isMenuOpen ? closeMenu() : openMenu());
+  const currentChapterInfo = chapters.find(
+    (c) => c.chapter_number === currentChapter
+  );
+  const currentChapterTitle = currentChapterInfo
+    ? showOriginal
+      ? currentChapterInfo.original_title || currentChapterInfo.title
+      : currentChapterInfo.title || currentChapterInfo.original_title
+    : '';
 
   // Escape closes the newest open layer only (a confirm over the menu, the
   // note popover, the contents or search panel, the menu).
@@ -1827,6 +1862,23 @@ const BilingualReaderV2: React.FC<BilingualReaderV2Props> = ({
               </>
             ) : (
               <>
+                {menuPosition && (
+                  <div className="fab-menu-position">
+                    {currentChapterTitle && (
+                      <span className="fab-menu-position-title">
+                        {currentChapterTitle}
+                      </span>
+                    )}
+                    <span className="fab-menu-position-meta">
+                      {t.reader.chapterOf(
+                        menuPosition.index,
+                        menuPosition.total
+                      )}
+                      {' · '}
+                      {t.reader.bookPercent(menuPosition.percent)}
+                    </span>
+                  </div>
+                )}
                 {/* Primary actions */}
                 {onBackToShelf && (
                   <button className="fab-menu-item" onClick={onBackToShelf}>

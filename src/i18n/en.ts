@@ -157,6 +157,9 @@ export const en = {
     viewInContext: 'View in context',
     returnToReading: 'Return to reading',
     backToShelf: 'Back to shelf',
+    // Top of the menu: where the reader is in the book.
+    chapterOf: (n: number, total: number) => `Chapter ${n} of ${total}`,
+    bookPercent: (pct: number) => `${pct}% of the book`,
     showTranslation: 'Show translation',
     showOriginal: 'Show original',
     chapters: 'Chapters',

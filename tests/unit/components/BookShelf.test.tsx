@@ -294,3 +294,33 @@ describe('BookShelf - back from a book', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 });
+
+describe('BookShelf - language in the account menu', () => {
+  beforeEach(() => {
+    mockFetch.mockReset();
+    localStorage.setItem('ovid-locale', 'en');
+  });
+
+  it('switches the interface language from the account menu', async () => {
+    setupFetch(MOCK_PUBLIC_BOOKS);
+    const BookShelf = (await import('../../../src/components/BookShelf'))
+      .default;
+    const { I18nProvider } = await import('../../../src/i18n');
+    const { container } = render(
+      <I18nProvider>
+        <BookShelf onSelectBook={vi.fn()} />
+      </I18nProvider>
+    );
+    const avatar = await waitFor(() => {
+      const el = container.querySelector<HTMLElement>('.shelf-avatar-btn');
+      expect(el).not.toBeNull();
+      return el!;
+    });
+    fireEvent.click(avatar);
+    const menu = container.querySelector<HTMLElement>('.shelf-user-dropdown')!;
+    fireEvent.click(within(menu).getByRole('button', { name: '中文' }));
+    expect(menu).not.toBeInTheDocument();
+    expect(document.documentElement.lang).toBe('zh-CN');
+    localStorage.removeItem('ovid-locale');
+  });
+});

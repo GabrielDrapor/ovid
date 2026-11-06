@@ -155,6 +155,9 @@ export const zh: Messages = {
     viewInContext: '查看原文位置',
     returnToReading: '返回原位置',
     backToShelf: '返回书架',
+    // 菜单顶部：读到全书哪里了。
+    chapterOf: (n: number, total: number) => `第 ${n} / ${total} 章`,
+    bookPercent: (pct: number) => `全书 ${pct}%`,
     showTranslation: '显示译文',
     showOriginal: '显示原文',
     chapters: '章节',
