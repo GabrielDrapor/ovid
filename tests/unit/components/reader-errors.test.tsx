@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
@@ -60,6 +60,10 @@ function mockApi(routes: Record<string, () => Response>) {
     return Promise.resolve(key ? routes[key]() : reply({}));
   }) as any;
 }
+
+// A loaded chapter scrolls to the top 100 ms later. Let that timer finish
+// here: after the last test `window` is gone, and it would fail the run.
+afterAll(() => new Promise((resolve) => setTimeout(resolve, 150)));
 
 beforeEach(() => {
   localStorage.clear();
