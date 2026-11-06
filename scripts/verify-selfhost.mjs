@@ -214,7 +214,11 @@ ck('首页返回 SPA', sr.status === 200);
 sr = await fetch(BASE + '/manifest.json');
 ck('静态文件可访问', sr.status === 200);
 sr = await fetch(BASE + '/book/nonexistent');
-ck('不存在的书重定向', sr.status === 200 || sr.redirected, String(sr.status));
+ck(
+  '不存在的书返回 404 和应用页面',
+  sr.status === 404 && (await sr.text()).includes('<div id="root">'),
+  String(sr.status)
+);
 
 console.log(`\n通过 ${pass} / 失败 ${fail}`);
 process.exit(fail ? 1 : 0);
