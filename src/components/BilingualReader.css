@@ -229,6 +229,32 @@
   font-size: 12px;
 }
 
+/* Top of the menu: the chapter being read and how far through the book. */
+.fab-menu-position {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 16px 8px;
+  border-bottom: 1px solid var(--rt-border, #e6dfcc);
+  margin-bottom: 4px;
+  min-width: 0;
+}
+
+.fab-menu-position-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--rt-text, #2f2a21);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fab-menu-position-meta {
+  font-size: 12px;
+  color: var(--rt-text-muted, #8a8171);
+  font-variant-numeric: tabular-nums;
+}
+
 /* Share page: what sharing means, the link itself, Copy / Share via,
    and Stop sharing at the end. */
 .fab-share {
