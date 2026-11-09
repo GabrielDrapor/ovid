@@ -156,6 +156,9 @@ export const zh: Messages = {
     noteNotFound: '未找到对应的注释内容',
     viewInContext: '查看原文位置',
     returnToReading: '返回原位置',
+    progressSignedOut:
+      '登录已过期，阅读进度暂时只存在这台设备上。重新登录后会继续同步。',
+    progressRetrying: '阅读进度暂时没能同步，会自动重试。',
     backToShelf: '返回书架',
     // 菜单顶部：读到全书哪里了。
     chapterOf: (n: number, total: number) => `第 ${n} / ${total} 章`,

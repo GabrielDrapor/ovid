@@ -158,6 +158,10 @@ export const en = {
     noteNotFound: 'Note content not found',
     viewInContext: 'View in context',
     returnToReading: 'Return to reading',
+    progressSignedOut:
+      'You’ve been signed out, so your place is only saved on this device for now. Sign in again to keep it in sync.',
+    progressRetrying:
+      'Couldn’t sync your place yet. Trying again automatically.',
     backToShelf: 'Back to shelf',
     // Top of the menu: where the reader is in the book.
     chapterOf: (n: number, total: number) => `Chapter ${n} of ${total}`,
