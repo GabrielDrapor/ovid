@@ -50,6 +50,8 @@ export const en = {
   },
 
   closet: {
+    // Top of the 3D shelf while choosing where the dock's Add book goes.
+    pickSpot: 'Choose an empty spot for the new book',
     loadingQuips: [
       'Sweeping the dust off the shelves…',
       'Straightening the spines…',

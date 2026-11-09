@@ -50,6 +50,8 @@ export const zh: Messages = {
   },
 
   closet: {
+    // 选新书位置时，3D 书架顶部的提示。
+    pickSpot: '选一个空位放新书',
     loadingQuips: [
       '正在掸去书架上的灰尘…',
       '正在扶正书脊…',

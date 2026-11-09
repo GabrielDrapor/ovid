@@ -2351,6 +2351,12 @@
   }
 }
 
+/* Pressed while the shelf asks where the new book goes. */
+.shelf-add-btn.is-active {
+  background: rgba(255, 244, 228, 0.22);
+  border-color: rgba(255, 244, 228, 0.55);
+}
+
 /* Phones: the dock has no room for the hint, so it sits just above the
    dock until the first touch. */
 .closet-touch-hint {
