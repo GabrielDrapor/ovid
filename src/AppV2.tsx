@@ -13,6 +13,8 @@ import {
   type CloudProgress,
 } from './utils/reading-progress';
 import { useI18n } from './i18n';
+import { useToast } from './components/Dialogs';
+import { createProgressSync, type ProgressBody } from './utils/progress-sync';
 import './App.css';
 
 interface Chapter {
@@ -134,6 +136,43 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
     undefined
   );
   const { user } = useUser();
+  const [showToast, toastNode] = useToast();
+
+  // Server-side progress sync. Signed out there is no account to save to, so
+  // progress stays in localStorage only (as it always did) and nothing is
+  // sent. Signed in, saves are retried until they land; a 401 means the
+  // session ran out, which the reader says once instead of losing progress
+  // in silence.
+  const progressSyncRef = useRef<ReturnType<typeof createProgressSync> | null>(
+    null
+  );
+  const signedIn = !!user;
+  // Read at call time, so a language switch doesn't restart the sync.
+  const tRef = useRef(t);
+  tRef.current = t;
+  useEffect(() => {
+    if (!signedIn) return;
+    const sync = createProgressSync(bookUuid, {
+      onSignedOut: () =>
+        showToast({
+          tone: 'error',
+          message: tRef.current.reader.progressSignedOut,
+        }),
+      onFailing: () =>
+        showToast({
+          tone: 'info',
+          message: tRef.current.reader.progressRetrying,
+        }),
+    });
+    progressSyncRef.current = sync;
+    return () => {
+      sync.dispose();
+      if (progressSyncRef.current === sync) progressSyncRef.current = null;
+    };
+  }, [bookUuid, signedIn, showToast]);
+  const pushProgress = useCallback((body: ProgressBody) => {
+    progressSyncRef.current?.save(body);
+  }, []);
 
   // Calculate reading progress percentage — chapters weighted by text length,
   // plus the intra-chapter fraction through the current chapter
@@ -223,18 +262,14 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
       }
 
       const progressPercent = calculateProgress(chapterFractionRef.current);
-      fetch(`/api/book/${bookUuid}/progress`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          readingProgress: progressPercent,
-          chapterNumber: currentChapter,
-          paragraphXpath: currentXpathRef.current,
-          showOriginal,
-        }),
-      }).catch((err) => console.error('Error saving showOriginal:', err));
+      pushProgress({
+        readingProgress: progressPercent,
+        chapterNumber: currentChapter,
+        paragraphXpath: currentXpathRef.current,
+        showOriginal,
+      });
     },
-    [bookUuid, currentChapter, calculateProgress]
+    [bookUuid, currentChapter, calculateProgress, pushProgress]
   );
 
   // Called by reader when visible element changes
@@ -249,20 +284,14 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
       if (progressTimerRef.current) clearTimeout(progressTimerRef.current);
       progressTimerRef.current = setTimeout(() => {
         const progressPercent = calculateProgress(chapterFraction);
-        fetch(`/api/book/${bookUuid}/progress`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            readingProgress: progressPercent,
-            chapterNumber: currentChapter,
-            paragraphXpath: xpath,
-          }),
-        }).catch((err) =>
-          console.error('Error saving progress to backend:', err)
-        );
+        pushProgress({
+          readingProgress: progressPercent,
+          chapterNumber: currentChapter,
+          paragraphXpath: xpath,
+        });
       }, 5000);
     },
-    [currentChapter, saveProgress, bookUuid, calculateProgress]
+    [currentChapter, saveProgress, calculateProgress, pushProgress]
   );
 
   // Load chapters list
@@ -397,7 +426,7 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
       prefetchChapter(chapterNumber - 1);
       prefetchChapter(chapterNumber + 1);
 
-      // Auto-update reading progress in database (fire-and-forget)
+      // Save the new chapter to the account (retried until it lands)
       // Use PUT progress endpoint to avoid resetting completion status
       // When entering a chapter, fraction is 0 (top of chapter)
       chapterFractionRef.current = 0;
@@ -407,15 +436,11 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
           chapterNumber,
           0
         );
-        fetch(`/api/book/${bookUuid}/progress`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            readingProgress: progressPercent,
-            chapterNumber: chapterNumber,
-            paragraphXpath: scrollToXpath || null,
-          }),
-        }).catch((err) => console.error('Error updating progress:', err));
+        pushProgress({
+          readingProgress: progressPercent,
+          chapterNumber: chapterNumber,
+          paragraphXpath: scrollToXpath || null,
+        });
       }
 
       // Set target xpath for scroll (or clear it for new chapter)
@@ -493,17 +518,13 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
           currentChapter,
           chapterFractionRef.current
         );
-        const payload = JSON.stringify({
+        // sendBeacon is reliable even during page unload (sends POST);
+        // it also carries a save that is still waiting to be retried.
+        progressSyncRef.current?.flushWithBeacon({
           readingProgress: progressPercent,
           chapterNumber: currentChapter,
           paragraphXpath: currentXpathRef.current,
         });
-        // sendBeacon is reliable even during page unload (sends POST)
-        // Backend accepts both PUT and POST for progress updates
-        navigator.sendBeacon(
-          `/api/book/${bookUuid}/progress`,
-          new Blob([payload], { type: 'application/json' })
-        );
       }
     };
 
@@ -670,6 +691,7 @@ function AppV2({ bookUuid, onBackToShelf }: AppV2Props) {
         onNavigateInternal={handleNavigateInternal}
         fetchChapter={fetchChapterData}
       />
+      {toastNode}
       {returnStack.length > 0 && (
         <button className="return-chip" onClick={handleReturnToReading}>
           {t.reader.returnToReading}
