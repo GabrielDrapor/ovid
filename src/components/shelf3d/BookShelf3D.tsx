@@ -105,7 +105,16 @@ interface BookShelf3DProps {
   /** False while the shelf is hidden behind an open book: no frames are
    *  drawn, and an open book card is put away. */
   active?: boolean;
+  /** Choosing where a new book goes (the dock's Add book): every empty
+   *  spot shows its plus, the camera backs out to show the wall, and
+   *  books can't be opened. Clicking a spot calls onUploadToSlot. */
+  picking?: boolean;
+  /** Leave picking without choosing (Cancel, Escape). */
+  onCancelPick?: () => void;
 }
+
+// Book clicks while choosing a spot for a new book.
+const ignoreSelect = () => {};
 
 function toUploadTarget(target: PlacedUploadTarget): ShelfUploadTarget {
   return {
@@ -431,6 +440,8 @@ interface BookMeshProps {
   width: number;
   selected: boolean;
   anySelected: boolean;
+  /** Can't be opened right now (choosing a spot for a new book). */
+  inert?: boolean;
   onSelect: (uuid: string) => void;
   onSpineRatio: (uuid: string, ratio: number) => void;
   onArtReady: (uuid: string) => void;
@@ -462,6 +473,7 @@ function BookMesh({
   width,
   selected,
   anySelected,
+  inert = false,
   onSelect,
   onSpineRatio,
   onArtReady,
@@ -780,11 +792,11 @@ function BookMesh({
   }, [themeId]);
 
   useEffect(() => {
-    document.body.style.cursor = hovered ? 'pointer' : '';
+    document.body.style.cursor = hovered && !inert ? 'pointer' : '';
     return () => {
       document.body.style.cursor = '';
     };
-  }, [hovered]);
+  }, [hovered, inert]);
 
   // Place the book at its shelf spot on first render so it doesn't fly in
   // from the origin.
@@ -1056,6 +1068,8 @@ interface UploadPlaceholderProps {
   hidden: boolean;
   /** Keep the plus visible without hover (next to the viewer's own books). */
   beckon: boolean;
+  /** Picking a spot for a new book: the plus pulses to be found. */
+  picking: boolean;
   themeId: string;
   onUpload: (target: ShelfUploadTarget) => void;
   dragDist: React.MutableRefObject<number>;
@@ -1066,6 +1080,7 @@ function UploadPlaceholder({
   y,
   hidden,
   beckon,
+  picking,
   onUpload,
   dragDist,
   themeId,
@@ -1120,12 +1135,20 @@ function UploadPlaceholder({
     spine.color.lerp(ghostTint, kt);
     body.color.lerp(ghostTint, kt);
     // Body: barely-there fill volume behind the ghost, hover only.
-    const bodyTarget = !hidden && hovered ? 0.14 : 0;
+    const bodyTarget = hidden ? 0 : hovered ? 0.22 : picking ? 0.12 : 0;
     body.opacity += (bodyTarget - body.opacity) * k;
     // Plus glyph: on hover, and faintly at rest only next to the viewer's
     // own books — the rest of the wall stays clean instead of filling up
     // with plus signs.
-    const ghostTarget = hidden ? 0 : hovered ? 0.95 : beckon ? 0.5 : 0;
+    const ghostTarget = hidden
+      ? 0
+      : hovered
+        ? 0.95
+        : picking
+          ? 0.85 + 0.15 * Math.sin(state.clock.elapsedTime * 3)
+          : beckon
+            ? 0.5
+            : 0;
     spine.opacity += (ghostTarget - spine.opacity) * k;
     group.position.z =
       (hovered && !hidden ? 0.05 : 0) +
@@ -1614,6 +1637,7 @@ function CameraRig({
   rowCenters,
   focusUuid,
   gazeHold,
+  overview,
 }: {
   focused: boolean;
   contentW: number;
@@ -1632,6 +1656,9 @@ function CameraRig({
   focusUuid: string | null;
   /** True while the pointer rests on a shelf label: hold the gaze still. */
   gazeHold: React.MutableRefObject<boolean>;
+  /** Back out as far as the wall allows, e.g. to choose an empty spot;
+   *  the zoom from before comes back after. */
+  overview: boolean;
 }) {
   const { camera, gl, size } = useThree();
   const zoom = useRef<number | null>(null);
@@ -1699,6 +1726,18 @@ function CameraRig({
   useEffect(() => {
     if (!userZoomed.current) zoom.current = fitZ;
   }, [fitZ]);
+
+  useEffect(() => {
+    if (!overview) return;
+    const before = zoom.current;
+    const wasUserZoomed = userZoomed.current;
+    zoom.current = maxZoomRef.current;
+    leanReleased.current = true;
+    return () => {
+      zoom.current = before;
+      userZoomed.current = wasUserZoomed;
+    };
+  }, [overview]);
 
   useEffect(() => {
     const el = gl.domElement;
@@ -2020,6 +2059,8 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
   onSaveSlotLabel,
   onAddTargetChange,
   active = true,
+  picking = false,
+  onCancelPick,
 }) => {
   const { t } = useI18n();
   const [spineRatios, setSpineRatios] = useState<Map<string, number>>(
@@ -2225,10 +2266,20 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
   }, [active]);
 
   useEffect(() => {
+    if (picking) {
+      setSelectedUuid(null);
+      setEditingLabel(null);
+    }
+  }, [picking]);
+  const cancelPickRef = useRef<(() => void) | null>(null);
+  cancelPickRef.current = picking ? (onCancelPick ?? null) : null;
+
+  useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         setSelectedUuid(null);
         setEditingLabel(null);
+        cancelPickRef.current?.();
       }
     };
     window.addEventListener('keydown', onKey);
@@ -2292,8 +2343,11 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
               position={[p.x, y, 0]}
               width={p.width}
               selected={selectedUuid === p.uuid}
-              anySelected={selectedUuid !== null}
-              onSelect={setSelectedUuid}
+              // While choosing a spot, books step back like they do behind
+              // an open book, so the empty spots stand out.
+              anySelected={selectedUuid !== null || picking}
+              inert={picking}
+              onSelect={picking ? ignoreSelect : setSelectedUuid}
               onSpineRatio={handleSpineRatio}
               onArtReady={handleArtReady}
               processingProgress={processingProgress}
@@ -2302,6 +2356,7 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
               themeId={shelfTheme}
               dragDist={dragDist}
               draggable={
+                !picking &&
                 currentUserId != null &&
                 book.user_id === currentUserId &&
                 !publicShelfUuids.has(book.uuid)
@@ -2326,6 +2381,7 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
                 y={y}
                 hidden={loading || selectedUuid !== null}
                 beckon={beckonKeys.has(`${target.rowCoord}:${target.colCoord}`)}
+                picking={picking}
                 themeId={shelfTheme}
                 onUpload={onUploadToSlot}
                 dragDist={dragDist}
@@ -2347,8 +2403,24 @@ const BookShelf3D: React.FC<BookShelf3DProps> = ({
           rowCenters={rowCenters}
           focusUuid={recentUuid}
           gazeHold={gazeHold}
+          overview={picking}
         />
       </Canvas>
+
+      {picking && (
+        <div className="closet3d-pick-banner" role="status">
+          <span>{t.closet.pickSpot}</span>
+          {onCancelPick && (
+            <button
+              type="button"
+              className="closet3d-pick-cancel"
+              onClick={onCancelPick}
+            >
+              {t.common.cancel}
+            </button>
+          )}
+        </div>
+      )}
 
       {editingLabel && (
         <div

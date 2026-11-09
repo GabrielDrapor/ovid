@@ -26,22 +26,51 @@ vi.mock('../../../src/contexts/UserContext', () => ({
   }),
 }));
 
-// The closet picks where "Add book" puts a book; this stand-in picks the
-// third bay of the second row.
+// The closet reports a spot it would suggest for "Add book" (none when the
+// wall has no empty spot). While picking, this stand-in offers one empty
+// spot, the fourth bay of the first row, and a Cancel.
+const SUGGESTED = {
+  shelfSlotId: null,
+  row: 1,
+  col: 2,
+  label: null,
+  position: { row: 2, col: 3 },
+};
+let mockAddTarget: typeof SUGGESTED | null = SUGGESTED;
 vi.mock('../../../src/components/shelf3d/BookShelf3D', async () => {
   const React = await import('react');
   return {
-    default: ({ onAddTargetChange }: any) => {
+    default: ({
+      onAddTargetChange,
+      onUploadToSlot,
+      picking,
+      onCancelPick,
+    }: any) => {
       React.useEffect(() => {
-        onAddTargetChange?.({
-          shelfSlotId: null,
-          row: 1,
-          col: 2,
-          label: null,
-          position: { row: 2, col: 3 },
-        });
+        onAddTargetChange?.(mockAddTarget);
       }, [onAddTargetChange]);
-      return <div data-testid="closet" />;
+      return (
+        <div data-testid="closet">
+          {picking && (
+            <>
+              <button
+                onClick={() =>
+                  onUploadToSlot({
+                    shelfSlotId: null,
+                    row: 0,
+                    col: 3,
+                    label: null,
+                    position: { row: 1, col: 4 },
+                  })
+                }
+              >
+                empty spot
+              </button>
+              <button onClick={onCancelPick}>cancel picking</button>
+            </>
+          )}
+        </div>
+      );
     },
   };
 });
@@ -72,6 +101,7 @@ const touchScreen = (touch: boolean) => {
 
 beforeEach(() => {
   mockUser = null;
+  mockAddTarget = SUGGESTED;
   touchScreen(false);
 });
 
@@ -100,13 +130,57 @@ describe('Add book in the dock', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('opens the upload form for the spot the closet picked', async () => {
+  it('asks where the book goes, then opens the form for that spot', async () => {
     mockUser = { id: 1, email: 'a@b.c', name: 'A', picture: '' };
     render(<BookShelf onSelectBook={vi.fn()} />);
     await screen.findByTestId('closet');
-    fireEvent.click(screen.getByRole('button', { name: 'Add book' }));
+    const add = screen.getByRole('button', { name: 'Add book' });
+    fireEvent.click(add);
+    expect(add).toHaveAttribute('aria-pressed', 'true');
+    // No form yet: the shelf shows the empty spots first.
+    expect(
+      screen.queryByRole('dialog', { name: 'Add book here' })
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'empty spot' }));
     const form = await screen.findByRole('dialog', { name: 'Add book here' });
-    expect(form).toHaveTextContent('Row 2, bay 3');
+    expect(form).toHaveTextContent('Row 1, bay 4');
+    expect(
+      screen.queryByRole('button', { name: 'empty spot' })
+    ).not.toBeInTheDocument();
+  });
+
+  it('stops asking on Cancel or a second click of Add book', async () => {
+    mockUser = { id: 1, email: 'a@b.c', name: 'A', picture: '' };
+    render(<BookShelf onSelectBook={vi.fn()} />);
+    await screen.findByTestId('closet');
+    const add = screen.getByRole('button', { name: 'Add book' });
+    fireEvent.click(add);
+    fireEvent.click(screen.getByRole('button', { name: 'cancel picking' }));
+    expect(
+      screen.queryByRole('button', { name: 'empty spot' })
+    ).not.toBeInTheDocument();
+    expect(add).toHaveAttribute('aria-pressed', 'false');
+
+    fireEvent.click(add);
+    fireEvent.click(add);
+    expect(
+      screen.queryByRole('button', { name: 'empty spot' })
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('dialog', { name: 'Add book here' })
+    ).not.toBeInTheDocument();
+  });
+
+  it('opens the form straight away when the wall has no empty spot', async () => {
+    mockUser = { id: 1, email: 'a@b.c', name: 'A', picture: '' };
+    mockAddTarget = null;
+    render(<BookShelf onSelectBook={vi.fn()} />);
+    await screen.findByTestId('closet');
+    fireEvent.click(screen.getByRole('button', { name: 'Add book' }));
+    expect(
+      await screen.findByRole('dialog', { name: 'Upload book' })
+    ).toBeInTheDocument();
   });
 });
 

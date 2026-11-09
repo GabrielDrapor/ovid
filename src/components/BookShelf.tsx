@@ -314,6 +314,10 @@ const BookShelf: React.FC<BookShelfProps> = ({
 
   // The dock's "Add book": the upload form for the spot the closet picked,
   // or, signed out, the sign-in menu with a line saying why.
+  // The dock's Add book first asks where the book goes: the 3D shelf shows
+  // every empty spot, and clicking one opens the upload form for it. With
+  // no empty spot to show, the form opens straight away.
+  const [pickingSpot, setPickingSpot] = useState(false);
   const handleAddBook = () => {
     if (!user) {
       setOpenDockMenu('signin');
@@ -321,8 +325,19 @@ const BookShelf: React.FC<BookShelfProps> = ({
       return;
     }
     setOpenDockMenu(null);
-    openUploadModal(addTarget ?? undefined);
+    if (addTarget) setPickingSpot((on) => !on);
+    else openUploadModal();
   };
+  const uploadToSpot = useCallback(
+    (target: ShelfUploadTarget) => {
+      setPickingSpot(false);
+      openUploadModal(target);
+    },
+    [openUploadModal]
+  );
+  useEffect(() => {
+    if (!active || !user) setPickingSpot(false);
+  }, [active, user]);
 
   const closeUploadModal = useCallback(() => {
     estimateRequestRef.current++;
@@ -1531,7 +1546,9 @@ const BookShelf: React.FC<BookShelfProps> = ({
                     currentUserId={user?.id}
                     onRead={onSelectBook}
                     onDelete={handleDeleteBook}
-                    onUploadToSlot={user ? openUploadModal : undefined}
+                    onUploadToSlot={user ? uploadToSpot : undefined}
+                    picking={pickingSpot}
+                    onCancelPick={() => setPickingSpot(false)}
                     onMoveBook={user ? handleMoveBook : undefined}
                     onSaveSlotLabel={user ? handleSaveSlotLabel : undefined}
                     onAddTargetChange={setAddTarget}
@@ -1747,8 +1764,9 @@ const BookShelf: React.FC<BookShelfProps> = ({
                 {use3D && !userLoading && (
                   <button
                     type="button"
-                    className="shelf-add-btn"
+                    className={`shelf-add-btn${pickingSpot ? ' is-active' : ''}`}
                     aria-label={t.shelf.addBook}
+                    aria-pressed={user ? pickingSpot : undefined}
                     onClick={handleAddBook}
                   >
                     <Icon name="plus" size={14} />

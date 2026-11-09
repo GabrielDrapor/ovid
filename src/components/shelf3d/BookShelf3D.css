@@ -636,3 +636,47 @@
     padding-right: 24px;
   }
 }
+
+/* Choosing where the dock's Add book goes: a dark pill at the top, in the
+   same glass as the dock. */
+.closet3d-pick-banner {
+  position: absolute;
+  top: calc(16px + env(safe-area-inset-top, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  /* A centred absolute box would otherwise shrink to half the screen. */
+  width: max-content;
+  max-width: calc(100% - 32px);
+  padding: 8px 8px 8px 16px;
+  border-radius: 14px;
+  background: rgba(20, 16, 12, 0.78);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 244, 228, 0.18);
+  color: rgba(255, 250, 240, 0.92);
+  font-size: 13.5px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.closet3d-pick-banner > span {
+  min-width: 0;
+}
+
+.closet3d-pick-cancel {
+  flex-shrink: 0;
+  padding: 6px 12px;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 244, 228, 0.24);
+  background: rgba(255, 244, 228, 0.08);
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+
+.closet3d-pick-cancel:hover {
+  background: rgba(255, 244, 228, 0.16);
+}
