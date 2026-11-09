@@ -96,7 +96,18 @@ function createMockDB(
             }
             return { results: opts.shelfSlotsResult ?? [] };
           }
-          return { results: opts.siblingsResult ?? [] };
+          // Siblings may carry an owner; apply the same visibility filter
+          // as the real SQL (public books plus the mover's own).
+          const rows = opts.siblingsResult ?? [];
+          if (sql.includes('b.user_id = ?')) {
+            const userId = stmt._args[2];
+            return {
+              results: rows
+                .filter((r) => r.user_id === undefined || r.user_id === null || r.user_id === userId)
+                .map(({ user_id, ...rest }) => rest),
+            };
+          }
+          return { results: rows };
         }),
         run: vi.fn(async () => {
           runCalls++;
@@ -297,6 +308,37 @@ describe('moveBookToSlot', () => {
     });
     const result = await moveBookToSlot(db, 'uuid', 1, { slotId: 3 }, 5);
     expect(result.position).toBe(8); // last sibling position + 1, not index-based
+  });
+
+  it("ignores other users' books in the slot when placing at insertIndex", async () => {
+    // Slot shared with user 2. The mover (user 1) sees only A(5) and B(9);
+    // dropping between them (insertIndex 1) must land right before B, not
+    // before user 2's hidden book at position 6 (which sits before B).
+    const db = createMockDB({
+      ...validSlot3,
+      bookLookupResult: { id: 10, user_id: 1 },
+      siblingsResult: [
+        { book_id: 20, position: 4, user_id: 2 },
+        { book_id: 1, position: 5, user_id: 1 },
+        { book_id: 21, position: 6, user_id: 2 },
+        { book_id: 2, position: 9, user_id: 1 },
+        { book_id: 22, position: 12, user_id: 2 },
+      ],
+    });
+
+    const result = await moveBookToSlot(db, 'uuid', 1, { slotId: 3 }, 1);
+    expect(result.position).toBe(9);
+
+    // Appending after the mover's last visible book goes right after it.
+    const db2 = createMockDB({
+      ...validSlot3,
+      bookLookupResult: { id: 10, user_id: 1 },
+      siblingsResult: [
+        { book_id: 1, position: 5, user_id: 1 },
+        { book_id: 22, position: 12, user_id: 2 },
+      ],
+    });
+    expect((await moveBookToSlot(db2, 'uuid', 1, { slotId: 3 }, 1)).position).toBe(6);
   });
 
   it('resolves a (row, col) target into a new slot when no slotId is given', async () => {

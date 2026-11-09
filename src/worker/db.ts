@@ -187,10 +187,19 @@ export async function moveBookToSlot(
     throw new Error('Forbidden: books cannot be moved onto a public shelf');
   }
 
+  // A private slot is one shared grid cell: other users' books can sit in it
+  // too, but the mover only sees the public books and their own. insertIndex
+  // counts the books the mover can see, so it must be resolved against the
+  // same set — counting hidden books landed the book at the wrong spot, and
+  // on the next refresh it looked like the move had not been saved.
   const siblingsResult = await db.prepare(
-    'SELECT book_id, position FROM book_shelf_slots WHERE slot_id = ? AND book_id != ? ORDER BY position ASC, book_id ASC'
+    `SELECT bss.book_id, bss.position FROM book_shelf_slots bss
+     JOIN books_v2 b ON b.id = bss.book_id
+     WHERE bss.slot_id = ? AND bss.book_id != ?
+       AND (b.user_id IS NULL OR b.user_id = ?)
+     ORDER BY bss.position ASC, bss.book_id ASC`
   )
-    .bind(targetSlotId, bookId)
+    .bind(targetSlotId, bookId, userId)
     .all<{ book_id: number; position: number }>();
   const siblings = siblingsResult.results ?? [];
 
